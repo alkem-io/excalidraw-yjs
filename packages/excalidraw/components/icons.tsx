@@ -1875,6 +1875,20 @@ export const laserPointerToolIcon = createIcon(
   20,
 );
 
+export const reactionToolIcon = createIcon(
+  <g fill="currentColor">
+    <path d="M18 21H7V8L14 1L15.25 2.25C15.3667 2.36667 15.4625 2.525 15.5375 2.725C15.6125 2.925 15.65 3.11667 15.65 3.3V3.65L14.55 8H21C21.5333 8 22 8.2 22.4 8.6C22.8 9 23 9.46667 23 10V12C23 12.1167 22.9833 12.2417 22.95 12.375C22.9167 12.5083 22.8833 12.6333 22.85 12.75L19.85 19.8C19.7 20.1333 19.45 20.4167 19.1 20.65C18.75 20.8833 18.3833 21 18 21ZM9 19H18L21 12V10H12L13.35 4.5L9 8.85V19ZM7 8V10H4V19H7V21H2V8H7Z" />
+  </g>,
+  { width: 24, height: 24 },
+);
+
+export const countdownTimerIcon = createIcon(
+  <g fill="currentColor">
+    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67V7z" />
+  </g>,
+  { width: 24, height: 24 },
+);
+
 export const MagicIcon = createIcon(
   <g stroke="currentColor" fill="none">
     <path stroke="none" d="M0 0h24v24H0z" />
@@ -1893,6 +1907,16 @@ export const MagicIconThin = createIcon(
     <path d="M15 6l3 3" />
     <path d="M9 3a2 2 0 0 0 2 2a2 2 0 0 0 -2 2a2 2 0 0 0 -2 -2a2 2 0 0 0 2 -2" />
     <path d="M19 13a2 2 0 0 0 2 2a2 2 0 0 0 -2 2a2 2 0 0 0 -2 -2a2 2 0 0 0 2 -2" />
+  </g>,
+  tablerIconProps,
+);
+
+export const EmojiIcon = createIcon(
+  <g stroke="currentColor" fill="none">
+    <circle cx="12" cy="12" r="10" />
+    <path d="M8 14s1.5 2 4 2 4-2 4-2" />
+    <circle cx="9" cy="9" r="0.5" fill="currentColor" stroke="none" />
+    <circle cx="15" cy="9" r="0.5" fill="currentColor" stroke="none" />
   </g>,
   tablerIconProps,
 );

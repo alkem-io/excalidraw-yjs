@@ -701,6 +701,23 @@ class App extends React.Component<AppProps, AppState> {
     ]
   >();
   onUserFollowEmitter = new Emitter<[payload: OnUserFollowedPayload]>();
+
+  // Incoming ephemeral UI events (floating emoji reactions)
+  onIncomingEmojiReactionEmitter = new Emitter<
+    [payload: { id: string; emoji: string; x: number; y: number }]
+  >();
+
+  // Incoming ephemeral UI events (countdown timer)
+  onIncomingCountdownTimerEmitter = new Emitter<
+    [
+      payload: {
+        remainingSeconds: number;
+        startedBy: string;
+        active: boolean;
+      },
+    ]
+  >();
+
   onScrollChangeEmitter = new Emitter<
     [scrollX: number, scrollY: number, zoom: AppState["zoom"]]
   >();
@@ -788,6 +805,10 @@ class App extends React.Component<AppProps, AppState> {
         onPointerUp: (cb) => this.onPointerUpEmitter.on(cb),
         onScrollChange: (cb) => this.onScrollChangeEmitter.on(cb),
         onUserFollow: (cb) => this.onUserFollowEmitter.on(cb),
+        dispatchIncomingEmojiReaction: (payload) =>
+          this.onIncomingEmojiReactionEmitter.trigger(payload),
+        dispatchIncomingCountdownTimer: (payload) =>
+          this.onIncomingCountdownTimerEmitter.trigger(payload),
       } as const;
       if (typeof excalidrawAPI === "function") {
         excalidrawAPI(api);
@@ -6702,7 +6723,8 @@ class App extends React.Component<AppProps, AppState> {
       );
     } else if (
       this.state.activeTool.type !== "eraser" &&
-      this.state.activeTool.type !== "hand"
+      this.state.activeTool.type !== "hand" &&
+      this.state.activeTool.type !== TOOL_TYPE.emojiReaction
     ) {
       this.createGenericElementOnPointerDown(
         this.state.activeTool.type,
@@ -9857,6 +9879,7 @@ class App extends React.Component<AppProps, AppState> {
       if (
         !activeTool.locked &&
         activeTool.type !== "freedraw" &&
+        activeTool.type !== TOOL_TYPE.emojiReaction &&
         (activeTool.type !== "lasso" ||
           // if lasso is turned on but from selection => reset to selection
           (activeTool.type === "lasso" && activeTool.fromSelection))
@@ -11148,12 +11171,14 @@ class App extends React.Component<AppProps, AppState> {
     (
       event: WheelEvent | React.WheelEvent<HTMLDivElement | HTMLCanvasElement>,
     ) => {
-      // if not scrolling on canvas/wysiwyg, ignore
+      // if not scrolling on canvas/wysiwyg/reaction-overlay, ignore
       if (
         !(
           event.target instanceof HTMLCanvasElement ||
           event.target instanceof HTMLTextAreaElement ||
-          event.target instanceof HTMLIFrameElement
+          event.target instanceof HTMLIFrameElement ||
+          (event.target instanceof HTMLElement &&
+            event.target.classList.contains("reaction-overlay"))
         )
       ) {
         // prevent zooming the browser (but allow scrolling DOM)

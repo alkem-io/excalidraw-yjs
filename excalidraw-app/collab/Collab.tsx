@@ -6,7 +6,7 @@ import {
   reconcileElements,
 } from "@excalidraw/excalidraw";
 import { ErrorDialog } from "@excalidraw/excalidraw/components/ErrorDialog";
-import { APP_NAME, EVENT } from "@excalidraw/common";
+import { APP_NAME, EVENT, randomId } from "@excalidraw/common";
 import {
   IDLE_THRESHOLD,
   ACTIVE_THRESHOLD,
@@ -88,6 +88,7 @@ import { collabErrorIndicatorAtom } from "./CollabError";
 import Portal from "./Portal";
 
 import type {
+  SocketUpdateData,
   SocketUpdateDataSource,
   SyncableExcalidrawElement,
 } from "../data";
@@ -120,6 +121,8 @@ export interface CollabAPI {
   getUsername: CollabInstance["getUsername"];
   getActiveRoomLink: CollabInstance["getActiveRoomLink"];
   setCollabError: CollabInstance["setErrorDialog"];
+  broadcastEmojiReaction: CollabInstance["broadcastEmojiReaction"];
+  broadcastCountdownTimer: CollabInstance["broadcastCountdownTimer"];
 }
 
 interface CollabProps {
@@ -201,6 +204,46 @@ class Collab extends PureComponent<CollabProps, CollabState> {
 
   private onUmmount: (() => void) | null = null;
 
+  // Broadcast an ephemeral floating emoji reaction to other clients
+  broadcastEmojiReaction = async (emoji: string, x: number, y: number) => {
+    try {
+      const data = {
+        type: WS_SUBTYPES.EMOJI_REACTION,
+        payload: {
+          emoji,
+          x,
+          y,
+          id: `${this.portal.roomId}_${randomId()}_${Date.now()}`,
+        },
+      } as SocketUpdateData;
+      // use volatile channel so reactions don't get queued behind more important updates like scene updates or cursor movements
+      await this.portal._broadcastSocketData(data, true);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // Broadcast countdown timer state to other clients
+  broadcastCountdownTimer = async (
+    remainingSeconds: number,
+    startedBy: string,
+    active: boolean,
+  ) => {
+    try {
+      const data = {
+        type: WS_SUBTYPES.COUNTDOWN_TIMER,
+        payload: {
+          remainingSeconds,
+          startedBy,
+          active,
+        },
+      } as SocketUpdateData;
+      await this.portal._broadcastSocketData(data, true);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   componentDidMount() {
     window.addEventListener(EVENT.BEFORE_UNLOAD, this.beforeUnload);
     window.addEventListener("online", this.onOfflineStatusToggle);
@@ -234,6 +277,8 @@ class Collab extends PureComponent<CollabProps, CollabState> {
       getUsername: this.getUsername,
       getActiveRoomLink: this.getActiveRoomLink,
       setCollabError: this.setErrorDialog,
+      broadcastEmojiReaction: this.broadcastEmojiReaction,
+      broadcastCountdownTimer: this.broadcastCountdownTimer,
     };
 
     appJotaiStore.set(collabAPIAtom, collabAPI);
@@ -643,6 +688,37 @@ class Collab extends PureComponent<CollabProps, CollabState> {
               }).appState,
             });
 
+            break;
+          }
+
+          case WS_SUBTYPES.EMOJI_REACTION: {
+            try {
+              const { emoji, x, y, id } = decryptedData.payload;
+              // forward to Excalidraw to display (optional subscriber)
+              this.excalidrawAPI?.dispatchIncomingEmojiReaction?.({
+                id: id || `${decryptedData.type}_${Date.now()}`,
+                emoji,
+                x,
+                y,
+              });
+            } catch (e) {
+              console.error(e);
+            }
+            break;
+          }
+
+          case WS_SUBTYPES.COUNTDOWN_TIMER: {
+            try {
+              const { remainingSeconds, startedBy, active } =
+                decryptedData.payload;
+              this.excalidrawAPI?.dispatchIncomingCountdownTimer?.({
+                remainingSeconds,
+                startedBy,
+                active,
+              });
+            } catch (e) {
+              console.error(e);
+            }
             break;
           }
 

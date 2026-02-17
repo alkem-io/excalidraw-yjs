@@ -155,7 +155,8 @@ export type ToolType =
   | "frame"
   | "magicframe"
   | "embeddable"
-  | "laser";
+  | "laser"
+  | "emojiReaction";
 
 export type ElementOrToolType = ExcalidrawElementType | ToolType | "custom";
 
@@ -610,6 +611,21 @@ export interface ExcalidrawProps {
   ) => void;
   onScrollChange?: (scrollX: number, scrollY: number, zoom: Zoom) => void;
   onUserFollow?: (payload: OnUserFollowedPayload) => void;
+
+  /** Request host app to broadcast a emoji reaction at a scene point (if collab is enabled) */
+  onRequestBroadcastEmojiReaction?: (
+    emoji: string,
+    x: number,
+    y: number,
+  ) => void;
+
+  /** Request host app to broadcast countdown timer state (if collab is enabled) */
+  onRequestBroadcastCountdownTimer?: (
+    remainingSeconds: number,
+    startedBy: string,
+    active: boolean,
+  ) => void;
+
   children?: React.ReactNode;
   validateEmbeddable?:
     | boolean
@@ -736,6 +752,8 @@ export type AppClassProperties = {
   excalidrawContainerValue: App["excalidrawContainerValue"];
 
   onPointerUpEmitter: App["onPointerUpEmitter"];
+  onIncomingEmojiReactionEmitter: App["onIncomingEmojiReactionEmitter"];
+  onIncomingCountdownTimerEmitter: App["onIncomingCountdownTimerEmitter"];
   updateEditorAtom: App["updateEditorAtom"];
 };
 
@@ -836,7 +854,9 @@ export interface ExcalidrawImperativeAPI {
    * used in conjunction with view mode (props.viewModeEnabled).
    */
   updateFrameRendering: InstanceType<typeof App>["updateFrameRendering"];
-  addElementsFromPasteOrLibrary: InstanceType<typeof App>["addElementsFromPasteOrLibrary"];
+  addElementsFromPasteOrLibrary: InstanceType<
+    typeof App
+  >["addElementsFromPasteOrLibrary"];
   onChange: (
     callback: (
       elements: readonly ExcalidrawElement[],
@@ -867,6 +887,19 @@ export interface ExcalidrawImperativeAPI {
   onUserFollow: (
     callback: (payload: OnUserFollowedPayload) => void,
   ) => UnsubscribeCallback;
+  // Incoming ephemeral UI events: emoji reactions (from Collab). Coordinates are scene/whiteboard coords.
+  dispatchIncomingEmojiReaction: (payload: {
+    id: string;
+    emoji: string;
+    x: number;
+    y: number;
+  }) => void;
+  // Incoming ephemeral UI events: countdown timer state (from Collab).
+  dispatchIncomingCountdownTimer: (payload: {
+    remainingSeconds: number;
+    startedBy: string;
+    active: boolean;
+  }) => void;
 }
 
 export type Device = Readonly<{

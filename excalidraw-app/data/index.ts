@@ -119,6 +119,23 @@ export type SocketUpdateDataSource = {
       username: string;
     };
   };
+  EMOJI_REACTION: {
+    type: WS_SUBTYPES.EMOJI_REACTION;
+    payload: {
+      emoji: string;
+      x: number; // sceneX (whiteboard coordinates)
+      y: number; // sceneY (whiteboard coordinates)
+      id?: string;
+    };
+  };
+  COUNTDOWN_TIMER: {
+    type: WS_SUBTYPES.COUNTDOWN_TIMER;
+    payload: {
+      remainingSeconds: number;
+      startedBy: string;
+      active: boolean;
+    };
+  };
 };
 
 export type SocketUpdateDataIncoming =

@@ -28,6 +28,16 @@ import { useAtom, useAtomValue } from "../editor-jotai";
 import { t } from "../i18n";
 import { calculateScrollCenter } from "../scene";
 
+import {
+  useEmojiReactions,
+  EmojiPickerPanel,
+  ReactionModeButton,
+  ReactionOverlay,
+  FloatingEmojisLayer,
+} from "./emojiReactions";
+
+import { useCountdownTimer, CountdownTimerPanel } from "./countdownTimer";
+
 import { SelectedShapeActions, ShapesSwitcher } from "./Actions";
 import { LoadingMessage } from "./LoadingMessage";
 import { MobileMenu } from "./MobileMenu";
@@ -157,6 +167,9 @@ const LayerUI = ({
 }: LayerUIProps) => {
   const device = useDevice();
   const tunnels = useInitializeTunnels();
+
+  const reactions = useEmojiReactions(app, appState, canvas);
+  const countdownTimer = useCountdownTimer(app);
 
   const TunnelsJotaiProvider = tunnels.tunnelsJotai.Provider;
 
@@ -330,6 +343,10 @@ const LayerUI = ({
                               activeTool={appState.activeTool}
                               UIOptions={UIOptions}
                               app={app}
+                              onSelectReactionEmoji={
+                                reactions.handleSelectReactionEmoji
+                              }
+                              onStartCountdownTimer={countdownTimer.startTimer}
                             />
                           </Stack.Row>
                         </Island>
@@ -350,6 +367,54 @@ const LayerUI = ({
                                 app.setActiveTool({ type: TOOL_TYPE.laser })
                               }
                               isMobile
+                            />
+                          </Island>
+                        )}
+                        {isCollaborating && (
+                          <Island
+                            className="reaction-toolbar-button"
+                            style={{ position: "relative" }}
+                          >
+                            <ReactionModeButton
+                              title={t("toolBar.emojiReactions")}
+                              checked={reactions.reactionModeActive}
+                              onChange={reactions.toggleReactionMode}
+                              isMobile
+                              activeEmoji={
+                                reactions.reactionModeActive
+                                  ? reactions.reactionEmoji
+                                  : null
+                              }
+                            />
+                            {reactions.showEmojiPicker &&
+                              !reactions.reactionModeActive && (
+                                <div
+                                  ref={reactions.emojiPickerRef}
+                                  className="emoji-submenu__panel emoji-submenu__panel--below"
+                                  data-testid="emoji-picker-wrapper"
+                                >
+                                  <EmojiPickerPanel
+                                    onSelect={(emoji) => {
+                                      reactions.handleSelectReactionEmoji(
+                                        emoji,
+                                      );
+                                    }}
+                                  />
+                                </div>
+                              )}
+                          </Island>
+                        )}
+                        {countdownTimer.isActive && (
+                          <Island
+                            style={{
+                              marginLeft: 8,
+                              alignSelf: "center",
+                              height: "fit-content",
+                            }}
+                          >
+                            <CountdownTimerPanel
+                              timers={countdownTimer.timers}
+                              onCancel={countdownTimer.cancelTimer}
                             />
                           </Island>
                         )}
@@ -561,14 +626,28 @@ const LayerUI = ({
                 : {}
             }
           >
+            {reactions.reactionModeActive && reactions.reactionEmoji && (
+              <ReactionOverlay
+                overlayDisabled={reactions.overlayDisabled}
+                lastToggleTimeRef={reactions.lastToggleTimeRef}
+                reactionCursorButtonRef={reactions.reactionCursorButtonRef}
+                lastSpawnRef={reactions.lastSpawnRef}
+                spawnEmoji={reactions.spawnEmoji}
+                scheduleForwardPointerUpdate={
+                  reactions.scheduleForwardPointerUpdate
+                }
+              />
+            )}
             {renderWelcomeScreen && <tunnels.WelcomeScreenCenterTunnel.Out />}
             {renderFixedSideContainer()}
+
             <Footer
               appState={appState}
               actionManager={actionManager}
               showExitZenModeBtn={showExitZenModeBtn}
               renderWelcomeScreen={renderWelcomeScreen}
             />
+
             {appState.scrolledOutside && (
               <button
                 type="button"
@@ -589,11 +668,25 @@ const LayerUI = ({
     </>
   );
 
+  const canvasRect = canvas?.getBoundingClientRect();
+  const canvasOffsetLeft = canvasRect?.left ?? 0;
+  const canvasOffsetTop = canvasRect?.top ?? 0;
+
   return (
     <UIAppStateContext.Provider value={appState}>
       <TunnelsJotaiProvider>
         <TunnelsContext.Provider value={tunnels}>
           {layerUIJSX}
+
+          <FloatingEmojisLayer
+            floatingEmojis={reactions.floatingEmojis}
+            zoom={appState.zoom}
+            canvasOffsetLeft={canvasOffsetLeft}
+            canvasOffsetTop={canvasOffsetTop}
+            scrollX={app.state.scrollX}
+            scrollY={app.state.scrollY}
+            onRemove={reactions.removeFloatingEmoji}
+          />
         </TunnelsContext.Provider>
       </TunnelsJotaiProvider>
     </UIAppStateContext.Provider>

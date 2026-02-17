@@ -55,6 +55,9 @@ import Stack from "./Stack";
 import { ToolButton } from "./ToolButton";
 import { Tooltip } from "./Tooltip";
 import DropdownMenu from "./dropdownMenu/DropdownMenu";
+import EmojiPicker from "./EmojiPicker";
+import ReactionEmojiSubmenu from "./emojiReactions/ReactionEmojiSubmenu";
+import CountdownTimerSubmenu from "./countdownTimer/CountdownTimerSubmenu";
 import {
   EmbedIcon,
   extraToolsIcon,
@@ -285,11 +288,15 @@ export const ShapesSwitcher = ({
   appState,
   app,
   UIOptions,
+  onSelectReactionEmoji,
+  onStartCountdownTimer,
 }: {
   activeTool: UIAppState["activeTool"];
   appState: UIAppState;
   app: AppClassProperties;
   UIOptions: AppProps["UIOptions"];
+  onSelectReactionEmoji?: (emoji: string) => void;
+  onStartCountdownTimer?: (minutes: number, seconds: number) => void;
 }) => {
   const [isExtraToolsMenuOpen, setIsExtraToolsMenuOpen] = useState(false);
 
@@ -427,6 +434,29 @@ export const ShapesSwitcher = ({
           >
             {t("toolBar.lasso")}
           </DropdownMenu.Item>
+          <DropdownMenu.ItemCustom data-testid="toolbar-emoji">
+            <EmojiPicker onInsert={() => setIsExtraToolsMenuOpen(false)} />
+          </DropdownMenu.ItemCustom>
+          {onSelectReactionEmoji && (
+            <DropdownMenu.ItemCustom data-testid="toolbar-reactions">
+              <ReactionEmojiSubmenu
+                onSelect={(emoji) => {
+                  setIsExtraToolsMenuOpen(false);
+                  onSelectReactionEmoji(emoji);
+                }}
+              />
+            </DropdownMenu.ItemCustom>
+          )}
+          {onStartCountdownTimer && (
+            <DropdownMenu.ItemCustom data-testid="toolbar-countdown-timer">
+              <CountdownTimerSubmenu
+                onStart={(minutes, seconds) => {
+                  setIsExtraToolsMenuOpen(false);
+                  onStartCountdownTimer(minutes, seconds);
+                }}
+              />
+            </DropdownMenu.ItemCustom>
+          )}
           <div style={{ margin: "6px 0", fontSize: 14, fontWeight: 600 }}>
             Generate
           </div>
