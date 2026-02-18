@@ -1,6 +1,6 @@
 @import "open-color/open-color";
 @import "../css/variables.module.scss";
-@import "./emojiReactions/EmojiReactions.scss";
+@import "./emojis/emojiReactions/EmojiReactions.scss";
 
 .excalidraw {
   .layer-ui__wrapper.animate {
@@ -121,12 +121,6 @@
       margin-left: 4px;
       align-self: center;
       height: fit-content;
-    }
-
-    .footer-controls {
-      display: flex;
-      gap: 8px;
-      align-items: center;
     }
   }
 }
