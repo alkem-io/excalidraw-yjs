@@ -1,11 +1,8 @@
-import { average, pointFrom, type GlobalPoint } from "@excalidraw/math";
+import { average } from "@excalidraw/math";
 
-import type {
-  ExcalidrawBindableElement,
-  FontFamilyValues,
-  FontString,
-  ExcalidrawElement,
-} from "@excalidraw/element/types";
+import type { GlobalCoord } from "@excalidraw/math";
+
+import type { FontFamilyValues, FontString } from "@excalidraw/element/types";
 
 import type {
   ActiveTool,
@@ -15,13 +12,11 @@ import type {
   Zoom,
 } from "@excalidraw/excalidraw/types";
 
-import { COLOR_PALETTE } from "./colors";
 import {
   DEFAULT_VERSION,
   ENV,
   FONT_FAMILY,
   getFontFamilyFallbacks,
-  isDarwin,
   WINDOWS_EMOJI_FALLBACK_FONT,
 } from "./constants";
 
@@ -92,7 +87,9 @@ export const isWritableElement = (
   (target instanceof HTMLInputElement &&
     (target.type === "text" ||
       target.type === "number" ||
-      target.type === "password"));
+      target.type === "password" ||
+      target.type === "search")) ||
+  (target instanceof HTMLElement && target.closest(".cm-editor") !== null);
 
 export const getFontFamilyString = ({
   fontFamily,
@@ -101,7 +98,6 @@ export const getFontFamilyString = ({
 }) => {
   for (const [fontFamilyString, id] of Object.entries(FONT_FAMILY)) {
     if (id === fontFamily) {
-      // TODO: we should fallback first to generic family names first
       return `${fontFamilyString}${getFontFamilyFallbacks(id)
         .map((x) => `, ${x}`)
         .join("")}`;
@@ -119,6 +115,11 @@ export const getFontString = ({
   fontFamily: FontFamilyValues;
 }) => {
   return `${fontSize}px ${getFontFamilyString({ fontFamily })}` as FontString;
+};
+
+/** executes callback in the frame that's after the current one */
+export const nextAnimationFrame = async (cb: () => any) => {
+  requestAnimationFrame(() => requestAnimationFrame(cb));
 };
 
 export const debounce = <T extends any[]>(
@@ -150,38 +151,27 @@ export const debounce = <T extends any[]>(
   return ret;
 };
 
-// throttle callback to execute once per animation frame
-export const throttleRAF = <T extends any[]>(
-  fn: (...args: T) => void,
-  opts?: { trailing?: boolean },
-) => {
+// throttle callback to execute once per animation frame using the latest args
+export const throttleRAF = <T extends any[]>(fn: (...args: T) => void) => {
   let timerId: number | null = null;
   let lastArgs: T | null = null;
-  let lastArgsTrailing: T | null = null;
 
-  const scheduleFunc = (args: T) => {
+  const scheduleFunc = () => {
     timerId = window.requestAnimationFrame(() => {
       timerId = null;
-      fn(...args);
+      const args = lastArgs;
       lastArgs = null;
-      if (lastArgsTrailing) {
-        lastArgs = lastArgsTrailing;
-        lastArgsTrailing = null;
-        scheduleFunc(lastArgs);
+
+      if (args) {
+        fn(...args);
       }
     });
   };
 
   const ret = (...args: T) => {
-    if (isTestEnv()) {
-      fn(...args);
-      return;
-    }
     lastArgs = args;
     if (timerId === null) {
-      scheduleFunc(lastArgs);
-    } else if (opts?.trailing) {
-      lastArgsTrailing = args;
+      scheduleFunc();
     }
   };
   ret.flush = () => {
@@ -190,12 +180,12 @@ export const throttleRAF = <T extends any[]>(
       timerId = null;
     }
     if (lastArgs) {
-      fn(...(lastArgsTrailing || lastArgs));
-      lastArgs = lastArgsTrailing = null;
+      fn(...lastArgs);
+      lastArgs = null;
     }
   };
   ret.cancel = () => {
-    lastArgs = lastArgsTrailing = null;
+    lastArgs = null;
     if (timerId !== null) {
       cancelAnimationFrame(timerId);
       timerId = null;
@@ -379,6 +369,10 @@ export const removeSelection = () => {
 
 export const distance = (x: number, y: number) => Math.abs(x - y);
 
+export const isSelectionLikeTool = (type: ToolType | "custom") => {
+  return type === "selection" || type === "lasso";
+};
+
 export const updateActiveTool = (
   appState: Pick<AppState, "activeTool">,
   data: ((
@@ -420,19 +414,6 @@ export const allowFullScreen = () =>
 
 export const exitFullScreen = () => document.exitFullscreen();
 
-export const getShortcutKey = (shortcut: string): string => {
-  shortcut = shortcut
-    .replace(/\bAlt\b/i, "Alt")
-    .replace(/\bShift\b/i, "Shift")
-    .replace(/\b(Enter|Return)\b/i, "Enter");
-  if (isDarwin) {
-    return shortcut
-      .replace(/\bCtrlOrCmd\b/gi, "Cmd")
-      .replace(/\bAlt\b/i, "Option");
-  }
-  return shortcut.replace(/\bCtrlOrCmd\b/gi, "Ctrl");
-};
-
 export const viewportCoordsToSceneCoords = (
   { clientX, clientY }: { clientX: number; clientY: number },
   {
@@ -452,7 +433,7 @@ export const viewportCoordsToSceneCoords = (
   const x = (clientX - offsetLeft) / zoom.value - scrollX;
   const y = (clientY - offsetTop) / zoom.value - scrollY;
 
-  return { x, y };
+  return { x, y } as GlobalCoord;
 };
 
 export const sceneCoordsToViewportCoords = (
@@ -557,19 +538,6 @@ export const mapFind = <T, K>(
   }
   return undefined;
 };
-
-export const isTransparent = (color: string) => {
-  const isRGBTransparent = color.length === 5 && color.substr(4, 1) === "0";
-  const isRRGGBBTransparent = color.length === 9 && color.substr(7, 2) === "00";
-  return (
-    isRGBTransparent ||
-    isRRGGBBTransparent ||
-    color === COLOR_PALETTE.transparent
-  );
-};
-
-export const isBindingFallthroughEnabled = (el: ExcalidrawBindableElement) =>
-  el.fillStyle !== "solid" || isTransparent(el.backgroundColor);
 
 export type ResolvablePromise<T> = Promise<T> & {
   resolve: [T] extends [undefined]
@@ -712,8 +680,8 @@ export const arrayToObject = <T>(
   array: readonly T[],
   groupBy?: (value: T) => string | number,
 ) =>
-  array.reduce((acc, value) => {
-    acc[groupBy ? groupBy(value) : String(value)] = value;
+  array.reduce((acc, value, idx) => {
+    acc[groupBy ? groupBy(value) : idx] = value;
     return acc;
   }, {} as { [key: string]: T });
 
@@ -1170,39 +1138,69 @@ export const normalizeEOL = (str: string) => {
 };
 
 // -----------------------------------------------------------------------------
-type HasBrand<T> = {
+export type HasBrand<T> = {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  [K in keyof T]: K extends `~brand${infer _}` ? true : never;
+  [K in keyof T]: K extends `~brand${infer _}` | "_brand" ? true : never;
 }[keyof T];
 
 type RemoveAllBrands<T> = HasBrand<T> extends true
   ? {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      [K in keyof T as K extends `~brand~${infer _}` ? never : K]: T[K];
+      [K in keyof T as K extends `~brand~${infer _}` | "_brand"
+        ? never
+        : K]: T[K];
     }
-  : never;
+  : T;
 
-// adapted from https://github.com/colinhacks/zod/discussions/1994#discussioncomment-6068940
-// currently does not cover all types (e.g. tuples, promises...)
-type Unbrand<T> = T extends Map<infer E, infer F>
-  ? Map<E, F>
+// For accepting values - uses loose matching for branded types
+// Preserves readonly modifier: mutable array requires mutable input
+type UnbrandForValue<T> = T extends Map<infer E, infer F>
+  ? Map<UnbrandForValue<E>, UnbrandForValue<F>>
   : T extends Set<infer E>
-  ? Set<E>
-  : T extends Array<infer E>
-  ? Array<E>
+  ? Set<UnbrandForValue<E>>
+  : T extends readonly any[]
+  ? T extends any[]
+    ? unknown[] // mutable array - require mutable input
+    : readonly unknown[] // readonly array - accept readonly input
   : RemoveAllBrands<T>;
+
+// For return types - preserves array element unbranding
+export type Unbrand<T> = T extends Map<infer E, infer F>
+  ? Map<Unbrand<E>, Unbrand<F>>
+  : T extends Set<infer E>
+  ? Set<Unbrand<E>>
+  : T extends readonly (infer E)[]
+  ? Array<Unbrand<E>>
+  : RemoveAllBrands<T>;
+
+export type CombineBrands<BrandedType, CurrentType> =
+  BrandedType extends readonly (infer BE)[]
+    ? CurrentType extends readonly (infer CE)[]
+      ? Array<CE & BE>
+      : CurrentType & BrandedType
+    : CurrentType & BrandedType;
+
+export type CombineBrandsIfNeeded<T, Required> = [T] extends [Required]
+  ? T[]
+  : HasBrand<T> extends true
+  ? CombineBrands<T, Required>[]
+  : Required[];
 
 /**
  * Makes type into a branded type, ensuring that value is assignable to
- * the base ubranded type. Optionally you can explicitly supply current value
+ * the base unbranded type. Optionally you can explicitly supply current value
  * type to combine both (useful for composite branded types. Make sure you
  * compose branded types which are not composite themselves.)
  */
-export const toBrandedType = <BrandedType, CurrentType = BrandedType>(
-  value: Unbrand<BrandedType>,
-) => {
-  return value as CurrentType & BrandedType;
-};
+export function toBrandedType<BrandedType>(
+  value: UnbrandForValue<BrandedType>,
+): BrandedType;
+export function toBrandedType<BrandedType, CurrentType>(
+  value: CurrentType,
+): CombineBrands<BrandedType, CurrentType>;
+export function toBrandedType(value: unknown) {
+  return value;
+}
 
 // -----------------------------------------------------------------------------
 
@@ -1237,20 +1235,6 @@ export const escapeDoubleQuotes = (str: string) => {
 
 export const castArray = <T>(value: T | T[]): T[] =>
   Array.isArray(value) ? value : [value];
-
-export const elementCenterPoint = (
-  element: ExcalidrawElement,
-  xOffset: number = 0,
-  yOffset: number = 0,
-) => {
-  const { x, y, width, height } = element;
-
-  const centerXPoint = x + width / 2 + xOffset;
-
-  const centerYPoint = y + height / 2 + yOffset;
-
-  return pointFrom<GlobalPoint>(centerXPoint, centerYPoint);
-};
 
 /** hack for Array.isArray type guard not working with readonly value[] */
 export const isReadonlyArray = (value?: any): value is readonly any[] => {
@@ -1293,4 +1277,55 @@ export const reduceToCommonValue = <T, R = T>(
   }
 
   return commonValue;
+};
+
+type FEATURE_FLAGS = {
+  COMPLEX_BINDINGS: boolean;
+};
+
+const FEATURE_FLAGS_STORAGE_KEY = "excalidraw-feature-flags";
+const DEFAULT_FEATURE_FLAGS: FEATURE_FLAGS = {
+  COMPLEX_BINDINGS: false,
+};
+let featureFlags: FEATURE_FLAGS | null = null;
+
+export const getFeatureFlag = <F extends keyof FEATURE_FLAGS>(
+  flag: F,
+): FEATURE_FLAGS[F] => {
+  if (!featureFlags) {
+    try {
+      const serializedFlags = localStorage.getItem(FEATURE_FLAGS_STORAGE_KEY);
+      if (serializedFlags) {
+        const flags = JSON.parse(serializedFlags);
+        featureFlags = flags ?? DEFAULT_FEATURE_FLAGS;
+      }
+    } catch {}
+  }
+
+  return (featureFlags || DEFAULT_FEATURE_FLAGS)[flag];
+};
+
+export const setFeatureFlag = <F extends keyof FEATURE_FLAGS>(
+  flag: F,
+  value: FEATURE_FLAGS[F],
+) => {
+  try {
+    featureFlags = {
+      ...(featureFlags || DEFAULT_FEATURE_FLAGS),
+      [flag]: value,
+    };
+    localStorage.setItem(
+      FEATURE_FLAGS_STORAGE_KEY,
+      JSON.stringify(featureFlags),
+    );
+  } catch (e) {
+    console.error("unable to set feature flag", e);
+  }
+};
+
+export const oneOf = <N extends string | number | symbol | null, H extends N>(
+  needle: N,
+  haystack: readonly H[],
+): needle is H => {
+  return haystack.includes(needle as any);
 };

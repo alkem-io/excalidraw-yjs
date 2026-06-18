@@ -1,44 +1,25 @@
 import React from "react";
 
-import { showSelectedShapeActions } from "@excalidraw/element";
-
 import type { NonDeletedExcalidrawElement } from "@excalidraw/element/types";
 
-import { isHandToolActive } from "../appState";
 import { useTunnels } from "../context/tunnels";
 import { t } from "../i18n";
 import { calculateScrollCenter } from "../scene";
 import { SCROLLBAR_WIDTH, SCROLLBAR_MARGIN } from "../scene/scrollbars";
 
-import { actionToggleElementLock } from "../actions";
-
-import { SelectedShapeActions, ShapesSwitcher } from "./Actions";
+import { ExitViewModeButton, MobileShapeActions } from "./Actions";
+import { MobileToolBar } from "./MobileToolBar";
 import { FixedSideContainer } from "./FixedSideContainer";
-import { HandButton } from "./HandButton";
-import { HintViewer } from "./HintViewer";
+
 import { Island } from "./Island";
+
 import { PenModeButton } from "./PenModeButton";
-import { Section } from "./Section";
-import Stack from "./Stack";
-
-import { LockElementButton } from "./LockElementButton";
-
-import { EmojiPickerPanel, ReactionModeButton } from "./emojis/emojiReactions";
-
-import {
-  CountdownTimerPanel,
-  type UseCountdownTimerResult,
-} from "./countdownTimer";
-
-import type { UseEmojiReactionsResult } from "./emojis/emojiReactions";
 
 import type { ActionManager } from "../actions/manager";
 import type {
   AppClassProperties,
   AppProps,
   AppState,
-  Device,
-  ExcalidrawProps,
   UIAppState,
 } from "../types";
 import type { JSX } from "react";
@@ -50,7 +31,6 @@ type MobileMenuProps = {
   renderImageExportDialog: () => React.ReactNode;
   setAppState: React.Component<any, AppState>["setState"];
   elements: readonly NonDeletedExcalidrawElement[];
-  onLockToggle: () => void;
   onHandToolToggle: () => void;
   onPenModeToggle: AppClassProperties["togglePenMode"];
 
@@ -58,15 +38,14 @@ type MobileMenuProps = {
     isMobile: boolean,
     appState: UIAppState,
   ) => JSX.Element | null;
-  renderCustomStats?: ExcalidrawProps["renderCustomStats"];
+  renderTopLeftUI?: (
+    isMobile: boolean,
+    appState: UIAppState,
+  ) => JSX.Element | null;
   renderSidebars: () => JSX.Element | null;
-  device: Device;
   renderWelcomeScreen: boolean;
   UIOptions: AppProps["UIOptions"];
   app: AppClassProperties;
-  isCollaborating: boolean;
-  reactions: UseEmojiReactionsResult;
-  countdownTimer: UseCountdownTimerResult;
 };
 
 export const MobileMenu = ({
@@ -74,200 +53,106 @@ export const MobileMenu = ({
   elements,
   actionManager,
   setAppState,
-  onLockToggle,
   onHandToolToggle,
-  onPenModeToggle,
-
+  renderTopLeftUI,
   renderTopRightUI,
-  renderCustomStats,
   renderSidebars,
-  device,
   renderWelcomeScreen,
   UIOptions,
   app,
-  isCollaborating,
-  reactions,
-  countdownTimer,
+  onPenModeToggle,
 }: MobileMenuProps) => {
   const {
     WelcomeScreenCenterTunnel,
     MainMenuTunnel,
     DefaultSidebarTriggerTunnel,
   } = useTunnels();
-  const renderToolbar = () => {
-    return (
-      <FixedSideContainer side="top" className="App-top-bar">
-        {renderWelcomeScreen && <WelcomeScreenCenterTunnel.Out />}
-        <Section heading="shapes">
-          {(heading: React.ReactNode) => (
-            <Stack.Col gap={4} align="center">
-              <Stack.Row gap={1} className="App-toolbar-container">
-                <Island padding={1} className="App-toolbar App-toolbar--mobile">
-                  {heading}
-                  <Stack.Row gap={1}>
-                    <ShapesSwitcher
-                      appState={appState}
-                      activeTool={appState.activeTool}
-                      UIOptions={UIOptions}
-                      app={app}
-                      onSelectReactionEmoji={
-                        reactions.handleSelectReactionEmoji
-                      }
-                      onStartCountdownTimer={countdownTimer.startTimer}
-                    />
-                  </Stack.Row>
-                </Island>
-                {renderTopRightUI && renderTopRightUI(true, appState)}
-                <div className="mobile-misc-tools-container">
-                  {!appState.viewModeEnabled &&
-                    appState.openDialog?.name !== "elementLinkSelector" && (
-                      <DefaultSidebarTriggerTunnel.Out />
-                    )}
-                  <PenModeButton
-                    checked={appState.penMode}
-                    onChange={() => onPenModeToggle(null)}
-                    title={t("toolBar.penMode")}
-                    isMobile
-                    penDetected={appState.penDetected}
-                  />
-                  <LockElementButton
-                    disabled={
-                      Object.keys(appState.selectedElementIds).length === 0 &&
-                      appState.activeLockedId !== null
-                    }
-                    checked={!!appState.activeLockedId}
-                    onChange={() =>
-                      actionManager.executeAction(actionToggleElementLock)
-                    }
-                    title={t("toolBar.lockElements")}
-                  />
-                  <HandButton
-                    checked={isHandToolActive(appState)}
-                    onChange={() => onHandToolToggle()}
-                    title={t("toolBar.hand")}
-                    isMobile
-                  />
-                  {isCollaborating && (
-                    <ReactionModeButton
-                      title={t("toolBar.emojiReactions")}
-                      checked={reactions.reactionModeActive}
-                      onChange={reactions.toggleReactionMode}
-                      isMobile
-                      activeEmoji={
-                        reactions.reactionModeActive
-                          ? reactions.reactionEmoji
-                          : null
-                      }
-                    />
-                  )}
-                </div>
-              </Stack.Row>
-            </Stack.Col>
-          )}
-        </Section>
-        {countdownTimer.isActive && (
-          <Island
-            style={{
-              marginLeft: 8,
-              alignSelf: "center",
-              height: "fit-content",
-            }}
-          >
-            <CountdownTimerPanel
-              timers={countdownTimer.timers}
-              onCancel={countdownTimer.cancelTimer}
-            />
-          </Island>
-        )}
-        <HintViewer
-          appState={appState}
-          isMobile={true}
-          device={device}
-          app={app}
-        />
-      </FixedSideContainer>
-    );
-  };
-
-  const renderAppToolbar = () => {
-    if (
-      appState.viewModeEnabled ||
-      appState.openDialog?.name === "elementLinkSelector"
-    ) {
-      return (
-        <div className="App-toolbar-content">
-          <MainMenuTunnel.Out />
-        </div>
-      );
+  const renderAppTopBar = () => {
+    if (appState.openDialog?.name === "elementLinkSelector") {
+      return null;
     }
 
-    return (
-      <div className="App-toolbar-content">
-        <MainMenuTunnel.Out />
-        {actionManager.renderAction("toggleEditMenu")}
-        {actionManager.renderAction(
-          appState.multiElement ? "finalize" : "duplicateSelection",
+    const topRightUI = (
+      <div className="excalidraw-ui-top-right">
+        {renderTopRightUI?.(true, appState) ??
+          (!appState.viewModeEnabled && (
+            <>
+              <PenModeButton
+                checked={appState.penMode}
+                onChange={() => onPenModeToggle(null)}
+                title={t("toolBar.penMode")}
+                isMobile
+                penDetected={appState.penDetected}
+              />
+              <DefaultSidebarTriggerTunnel.Out />
+            </>
+          ))}
+        {appState.viewModeEnabled && (
+          <ExitViewModeButton actionManager={actionManager} />
         )}
-        {actionManager.renderAction("deleteSelectedElements")}
-        <div>
-          {actionManager.renderAction("undo")}
-          {actionManager.renderAction("redo")}
-        </div>
+      </div>
+    );
+
+    const topLeftUI = (
+      <div className="excalidraw-ui-top-left">
+        {renderTopLeftUI?.(true, appState)}
+        <MainMenuTunnel.Out />
+      </div>
+    );
+
+    return (
+      <div
+        className="App-toolbar-content"
+        style={{
+          display: "flex",
+          flexDirection: "row",
+          justifyContent: "space-between",
+        }}
+      >
+        {topLeftUI}
+        {topRightUI}
       </div>
     );
   };
 
-  const renderPopups = () => {
+  const renderToolbar = () => {
     return (
-      <>
-        {reactions.showEmojiPicker && !reactions.reactionModeActive && (
-          <div
-            ref={reactions.emojiPickerRef}
-            className="emoji-submenu__panel emoji-submenu__panel--mobile"
-            data-testid="emoji-picker-wrapper"
-          >
-            <EmojiPickerPanel
-              onSelect={(emoji) => {
-                reactions.handleSelectReactionEmoji(emoji);
-              }}
-            />
-          </div>
-        )}
-      </>
+      <MobileToolBar
+        app={app}
+        onHandToolToggle={onHandToolToggle}
+        setAppState={setAppState}
+      />
     );
   };
 
   return (
     <>
       {renderSidebars()}
-      {!appState.viewModeEnabled &&
-        appState.openDialog?.name !== "elementLinkSelector" &&
-        renderToolbar()}
-      {renderPopups()}
-      <div
-        className="App-bottom-bar"
-        style={{
-          marginBottom: SCROLLBAR_WIDTH + SCROLLBAR_MARGIN * 2,
-          marginLeft: SCROLLBAR_WIDTH + SCROLLBAR_MARGIN * 2,
-          marginRight: SCROLLBAR_WIDTH + SCROLLBAR_MARGIN * 2,
-        }}
-      >
-        <Island padding={0}>
-          {appState.openMenu === "shape" &&
-          !appState.viewModeEnabled &&
-          appState.openDialog?.name !== "elementLinkSelector" &&
-          showSelectedShapeActions(appState, elements) ? (
-            <Section className="App-mobile-menu" heading="selectedShapeActions">
-              <SelectedShapeActions
-                appState={appState}
-                elementsMap={app.scene.getNonDeletedElementsMap()}
-                renderAction={actionManager.renderAction}
-                app={app}
-              />
-            </Section>
-          ) : null}
-          <footer className="App-toolbar">
-            {renderAppToolbar()}
+      {/* welcome screen, bottom bar, and top bar all have the same z-index */}
+      {/* ordered in this reverse order so that top bar is on top */}
+      <div className="App-welcome-screen">
+        {renderWelcomeScreen && <WelcomeScreenCenterTunnel.Out />}
+      </div>
+
+      {!appState.viewModeEnabled && (
+        <div
+          className="App-bottom-bar"
+          style={{
+            marginBottom: SCROLLBAR_WIDTH + SCROLLBAR_MARGIN,
+          }}
+        >
+          <MobileShapeActions
+            appState={appState}
+            elementsMap={app.scene.getNonDeletedElementsMap()}
+            renderAction={actionManager.renderAction}
+            app={app}
+            setAppState={setAppState}
+          />
+
+          <Island className="App-toolbar">
+            {!appState.viewModeEnabled &&
+              appState.openDialog?.name !== "elementLinkSelector" &&
+              renderToolbar()}
             {appState.scrolledOutside &&
               !appState.openMenu &&
               !appState.openSidebar && (
@@ -283,9 +168,13 @@ export const MobileMenu = ({
                   {t("buttons.scrollBackToContent")}
                 </button>
               )}
-          </footer>
-        </Island>
-      </div>
+          </Island>
+        </div>
+      )}
+
+      <FixedSideContainer side="top" className="App-top-bar">
+        {renderAppTopBar()}
+      </FixedSideContainer>
     </>
   );
 };

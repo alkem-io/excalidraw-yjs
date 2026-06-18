@@ -6,7 +6,7 @@ import { hitElementBoundingBox } from "@excalidraw/element";
 
 import type { GlobalPoint, Radians } from "@excalidraw/math";
 
-import type { Bounds } from "@excalidraw/element";
+import type { Bounds } from "@excalidraw/common";
 import type {
   ElementsMap,
   NonDeletedExcalidrawElement,
@@ -92,7 +92,7 @@ export const isPointHittingLink = (
   if (
     !isMobile &&
     appState.viewModeEnabled &&
-    hitElementBoundingBox(x, y, element, elementsMap)
+    hitElementBoundingBox(pointFrom(x, y), element, elementsMap)
   ) {
     return true;
   }

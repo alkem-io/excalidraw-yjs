@@ -1,6 +1,7 @@
 import { useRef, useLayoutEffect, useCallback, useEffect } from "react";
 
-import { convertToExcalidrawElements } from "../../../data/transform";
+import { convertToExcalidrawElements } from "@excalidraw/element";
+
 import { t } from "../../../i18n";
 
 import { useApp } from "../../App";

@@ -8,7 +8,7 @@ import type { Radians } from "@excalidraw/math";
 
 import type { Mutable } from "@excalidraw/common/utility-types";
 
-import { ShapeCache } from "./ShapeCache";
+import { ShapeCache } from "./shape";
 
 import { updateElbowArrowPoints } from "./elbowArrow";
 
@@ -23,7 +23,7 @@ import type {
 
 export type ElementUpdate<TElement extends ExcalidrawElement> = Omit<
   Partial<TElement>,
-  "id" | "version" | "versionNonce" | "updated"
+  "id" | "updated"
 >;
 
 /**
@@ -40,22 +40,21 @@ export const mutateElement = <TElement extends Mutable<ExcalidrawElement>>(
   updates: ElementUpdate<TElement>,
   options?: {
     isDragging?: boolean;
+    isBindingEnabled?: boolean;
+    isMidpointSnappingEnabled?: boolean;
   },
 ) => {
   let didChange = false;
 
   // casting to any because can't use `in` operator
   // (see https://github.com/microsoft/TypeScript/issues/21732)
-  const { points, fixedSegments, startBinding, endBinding, fileId } =
-    updates as any;
+  const { points, fixedSegments, fileId } = updates as any;
 
   if (
     isElbowArrow(element) &&
     (Object.keys(updates).length === 0 || // normalization case
       typeof points !== "undefined" || // repositioning
-      typeof fixedSegments !== "undefined" || // segment fixing
-      typeof startBinding !== "undefined" ||
-      typeof endBinding !== "undefined") // manual binding to element
+      typeof fixedSegments !== "undefined") // segment fixing
   ) {
     updates = {
       ...updates,
@@ -137,8 +136,8 @@ export const mutateElement = <TElement extends Mutable<ExcalidrawElement>>(
     ShapeCache.delete(element);
   }
 
-  element.version++;
-  element.versionNonce = randomInteger();
+  element.version = updates.version ?? element.version + 1;
+  element.versionNonce = updates.versionNonce ?? randomInteger();
   element.updated = getUpdatedTimestamp();
 
   return element;
@@ -172,9 +171,9 @@ export const newElementWith = <TElement extends ExcalidrawElement>(
   return {
     ...element,
     ...updates,
+    version: updates.version ?? element.version + 1,
+    versionNonce: updates.versionNonce ?? randomInteger(),
     updated: getUpdatedTimestamp(),
-    version: element.version + 1,
-    versionNonce: randomInteger(),
   };
 };
 

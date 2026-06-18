@@ -6,25 +6,6 @@ import type { AppProps, AppState } from "@excalidraw/excalidraw/types";
 
 import { COLOR_PALETTE } from "./colors";
 
-export const isDarwin = /Mac|iPod|iPhone|iPad/.test(navigator.platform);
-export const isWindows = /^Win/.test(navigator.platform);
-export const isAndroid = /\b(android)\b/i.test(navigator.userAgent);
-export const isFirefox =
-  typeof window !== "undefined" &&
-  "netscape" in window &&
-  navigator.userAgent.indexOf("rv:") > 1 &&
-  navigator.userAgent.indexOf("Gecko") > 1;
-export const isChrome = navigator.userAgent.indexOf("Chrome") !== -1;
-export const isSafari =
-  !isChrome && navigator.userAgent.indexOf("Safari") !== -1;
-export const isIOS =
-  /iPad|iPhone/.test(navigator.platform) ||
-  // iPadOS 13+
-  (navigator.userAgent.includes("Mac") && "ontouchend" in document);
-// keeping function so it can be mocked in test
-export const isBrave = () =>
-  (navigator as any).brave?.isBrave?.name === "isBrave";
-
 export const supportsResizeObserver =
   typeof window !== "undefined" && "ResizeObserver" in window;
 
@@ -36,6 +17,7 @@ export const APP_NAME = "Excalidraw";
 // (happens a lot with fast clicks with the text tool)
 export const TEXT_AUTOWRAP_THRESHOLD = 36; // px
 export const DRAGGING_THRESHOLD = 10; // px
+export const MINIMUM_ARROW_SIZE = 20; // px
 export const LINE_CONFIRM_THRESHOLD = 8; // px
 export const ELEMENT_SHIFT_TRANSLATE_AMOUNT = 5;
 export const ELEMENT_TRANSLATE_AMOUNT = 1;
@@ -117,11 +99,22 @@ export const ENV = {
 };
 
 export const CLASSES = {
+  SIDEBAR: "sidebar",
   SHAPE_ACTIONS_MENU: "App-menu__left",
   ZOOM_ACTIONS: "zoom-actions",
   SEARCH_MENU_INPUT_WRAPPER: "layer-ui__search-inputWrapper",
   CONVERT_ELEMENT_TYPE_POPUP: "ConvertElementTypePopup",
+  SHAPE_ACTIONS_THEME_SCOPE: "shape-actions-theme-scope",
+  FRAME_NAME: "frame-name",
+  DROPDOWN_MENU_EVENT_WRAPPER: "dropdown-menu-event-wrapper",
 };
+
+export const FONT_SIZES = {
+  sm: 16,
+  md: 20,
+  lg: 28,
+  xl: 36,
+} as const;
 
 export const CJK_HAND_DRAWN_FALLBACK_FONT = "Xiaolai";
 export const WINDOWS_EMOJI_FALLBACK_FONT = "Segoe UI Emoji";
@@ -147,19 +140,49 @@ export const FONT_FAMILY = {
   Assistant: 10,
 };
 
+// Segoe UI Emoji fails to properly fallback for some glyphs: ∞, ∫, ≠
+// so we need to have generic font fallback before it
+export const SANS_SERIF_GENERIC_FONT = "sans-serif";
+export const MONOSPACE_GENERIC_FONT = "monospace";
+
+export const FONT_FAMILY_GENERIC_FALLBACKS = {
+  [SANS_SERIF_GENERIC_FONT]: 998,
+  [MONOSPACE_GENERIC_FONT]: 999,
+};
+
 export const FONT_FAMILY_FALLBACKS = {
   [CJK_HAND_DRAWN_FALLBACK_FONT]: 100,
+  ...FONT_FAMILY_GENERIC_FALLBACKS,
   [WINDOWS_EMOJI_FALLBACK_FONT]: 1000,
 };
+
+export function getGenericFontFamilyFallback(
+  fontFamily: number,
+): keyof typeof FONT_FAMILY_GENERIC_FALLBACKS {
+  switch (fontFamily) {
+    case FONT_FAMILY.Cascadia:
+    case FONT_FAMILY["Comic Shanns"]:
+      return MONOSPACE_GENERIC_FONT;
+
+    default:
+      return SANS_SERIF_GENERIC_FONT;
+  }
+}
 
 export const getFontFamilyFallbacks = (
   fontFamily: number,
 ): Array<keyof typeof FONT_FAMILY_FALLBACKS> => {
+  const genericFallbackFont = getGenericFontFamilyFallback(fontFamily);
+
   switch (fontFamily) {
     case FONT_FAMILY.Excalifont:
-      return [CJK_HAND_DRAWN_FALLBACK_FONT, WINDOWS_EMOJI_FALLBACK_FONT];
+      return [
+        CJK_HAND_DRAWN_FALLBACK_FONT,
+        genericFallbackFont,
+        WINDOWS_EMOJI_FALLBACK_FONT,
+      ];
     default:
-      return [WINDOWS_EMOJI_FALLBACK_FONT];
+      return [genericFallbackFont, WINDOWS_EMOJI_FALLBACK_FONT];
   }
 };
 
@@ -167,6 +190,8 @@ export const THEME = {
   LIGHT: "light",
   DARK: "dark",
 } as const;
+
+export const DARK_THEME_FILTER = "invert(93%) hue-rotate(180deg)";
 
 export const FRAME_STYLE = {
   strokeColor: "#bbb" as ExcalidrawElement["strokeColor"],
@@ -221,13 +246,21 @@ export const IMAGE_MIME_TYPES = {
   jfif: "image/jfif",
 } as const;
 
-export const MIME_TYPES = {
+export const STRING_MIME_TYPES = {
   text: "text/plain",
   html: "text/html",
   json: "application/json",
   // excalidraw data
   excalidraw: "application/vnd.excalidraw+json",
+  excalidrawClipboard: "application/vnd.excalidraw.clipboard+json",
+  // LEGACY: fully-qualified library JSON data
   excalidrawlib: "application/vnd.excalidrawlib+json",
+  // list of excalidraw library item ids
+  excalidrawlibIds: "application/vnd.excalidrawlib.ids+json",
+} as const;
+
+export const MIME_TYPES = {
+  ...STRING_MIME_TYPES,
   // image-encoded excalidraw data
   "excalidraw.svg": "image/svg+xml",
   "excalidraw.png": "image/png",
@@ -276,9 +309,6 @@ export const IDLE_THRESHOLD = 60_000;
 // Report a user active each ACTIVE_THRESHOLD milliseconds
 export const ACTIVE_THRESHOLD = 3_000;
 
-// duplicates --theme-filter, should be removed soon
-export const THEME_FILTER = "invert(93%) hue-rotate(180deg)";
-
 export const URL_QUERY_KEYS = {
   addLibrary: "addLibrary",
 } as const;
@@ -302,24 +332,15 @@ export const DEFAULT_UI_OPTIONS: AppProps["UIOptions"] = {
   },
 };
 
-// breakpoints
-// -----------------------------------------------------------------------------
-// md screen
-export const MQ_MAX_WIDTH_PORTRAIT = 730;
-export const MQ_MAX_WIDTH_LANDSCAPE = 1000;
-export const MQ_MAX_HEIGHT_LANDSCAPE = 500;
-// sidebar
-export const MQ_RIGHT_SIDEBAR_MIN_WIDTH = 1229;
-// -----------------------------------------------------------------------------
-
 export const MAX_DECIMALS_FOR_SVG_EXPORT = 2;
 
 export const EXPORT_SCALES = [1, 2, 3];
 export const DEFAULT_EXPORT_PADDING = 10; // px
 
-export const DEFAULT_MAX_IMAGE_WIDTH_OR_HEIGHT = 1440;
-
-export const MAX_ALLOWED_FILE_BYTES = 4 * 1024 * 1024;
+export const DEFAULT_IMAGE_OPTIONS: AppProps["imageOptions"] = {
+  maxWidthOrHeight: 1440,
+  maxFileSizeBytes: 4 * 1024 * 1024,
+};
 
 export const SVG_NS = "http://www.w3.org/2000/svg";
 export const SVG_DOCUMENT_PREAMBLE = `<?xml version="1.0" standalone="no"?>
@@ -485,3 +506,12 @@ export enum UserIdleState {
  * the start and end points)
  */
 export const LINE_POLYGON_POINT_MERGE_DISTANCE = 20;
+
+export const DOUBLE_TAP_POSITION_THRESHOLD = 35;
+
+export const BIND_MODE_TIMEOUT = 700; // ms
+
+// glass background for mobile action buttons
+export const MOBILE_ACTION_BUTTON_BG = {
+  background: "var(--mobile-action-button-bg)",
+} as const;
