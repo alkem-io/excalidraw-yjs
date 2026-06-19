@@ -304,7 +304,16 @@ const hasDiffWork = (
       }
     }
     for (const id of nextIds) {
-      if (!deepEqual(filesMap.get(id), files[id])) {
+      const prev = filesMap.get(id);
+      const next = files[id];
+      // Reference fast-path (FIX 1): `BinaryFileData` is immutable in Excalidraw
+      // (entries are replaced wholesale, never mutated in place), so an
+      // unchanged reference is unchanged — skip the per-frame `deepEqual` walk
+      // over the base64 `dataURL` blob. Only `deepEqual` when references differ.
+      if (prev === next) {
+        continue;
+      }
+      if (!deepEqual(prev, next)) {
         return true;
       }
     }
