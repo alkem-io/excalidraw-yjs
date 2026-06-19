@@ -12,7 +12,7 @@ import { populateYDoc } from "./migrate";
 import type * as Y from "yjs";
 
 import type { ElementRecord } from "./schema";
-import type { EditingGuard } from "./apply";
+import type { ApplyScope, EditingGuard } from "./apply";
 import type { EphemeralChannel } from "./awareness";
 import type { Awareness } from "y-protocols/awareness";
 import type { SceneJSON } from "./migrate";
@@ -47,6 +47,45 @@ export type WhiteboardBindingOptions = {
   initialScene?: SceneJSON;
   /** Returns the id of the element the local user is mid-editing, or null. */
   editingGuard?: EditingGuard;
+};
+
+/**
+ * Derive the set of changed element ids from an `observeDeep` event batch on the
+ * `elements` `Y.Map` (FIX 2). Each event's `path` is the route from the observed
+ * root to the mutated type:
+ *
+ *  - `path.length === 0` → the mutation is on the top-level `elements` map itself
+ *    (an element entry added/removed) — the changed ids are the event's keys.
+ *  - `path.length >= 1` → a per-element mutation (a property change, or a nested
+ *    `boundElements` change at `[id, "boundElements"]`); the first path segment
+ *    is the element id.
+ *
+ * Returns `"full"` (forcing a whole-scene rebuild) if any event can't be mapped
+ * to a concrete id — correctness over micro-optimisation (per FIX 2: fall back
+ * rather than risk dropping a change).
+ */
+const changedElementIds = (
+  events: readonly Y.YEvent<Y.AbstractType<unknown>>[],
+): ApplyScope => {
+  const ids = new Set<string>();
+  for (const event of events) {
+    const path = event.path;
+    if (path.length === 0) {
+      // top-level add/remove of element entries → ids are the changed keys
+      for (const key of event.keys.keys()) {
+        ids.add(key);
+      }
+      continue;
+    }
+    const head = path[0];
+    if (typeof head === "string") {
+      ids.add(head);
+    } else {
+      // Can't resolve a concrete element id → be safe, rebuild everything.
+      return "full";
+    }
+  }
+  return ids;
 };
 
 /**
@@ -125,13 +164,16 @@ export class WhiteboardBinding {
     // Apply the current doc state to the scene, seeding lastKnownElements.
     this.lastKnownElements = this.applyGuarded();
 
-    // observe → apply (echo-guarded)
-    this.observeDeepHandler = (_events, transaction) =>
-      this.onDocChange(transaction);
+    // observe → apply (echo-guarded). The elements observer derives the set of
+    // changed element ids from the deep-event paths so apply stays O(changed)
+    // (FIX 2 / NFR-B-001); files/appState changes touch no element, so they apply
+    // with an EMPTY element scope (every element keeps its object identity).
+    this.observeDeepHandler = (events, transaction) =>
+      this.onDocChange(transaction, changedElementIds(events));
     this.filesObserveHandler = (_event, transaction) =>
-      this.onDocChange(transaction);
+      this.onDocChange(transaction, new Set());
     this.appStateObserveHandler = (_event, transaction) =>
-      this.onDocChange(transaction);
+      this.onDocChange(transaction, new Set());
     this.elementsMap.observeDeep(this.observeDeepHandler);
     this.filesMap.observe(this.filesObserveHandler);
     this.appStateMap.observe(this.appStateObserveHandler);
@@ -158,8 +200,10 @@ export class WhiteboardBinding {
   /**
    * Run `applyToScene` with the re-entrancy guard set, so any `onChange` the
    * editor fires synchronously from inside `updateScene` is ignored (no echo).
+   * `scope` bounds apply to the changed element ids (O(changed)); `"full"`
+   * rebuilds the whole scene (initial seed / unscopable structural change).
    */
-  private applyGuarded(): ElementRecord[] {
+  private applyGuarded(scope: ApplyScope = "full"): ElementRecord[] {
     this.applying = true;
     try {
       return applyToScene({
@@ -167,6 +211,7 @@ export class WhiteboardBinding {
         api: this.api,
         getPrevElements: () => this.lastKnownElements,
         editingGuard: this.editingGuard,
+        scope,
       });
     } finally {
       this.applying = false;
@@ -204,7 +249,7 @@ export class WhiteboardBinding {
   }
 
   /** Yjs observe → scene apply path, echo-guarded (FR-B-004). */
-  private onDocChange(transaction: Y.Transaction): void {
+  private onDocChange(transaction: Y.Transaction, scope: ApplyScope): void {
     if (this.destroyed) {
       return;
     }
@@ -212,7 +257,7 @@ export class WhiteboardBinding {
     if (transaction.origin === BINDING_ORIGIN) {
       return;
     }
-    this.lastKnownElements = this.applyGuarded();
+    this.lastKnownElements = this.applyGuarded(scope);
   }
 
   /** Detach every observer + subscription; no leaks on remount (FR-B-012). */
@@ -263,4 +308,4 @@ export type {
   VisibleSceneBoundsPayload,
 } from "./awareness";
 export type { SceneJSON } from "./migrate";
-export type { EditingGuard } from "./apply";
+export type { ApplyScope, EditingGuard } from "./apply";

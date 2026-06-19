@@ -60,6 +60,15 @@ const deriveNonce = (id: string, version: number): number => {
 };
 
 /**
+ * The set of element ids a doc change touched, or `"full"` when the change can't
+ * be scoped (initial seed, or a structural/array-level event) — in which case
+ * apply rebuilds every element. Threaded from the `observeDeep` event paths so a
+ * remote per-property edit only decodes + re-derives the affected elements
+ * (NFR-B-001 / T012, O(changed)).
+ */
+export type ApplyScope = ReadonlySet<string> | "full";
+
+/**
  * Build the full element list from the doc's element maps, ordered by `index`
  * with collision repair (T012–T014). Tombstones are retained in the returned
  * list (the caller filters them for render); `repaired` carries the ids whose
@@ -69,20 +78,75 @@ const deriveNonce = (id: string, version: number): number => {
  * `prevById` supplies the previous local element objects so that
  * `version`/`versionNonce` can be bumped locally on a real per-property change
  * (OPEN-3) rather than carried verbatim from the remote.
+ *
+ * `scope` (FIX 2 / NFR-B-001) bounds the work to O(changed): when it is a set of
+ * changed ids, every UNCHANGED id (present in `prevById`, absent from `scope`) is
+ * re-used by reference — its previous object identity is preserved so React /
+ * Excalidraw can skip re-rendering it, and its `Y.Map` is never decoded. Only the
+ * changed (and brand-new) ids are decoded + `bumpVersion`-ed. When `scope` is
+ * `"full"` (or unset) every element is decoded — the original behaviour.
+ *
+ * Correctness guard: if index-collision repair would touch an UNCHANGED element
+ * (a concurrent same-gap insert can shift a neighbour), the scoped build returns
+ * `fellBack: true` so the caller redoes a full rebuild rather than emitting a
+ * neighbour with stale identity. The reused objects are shallow-cloned before
+ * `repairIndices` (which mutates `index` in place), so a discarded scoped attempt
+ * never corrupts the shared `prevById` objects.
  */
 export const buildElements = (
   elementsMap: Y.Map<Y.Map<unknown>>,
   prevById: Map<string, ElementRecord>,
-): { elements: ElementRecord[]; repaired: Set<string> } => {
-  const elements: ElementRecord[] = [];
-  for (const [id, ymap] of elementsMap.entries()) {
-    const next = yMapToElement(ymap);
-    next.id = id;
-    bumpVersion(next, prevById.get(id));
-    elements.push(next);
+  scope: ApplyScope = "full",
+): { elements: ElementRecord[]; repaired: Set<string>; fellBack: boolean } => {
+  if (scope === "full") {
+    const elements: ElementRecord[] = [];
+    for (const [id, ymap] of elementsMap.entries()) {
+      const next = yMapToElement(ymap);
+      next.id = id;
+      bumpVersion(next, prevById.get(id));
+      elements.push(next);
+    }
+    const { ordered, repaired } = repairIndices(elements);
+    return { elements: ordered, repaired, fellBack: false };
   }
-  const { ordered, repaired } = repairIndices(elements);
-  return { elements: ordered, repaired };
+
+  // Scoped build: decode only changed/new ids; re-use prev objects for the rest.
+  // `reused` maps id → the ORIGINAL prev reference so identity can be restored
+  // after repair (which works on shallow clones to avoid mutating shared state).
+  const reused = new Map<string, ElementRecord>();
+  const working: ElementRecord[] = [];
+  for (const [id, ymap] of elementsMap.entries()) {
+    const prev = prevById.get(id);
+    if (!scope.has(id) && prev) {
+      // unchanged + previously known → re-use by reference (clone for repair).
+      reused.set(id, prev);
+      working.push({ ...prev });
+    } else {
+      const next = yMapToElement(ymap);
+      next.id = id;
+      bumpVersion(next, prev);
+      working.push(next);
+    }
+  }
+
+  const { ordered, repaired } = repairIndices(working);
+
+  // If repair touched an UNCHANGED element, bail to a full rebuild (the scoped
+  // result would carry a neighbour with a changed index but the old identity).
+  for (const id of repaired) {
+    if (reused.has(id)) {
+      return buildElements(elementsMap, prevById, "full");
+    }
+  }
+
+  // Restore the original object identity for every untouched, unrepaired element
+  // (repair never touched them, so the shallow clone is byte-identical to prev).
+  const elements = ordered.map((el) => {
+    const id = el.id as string;
+    const original = reused.get(id);
+    return original ?? el;
+  });
+  return { elements, repaired, fellBack: false };
 };
 
 /**
@@ -158,6 +222,13 @@ export type ApplyDeps = {
   getPrevElements: () => readonly ElementRecord[];
   /** id of the element the local user is mid-editing, or null */
   editingGuard?: EditingGuard;
+  /**
+   * The element ids the triggering doc change touched, or `"full"` for a
+   * whole-scene rebuild (initial seed / structural event). Defaults to `"full"`.
+   * A scoped set makes apply O(changed): only those ids are decoded + re-derived,
+   * every other element keeps its existing object identity (FIX 2 / NFR-B-001).
+   */
+  scope?: ApplyScope;
 };
 
 /**
@@ -167,7 +238,7 @@ export type ApplyDeps = {
  * available). Returns the element list applied.
  */
 export const applyToScene = (deps: ApplyDeps): ElementRecord[] => {
-  const { roots, api, getPrevElements, editingGuard } = deps;
+  const { roots, api, getPrevElements, editingGuard, scope = "full" } = deps;
   const { ydoc, elementsMap, filesMap, appStateMap } = roots;
 
   const prevElements = getPrevElements();
@@ -175,7 +246,7 @@ export const applyToScene = (deps: ApplyDeps): ElementRecord[] => {
     prevElements.map((el) => [el.id as string, el]),
   );
 
-  const { elements, repaired } = buildElements(elementsMap, prevById);
+  const { elements, repaired } = buildElements(elementsMap, prevById, scope);
 
   // Persist index-collision repairs back into the doc under our origin so they
   // are treated as a local change (not echoed) and converge across replicas.
