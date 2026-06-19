@@ -103,9 +103,21 @@ jobs:
 
       - name: Publish preview to pkg.pr.new (PR/Manual, pinned v0.0.65)
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        env:
+          # pkg.pr.new writes its preview as a PR comment, which needs a token
+          # that can write to the PR. On a FORK PR the default GITHUB_TOKEN is
+          # read-only for pull-requests, so `--comment=update` hard-fails. Only
+          # ask for the comment when the PR head repo is THIS repo (non-fork);
+          # otherwise turn commenting off so the publish itself still succeeds.
+          IS_SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
           set +e
-          OUTPUT=$(npx pkg-pr-new@0.0.65 publish --comment=update ./packages/excalidraw ./packages/yjs-binding 2>&1)
+          if [ "${IS_SAME_REPO}" = "true" ]; then
+            COMMENT_ARG="--comment=update"
+          else
+            COMMENT_ARG="--comment=off"
+          fi
+          OUTPUT=$(npx pkg-pr-new@0.0.65 publish "${COMMENT_ARG}" ./packages/excalidraw ./packages/yjs-binding 2>&1)
           STATUS=$?
           set -e
           echo "$OUTPUT"
