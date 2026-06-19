@@ -47,6 +47,15 @@ export const diffFiles = (
   for (const id of nextIds) {
     const next = files[id];
     const prev = filesMap.get(id);
+    // Reference fast-path (FIX 1): Excalidraw treats `BinaryFileData` as
+    // immutable — it replaces a file entry with a NEW object, never mutates a
+    // `dataURL` in place. So an unchanged reference is provably unchanged, and we
+    // skip the `deepEqual` walk over the (hundreds-of-KB) base64 blob, which runs
+    // on EVERY onChange (many per second while drawing). Only fall back to
+    // `deepEqual` when the references actually differ.
+    if (prev === next) {
+      continue;
+    }
     if (!prev || !deepEqual(prev, next)) {
       filesMap.set(id, next);
       mutations++;
