@@ -1,12 +1,10 @@
-import {
-  generateKeyBetween,
-  generateNKeysBetween,
-} from "@excalidraw/fractional-indexing";
+import { generateKeyBetween, generateNKeysBetween } from "fractional-indexing";
 
 /**
- * Z-order primitives (data-model §3). These are thin wrappers over the fork's
- * **pure**, vendored `@excalidraw/fractional-indexing` base-62 key generator —
- * the same order-preserving scheme the editor uses — kept decoupled from the
+ * Z-order primitives (data-model §3). These are thin wrappers over the public,
+ * **pure** `fractional-indexing` base-62 key generator — the upstream package
+ * the editor's `@excalidraw/fractional-indexing` is itself vendored from, so the
+ * order-preserving scheme is byte-for-byte identical — kept decoupled from the
  * editor's heavier `fractionalIndex.ts` (which imports `mutateElement` /
  * canvas machinery and mutates `version`/`versionNonce` as a side effect we must
  * own ourselves per OPEN-3). We never invent an ordering scheme: keys are always

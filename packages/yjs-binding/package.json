@@ -43,8 +43,7 @@
     "test": "vitest run --root ../.. packages/yjs-binding"
   },
   "dependencies": {
-    "@excalidraw/element": "0.18.0",
-    "@excalidraw/fractional-indexing": "3.3.0",
+    "fractional-indexing": "^3.2.0",
     "y-protocols": "^1.0.6",
     "yjs": "^13.6.27"
   },

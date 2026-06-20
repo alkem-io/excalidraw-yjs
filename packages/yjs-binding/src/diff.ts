@@ -1,7 +1,5 @@
 import * as Y from "yjs";
 
-import type { BoundElement } from "@excalidraw/element/types";
-
 import type {
   AppState,
   BinaryFileData,
@@ -20,6 +18,8 @@ import {
   elementToYMap,
   writeChangedKeys,
 } from "./schema";
+
+import type { BoundElement } from "@alkemio/excalidraw/element/types";
 
 import type { BoundElementType, ElementRecord } from "./schema";
 

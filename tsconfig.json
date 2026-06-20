@@ -31,6 +31,9 @@
       "@excalidraw/math/*": ["./packages/math/src/*"],
       "@excalidraw/utils": ["./packages/utils/src/index.ts"],
       "@excalidraw/utils/*": ["./packages/utils/src/*"],
+      "@alkemio/excalidraw": ["./packages/excalidraw/index.tsx"],
+      "@alkemio/excalidraw/element/*": ["./packages/element/src/*"],
+      "@alkemio/excalidraw/*": ["./packages/excalidraw/*"],
       "@alkemio/excalidraw-yjs-binding": ["./packages/yjs-binding/src/index.ts"],
       "@alkemio/excalidraw-yjs-binding/*": ["./packages/yjs-binding/src/*"]
     }
