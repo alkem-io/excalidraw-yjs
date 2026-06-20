@@ -1,5 +1,3 @@
-import { CaptureUpdateAction } from "@excalidraw/element";
-
 import type {
   AppState,
   BinaryFileData,
@@ -19,6 +17,31 @@ import { readFiles } from "./files";
 
 import type * as Y from "yjs";
 import type { ElementRecord } from "./schema";
+
+/**
+ * Inlined `CaptureUpdateAction` enum (self-containment).
+ *
+ * The binding consumes exactly one runtime value from this enum —
+ * `CaptureUpdateAction.NEVER`, passed to `updateScene` so a remote apply is never
+ * recorded on the local undo/redo stack. The enum lives in the editor's internal
+ * `@excalidraw/element` workspace package, which is NOT published standalone, so
+ * importing it at runtime forced every consumer into a local shim + a
+ * `pnpm.override`. Instead we inline the constant here: it is a stable part of
+ * Excalidraw's public `updateScene({ captureUpdate })` API contract — the editor
+ * compares the *string values*, not the object identity, so an inlined copy is
+ * behaviourally identical to the editor's own enum.
+ *
+ * This is not an untyped magic string: the sole consumption site below
+ * (`api.updateScene({ captureUpdate: CaptureUpdateAction.NEVER })`) is typed by
+ * `ExcalidrawImperativeAPI` (from the already-resolvable `@excalidraw/excalidraw`
+ * peer surface) as `captureUpdate?: CaptureUpdateActionType`, so any drift in the
+ * literal's value would fail the binding's own typecheck.
+ */
+const CaptureUpdateAction = {
+  IMMEDIATELY: "IMMEDIATELY",
+  NEVER: "NEVER",
+  EVENTUALLY: "EVENTUALLY",
+} as const;
 
 /**
  * The Yjs observe → scene apply path (data-model §8 Apply). Reads the changed

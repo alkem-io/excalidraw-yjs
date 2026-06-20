@@ -1,8 +1,8 @@
 import * as Y from "yjs";
 
-import type { BoundElement } from "@excalidraw/element/types";
-
 import { BINDING_ORIGIN } from "./origin";
+
+import type { BoundElement } from "@alkemio/excalidraw/element/types";
 
 /**
  * Top-level Yjs root-type names (obtained via `ydoc.getMap(name)`).

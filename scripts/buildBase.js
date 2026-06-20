@@ -18,6 +18,12 @@ const getConfig = (outdir) => ({
     "@excalidraw/element",
     "@excalidraw/math",
     "@excalidraw/fractional-indexing",
+    // Public upstream package the yjs-binding now depends on directly (its order
+    // helpers were re-pointed off the internal, unpublished
+    // `@excalidraw/fractional-indexing` so the published binding installs without
+    // a consumer override). Kept external so it resolves from the consumer's
+    // node_modules rather than being inlined into the bundle.
+    "fractional-indexing",
   ],
 });
 
