@@ -277,6 +277,8 @@ export class WhiteboardBinding {
 }
 
 export { populateYDoc, exportSceneJSON } from "./migrate";
+export { hashDocState } from "./hash";
+export { loadFileAsYDoc, parseSceneBlob, FileImportError } from "./load-file";
 export { areElementsSame, writeDiff, writeAppState } from "./diff";
 export { applyToScene, buildElements, readAppState, nonDeleted } from "./apply";
 export { AwarenessRouter } from "./awareness";
