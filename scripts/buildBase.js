@@ -24,6 +24,18 @@ const getConfig = (outdir) => ({
     // a consumer override). Kept external so it resolves from the consumer's
     // node_modules rather than being inlined into the bundle.
     "fractional-indexing",
+    // The CRDT runtime MUST be externalized, never bundled: a consumer that
+    // creates its own `Y.Doc` (every client whiteboard/memo content path) and
+    // hands it to `populateYDoc` / `exportSceneJSON` / `hashDocState` /
+    // `WhiteboardBinding` would otherwise mix two distinct `yjs` instances, and
+    // yjs's `instanceof` checks fail across copies ("Unexpected content type",
+    // yjs#438). Externalizing makes the binding share the single `yjs` /
+    // `y-protocols` / `lib0` the consumer installs (declared as peerDependencies).
+    "yjs",
+    "y-protocols",
+    "y-protocols/*",
+    "lib0",
+    "lib0/*",
   ],
 });
 
