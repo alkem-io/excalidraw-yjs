@@ -638,6 +638,23 @@ export class Scene {
       }
     }
 
+    // Snapshot every element's intended own-enumerable properties BEFORE any doc
+    // write. This is load-bearing: Pass 1 (the structural add of new ids) commits a
+    // transaction whose observer synchronously runs `recomputeFromDoc`, which
+    // reconciles the stable per-id derived objects *in place from the doc*. Many
+    // callers pass those very derived objects back in (e.g. the duplicate /
+    // wrap-in-container flows hand us `scene.getElementsIncludingDeleted()` with a
+    // re-`index`ed subset). So that intermediate recompute would overwrite a
+    // caller's freshly-assigned `index` (and any other not-yet-persisted field) back
+    // to the *stale* doc value — and Pass 2 would then see "record == doc" and skip
+    // the write, silently dropping the reorder. Writing Pass 2 from these immutable
+    // snapshots makes the persisted values independent of the live objects, so a
+    // reorder that coincides with an add (new clone + reordered originals) survives.
+    const snapshots = new Map<string, ElementRecord>();
+    for (const element of ordered) {
+      snapshots.set(element.id, { ...(element as unknown as ElementRecord) });
+    }
+
     this.observerFired = false;
 
     // Pass 1 (STRUCTURAL_ORIGIN, untracked by history): born-as-tombstone adds for
@@ -661,7 +678,7 @@ export class Scene {
         this.doc.transact(() => {
           for (const element of ordered) {
             if (newIds.has(element.id)) {
-              this.materializeNewEntry(element as unknown as ElementRecord);
+              this.materializeNewEntry(snapshots.get(element.id)!);
             }
           }
         }, STRUCTURAL_ORIGIN);
@@ -690,23 +707,31 @@ export class Scene {
         this.derivedById.delete(id);
       }
       for (const element of ordered) {
-        const record = element as unknown as ElementRecord;
+        // Write from the pre-write snapshot (not the live object): the Pass-1
+        // recompute may have reconciled `element` in place from the still-stale
+        // doc, so its `index`/props can no longer reflect the caller's intent. The
+        // snapshot does.
+        const record = snapshots.get(element.id)!;
         const ymap = this.yElements.get(element.id);
         if (ymap) {
           writeChangedKeys(ymap, record);
         }
         // Capture the element's (locally maintained) reconciliation metadata +
         // any own-Symbol props (e.g. ORIG_ID) — not stored in the doc, but the
-        // derived element must expose them.
+        // derived element must expose them. Version/etc. come from the snapshot so
+        // a Pass-1 recompute that bumped the live object cannot make the meta
+        // disagree with what we just persisted. Own-Symbols are read from the live
+        // `element`: they are non-enumerable (ORIG_ID) so a spread snapshot omits
+        // them, and the recompute re-stamps them, so the live object is canonical.
         this.meta.set(element.id, {
-          version: element.version,
-          versionNonce: element.versionNonce,
-          updated: element.updated,
+          version: record.version as number,
+          versionNonce: record.versionNonce as number,
+          updated: record.updated as number,
           symbols: captureOwnSymbols(element),
           boundElementsEmpty: isEmptyBoundElements(record),
         });
-        if (element.version > this.versionHighWater) {
-          this.versionHighWater = element.version;
+        if ((record.version as number) > this.versionHighWater) {
+          this.versionHighWater = record.version as number;
         }
         // Adopt the caller-supplied object as this id's stable derived object, so
         // a reference the caller still holds tracks the doc (the recompute that

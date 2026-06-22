@@ -781,17 +781,16 @@ describe("duplication z-order", () => {
     );
   });
 
-  // Native-Yjs core (M2): the Scene now orders reads strictly by fractional index
-  // (the doc is the source of truth), whereas the pre-rewrite Scene preserved the
-  // caller's array order. The alt-drag duplicate normalizes the element ARRAY
-  // (bound text after its container) but, for an out-of-order index setup, a
-  // follow-up write in the same gesture (`updateBoundElements` on the still-stale
-  // pre-normalization selected-element references) re-asserts the originals at
-  // their old indices, so the index-ordered scene shows them in the original order.
-  // In-order setups (and the "order A" sibling tests) duplicate correctly; only
-  // this deliberately out-of-order case regresses. Deferred: needs the duplicate
-  // flow to re-sync indices to the normalized order (or read fresh refs).
-  it.skip("alt-duplicating labeled arrows (out-of-order)", async () => {
+  // Native-Yjs core (M2): the Scene orders reads strictly by fractional index (the
+  // doc is the source of truth), whereas the pre-rewrite Scene used the caller's
+  // array order. The alt-drag duplicate normalizes the element array (bound text
+  // after its container) and re-`index`es the moved subset, but the originals get
+  // reordered while keeping stale indices; a coincident structural add (the new
+  // clones) used to make `replaceAllElements`' intermediate recompute clobber the
+  // reassigned indices, dropping the reorder. Fixed by writing the doc from a
+  // pre-write snapshot in `Scene.replaceAllElements`, so the normalized order
+  // survives — this out-of-order case now matches the in-order one.
+  it("alt-duplicating labeled arrows (out-of-order)", async () => {
     const [arrow, text] = API.createLabeledArrow();
 
     API.setElements([text, arrow]);

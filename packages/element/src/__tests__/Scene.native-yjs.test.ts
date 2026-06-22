@@ -1,5 +1,7 @@
 import * as Y from "yjs";
 
+import type { Mutable } from "@excalidraw/common/utility-types";
+
 import { newElement } from "../newElement";
 import { Scene } from "../Scene";
 import { ELEMENTS, RECONCILE_META_KEYS, yMapToElement } from "../yjs";
@@ -281,6 +283,50 @@ describe("native-yjs Scene: the element store IS the doc", () => {
     // sanity: the no-op really left bytes untouched (we only compare lengths as a
     // cheap smoke check that nothing was written before the real change)
     expect(before.byteLength).toBeGreaterThan(0);
+
+    scene.destroy();
+  });
+
+  it("a reorder of an existing element that coincides with a new-element add is persisted (no intermediate-recompute clobber)", () => {
+    // Regression for the native fractional-index ordering bug (M2): a single
+    // `replaceAllElements` that BOTH adds a new element AND re-`index`es an existing
+    // one used to lose the existing element's new index. Cause: the structural add
+    // (Pass 1) commits a transaction whose observer synchronously recomputes the
+    // derived objects *from the still-stale doc*; because callers pass those derived
+    // objects back in, the recompute overwrote the caller's freshly-assigned `index`
+    // before Pass 2 could persist it, so the reorder silently vanished and the scene
+    // re-sorted to the OLD order. Fixed by writing Pass 2 from a pre-write snapshot.
+    //
+    // This drives the exact shape of the duplicate / wrap-in-container flows: the
+    // existing elements are reordered (b before a) AND a brand-new element is added
+    // in the same call. The doc's fractional-index order must equal the passed array.
+    const scene = new Scene([rect("a"), rect("b")]);
+
+    // Use the scene's LIVE derived objects (as the real duplicate / wrap flows do —
+    // they reorder & re-`index` the scene's own elements in place). This is what
+    // makes the intermediate recompute able to clobber: the recompute reconciles
+    // these very objects from the doc.
+    const a = scene.getElement("a")! as Mutable<ExcalidrawElement>;
+    const b = scene.getElement("b")! as Mutable<ExcalidrawElement>;
+    const aIndex = a.index!;
+    // Reassign b's index in place to sort before a (exactly as syncMovedIndices
+    // mutates the moved elements), then pass [b, a] (reordered) plus a brand-new "c"
+    // so Pass 1 (structural add) runs and — under the old bug — its recompute
+    // overwrites b.index back to its stale value before Pass 2 persists "Zz".
+    (b as { index: string }).index = "Zz"; // "Zz" < a's "a0" (uppercase < lowercase)
+    expect((b.index as string) < aIndex).toBe(true);
+
+    scene.replaceAllElements([b, a, rect("c")]);
+
+    // The doc must reflect the passed array order: b, a, c.
+    expect(scene.getElementsIncludingDeleted().map((e) => e.id)).toEqual([
+      "b",
+      "a",
+      "c",
+    ]);
+    // And b's reassigned index must have actually landed in the doc (the clobber
+    // would have left b at its original a-after index, so the order would be a, b, c).
+    expect(scene.yElements.get("b")!.get("index")).toBe("Zz");
 
     scene.destroy();
   });
