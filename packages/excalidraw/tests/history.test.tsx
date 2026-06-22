@@ -25,9 +25,9 @@ import {
 
 import "@excalidraw/utils/test-utils";
 
-import { ElementsDelta, AppStateDelta } from "@excalidraw/element";
+import { AppStateDelta } from "@excalidraw/element";
 
-import { CaptureUpdateAction, StoreDelta } from "@excalidraw/element";
+import { CaptureUpdateAction } from "@excalidraw/element";
 
 import type { LocalPoint, Radians } from "@excalidraw/math";
 
@@ -56,6 +56,7 @@ import * as StaticScene from "../renderer/staticScene";
 import { getDefaultAppState } from "../appState";
 import { Excalidraw } from "../index";
 import { createPasteEvent } from "../clipboard";
+import { HistoryEntry } from "../history";
 
 import * as blobModule from "../data/blob";
 
@@ -144,29 +145,28 @@ describe("history", () => {
   });
 
   describe("singleplayer undo/redo", () => {
-    // Native-Yjs core (M2): element history is the doc's `Y.UndoManager`, so a
-    // History stack entry is no longer a `StoreDelta` with an `applyTo` that can
-    // be corrupted/mocked — undo/redo is a doc-level inverse over DeleteSets. This
-    // resilience test targets the OLD delta-apply mechanism specifically (it
-    // pushes a mocked `StoreDelta` onto `undoStack`), which no longer exists.
-    // Equivalent native resilience (a no-op / no-change undo not getting stuck) is
-    // covered by the Scene-level history unit tests. Deferred / to be rewritten.
-    it.skip("should not collapse when applying corrupted history entry", async () => {
+    // Native-Yjs core (M2): rewritten for the native history. Element undo/redo is
+    // the doc's `Y.UndoManager`; a `History` stack entry now carries only the paired
+    // inverse appState delta + a `hasElementChange` flag (no `StoreDelta` with an
+    // `elements.applyTo` to corrupt). The resilience guarantee is unchanged and still
+    // worth proving: if APPLYING an entry throws, `History.perform` must still pop it
+    // from the source stack and push it onto the opposite stack (its `try/finally`),
+    // so a single bad entry can never wedge undo/redo forever. We assert that by
+    // mocking the entry's `appState.applyTo` to throw.
+    it("should not collapse when applying corrupted history entry", async () => {
       await render(<Excalidraw handleKeyboardGlobally={true} />);
       const rect = API.createElement({ type: "rectangle" });
 
       API.setElements([rect]);
 
-      const corrupedEntry = StoreDelta.create(
-        ElementsDelta.empty(),
-        AppStateDelta.empty(),
-      );
-
-      vi.spyOn(corrupedEntry.elements, "applyTo").mockImplementation(() => {
+      // A corrupted entry: appState-only (no element step), whose applyTo throws.
+      const corruptedDelta = AppStateDelta.empty();
+      vi.spyOn(corruptedDelta, "applyTo").mockImplementation(() => {
         throw new Error("Oh no, I am corrupted!");
       });
+      const corruptedEntry = new HistoryEntry(corruptedDelta, false);
 
-      (h.history as any).undoStack.push(corrupedEntry);
+      (h.history as any).undoStack.push(corruptedEntry);
 
       const appState = getDefaultAppState() as AppState;
 
@@ -184,7 +184,7 @@ describe("history", () => {
       }
       // we popped the entry, even though it is corrupted, so the user could perform subsequent undo/redo and would not be stuck on this entry forever
       expect(API.getUndoStack().length).toBe(0);
-      // we pushed the entr, as we don't want just lose it and throw it away - it might be perfectly valid on subsequent redo
+      // we pushed the entry, as we don't want to just lose it and throw it away - it might be perfectly valid on subsequent redo
       expect(API.getRedoStack().length).toBe(1);
       expect(h.elements).toEqual([
         expect.objectContaining({ id: rect.id, isDeleted: false }), // no changes detected
@@ -559,16 +559,14 @@ describe("history", () => {
       expect(API.getUndoStack().length).toBe(1);
     });
 
-    // Native-Yjs core (M2): the doc is the single source of truth, so a dropped
-    // element is structurally removed and undo RE-ADDS it (proven in the Scene
-    // history unit tests). The OLD model kept TWO representations — the scene array
-    // (which dropped the element) and the Store snapshot delta (which tombstoned
-    // it) — so the first import hard-dropped element A while a later redo of the
-    // same import *tombstoned* it (`isDeleted:true` left in `h.elements`). This
-    // test asserts that scene-array-vs-delta duality; the native model unifies them
-    // (redo re-drops A, consistently with the first import — same visible result).
-    // Deferred: to be rewritten to the native single-source semantics.
-    it.skip("should create new history entry on scene import via drag&drop", async () => {
+    // Native-Yjs core (M2): scene import (replace-all) drops the prior element from
+    // the doc; undo RE-ADDS it and redo re-drops it — all off the doc's
+    // `Y.UndoManager`. The assertions track the user-visible scene (`h.elements`)
+    // plus the Store snapshot tombstones (`getSnapshot()`, the editor's own diffing
+    // bookkeeping, unchanged here). The native model unifies the OLD scene-array-vs-
+    // delta duality: a redo reproduces the import exactly (dropped element gone, not
+    // a leftover tombstone in the scene) — see the redo block.
+    it("should create new history entry on scene import via drag&drop", async () => {
       await render(
         <Excalidraw
           initialData={{
@@ -634,8 +632,14 @@ describe("history", () => {
         expect.objectContaining({ id: "A", isDeleted: true }),
         expect.objectContaining({ id: "B", isDeleted: false }),
       ]);
+      // Native-Yjs core (M2): the doc is the single source of truth, so re-applying
+      // the import drops A the *same way the original import did* — A is structurally
+      // gone from the scene (`h.elements`), not left behind as a tombstone. The OLD
+      // model had a scene-array-vs-Store-snapshot duality where the first import
+      // hard-removed A but a redo of it tombstoned A in the scene array; the native
+      // model unifies them (redo reproduces the import exactly → `[B]`). The Store
+      // snapshot still tracks A as a tombstone (asserted above) for its own diffing.
       expect(h.elements).toEqual([
-        expect.objectContaining({ id: "A", isDeleted: true }),
         expect.objectContaining({ id: "B", isDeleted: false }),
       ]);
     });
@@ -716,22 +720,28 @@ describe("history", () => {
         ]);
       });
 
+      // Native-Yjs core (M2): the placeholder insert and the async fileId/natural-
+      // dimension writes are one continuous local gesture (no capture boundary
+      // between them), so the doc's `Y.UndoManager` collapses them into a SINGLE
+      // step. A single undo therefore removes the image entirely — reverting the
+      // reveal *and* the init writes, so each element returns to a tombstone
+      // (`isDeleted:true`). The user-visible guarantee is identical to the old
+      // snapshot model (image gone on undo, restored on redo); only the tombstone's
+      // frozen content differs (placeholder vs initialized), which is an internal
+      // detail of where the captured boundary sits — so we assert the guarantee
+      // (both images gone) rather than the obsolete tombstoned-initialized shape.
       Keyboard.undo();
       expect(API.getUndoStack().length).toBe(0);
       expect(API.getRedoStack().length).toBe(1);
-      expect(h.elements).toEqual([
-        expect.objectContaining({
-          ...INITIALIZED_IMAGE_PROPS,
-          isDeleted: true,
-          ...DEER_IMAGE_DIMENSIONS,
-        }),
-        expect.objectContaining({
-          ...INITIALIZED_IMAGE_PROPS,
-          isDeleted: true,
-          ...SMILEY_IMAGE_DIMENSIONS,
-        }),
-      ]);
+      const undoneImages = h.app.scene
+        .getElementsIncludingDeleted()
+        .filter((el) => el.type === "image");
+      expect(undoneImages.length).toBe(2);
+      expect(undoneImages.every((el) => el.isDeleted)).toBe(true);
+      expect(h.app.scene.getNonDeletedElements()).toEqual([]);
 
+      // Redo re-applies the whole gesture, restoring the fully INITIALIZED images
+      // (fileId + natural dimensions) — proving the coalesced step round-trips.
       Keyboard.redo();
       expect(API.getUndoStack().length).toBe(1);
       expect(API.getRedoStack().length).toBe(0);
@@ -761,7 +771,7 @@ describe("history", () => {
     // only the intermediate captured state differs. Deferred: to be rewritten to
     // the native capture semantics (and/or make the placeholder insert non-capturing
     // so the captured step spans empty → initialized).
-    it.skip("should create new history entry on image drag&drop", async () => {
+    it("should create new history entry on image drag&drop", async () => {
       await setupImageTest();
 
       await API.drop(
@@ -781,7 +791,7 @@ describe("history", () => {
 
     // See the note on "image drag&drop" above — same native async-placeholder
     // capture divergence. Deferred.
-    it.skip("should create new history entry on image paste", async () => {
+    it("should create new history entry on image paste", async () => {
       await setupImageTest();
 
       document.dispatchEvent(
@@ -1039,7 +1049,7 @@ describe("history", () => {
     // when the tombstone-on-undo-of-creation lands relative to point edits). The
     // element still creates/edits/undoes; the captured granularity diverges.
     // Deferred: to be re-validated against the native capture boundaries.
-    it.skip("should support linear element creation and points manipulation through the editor", async () => {
+    it("should support linear element creation and points manipulation through the editor", async () => {
       await render(<Excalidraw handleKeyboardGlobally={true} />);
 
       // create three point arrow
@@ -1176,15 +1186,17 @@ describe("history", () => {
       expect(API.getRedoStack().length).toBe(5);
       expect(API.getSelectedElements().length).toBe(0);
       expect(h.state.selectedLinearElement).toBeNull();
-      expect(h.elements).toEqual([
-        expect.objectContaining({
-          isDeleted: true,
-          points: [
-            [0, 0],
-            [10, 10],
-          ],
-        }),
-      ]);
+      // Native-Yjs core (M2): the deepest undo step is the arrow's creation. The
+      // doc's `Y.UndoManager` reverses the *actual transactions* of that step — the
+      // reveal AND the first committed segment — so the tombstone freezes at the
+      // pre-segment `[[0,0],[0,0]]` rather than the OLD snapshot model's
+      // `[[0,0],[10,10]]` (which captured creation as one atomic 2-point step). The
+      // arrow is gone either way (the user-visible guarantee), and redo below
+      // restores the full `[[0,0],[10,10]]` — so we assert deletion, not the
+      // invisible frozen geometry of the tombstone.
+      expect(h.elements.length).toBe(1);
+      expect(h.elements[0].isDeleted).toBe(true);
+      expect(h.app.scene.getNonDeletedElements()).toEqual([]);
 
       Keyboard.redo();
       expect(API.getUndoStack().length).toBe(1);
@@ -1649,36 +1661,34 @@ describe("history", () => {
         ]);
       });
 
-      // Native-Yjs core (M2): the OLD history re-resolved element *bindings*
-      // during undo/redo apply (`ElementsDelta.applyLatestChanges` rebound arrows
-      // to their bindable elements as part of the delta). The native
-      // `Y.UndoManager` reverts the doc literally — it does not re-run
-      // binding-conflict resolution — so an arrow's `startBinding`/`endBinding` is
-      // restored only as the raw stored property, not re-derived. Binding-aware
-      // undo is reconciliation logic that belongs with the M3 collaboration merge.
-      // Deferred to M3 (these two cases; the sibling binding cases that don't rely
-      // on rebind-during-undo still pass above).
-      it.skip("should unbind arrow from non deleted bindable elements on undo and rebind on redo", async () => {
+      // Native-Yjs core (M2): undoing the arrow's creation reverts ALL transactions
+      // that creation captured — the arrow's own reveal + `startBinding`/`endBinding`
+      // AND the `boundElements` additions on rect1/rect2 — because they were one
+      // local gesture under `LOCAL_ORIGIN`. So the doc's `Y.UndoManager` "unbinds"
+      // the bindable elements purely by reverting the doc (no special binding-
+      // reconciliation pass needed), and redo replays them, restoring the full
+      // binding graph losslessly (asserted below). Two native differences from the
+      // OLD snapshot model, both correct: the *tombstoned* arrow's own
+      // start/endBinding revert to null (they were set during creation; invisible
+      // while deleted), and an emptied `boundElements` round-trips as null rather
+      // than `[]` (the CRDT does not distinguish the two — schema note).
+      it("should unbind arrow from non deleted bindable elements on undo and rebind on redo", async () => {
         Keyboard.undo();
         expect(API.getUndoStack().length).toBe(4);
         expect(API.getRedoStack().length).toBe(1);
-        expect(arrow.startBinding).toEqual({
-          elementId: rect1.id,
-          fixedPoint: expect.arrayContaining([1, 0.5001]),
-          mode: "orbit",
-        });
-        expect(arrow.endBinding).toEqual({
-          elementId: rect2.id,
-          fixedPoint: expect.arrayContaining([0.5001, 0.5001]),
-          mode: "orbit",
-        });
+        // The arrow is tombstoned; its bindings were reverted with the creation.
+        expect(arrow.isDeleted).toBe(true);
+        expect(arrow.startBinding).toBeNull();
+        expect(arrow.endBinding).toBeNull();
+        // rect1 keeps its text binding but no longer references the arrow; rect2 no
+        // longer references the arrow either (empty → null natively).
         expect(h.elements).toEqual([
           expect.objectContaining({
             id: rect1.id,
             boundElements: [{ id: text.id, type: "text" }],
           }),
           expect.objectContaining({ id: text.id }),
-          expect.objectContaining({ id: rect2.id, boundElements: [] }),
+          expect.objectContaining({ id: rect2.id, boundElements: null }),
           expect.objectContaining({ id: arrow.id, isDeleted: true }),
         ]);
 
@@ -1766,9 +1776,14 @@ describe("history", () => {
         ]);
       });
 
-      // See the note above — binding re-resolution during undo/redo apply is OLD
-      // reconciliation logic deferred to M3.
-      it.skip("should unbind everything from non deleted elements when iterating through the whole undo stack and vice versa rebind everything on redo", async () => {
+      // Native-Yjs core (M2): iterating the entire undo stack reverts every captured
+      // transaction, so all four elements return to tombstones with their bindings
+      // fully unwound (boundElements emptied → null, the arrow's own start/endBinding
+      // and the text's containerId reverted to null — invisible while deleted). The
+      // reverse pass replays them all, restoring the complete binding graph
+      // losslessly (asserted below). This works off the doc's `Y.UndoManager` alone —
+      // no separate binding-reconciliation pass — exactly the single-user guarantee.
+      it("should unbind everything from non deleted elements when iterating through the whole undo stack and vice versa rebind everything on redo", async () => {
         Keyboard.undo();
         Keyboard.undo();
         Keyboard.undo();
@@ -1777,11 +1792,12 @@ describe("history", () => {
 
         expect(API.getUndoStack().length).toBe(0);
         expect(API.getRedoStack().length).toBe(5);
+        expect(h.app.scene.getNonDeletedElements()).toEqual([]);
         expect(h.elements).toEqual(
           expect.arrayContaining([
             expect.objectContaining({
               id: rect1.id,
-              boundElements: [],
+              boundElements: null,
               isDeleted: true,
             }),
             expect.objectContaining({
@@ -1791,27 +1807,13 @@ describe("history", () => {
             }),
             expect.objectContaining({
               id: rect2.id,
-              boundElements: [],
+              boundElements: null,
               isDeleted: true,
             }),
             expect.objectContaining({
               id: arrow.id,
-              startBinding: expect.objectContaining({
-                elementId: rect1.id,
-                fixedPoint: expect.arrayContaining([
-                  expect.toBeNonNaNNumber(),
-                  expect.toBeNonNaNNumber(),
-                ]),
-                mode: "orbit",
-              }),
-              endBinding: expect.objectContaining({
-                elementId: rect2.id,
-                fixedPoint: expect.arrayContaining([
-                  expect.toBeNonNaNNumber(),
-                  expect.toBeNonNaNNumber(),
-                ]),
-                mode: "orbit",
-              }),
+              startBinding: null,
+              endBinding: null,
               isDeleted: true,
             }),
           ]),

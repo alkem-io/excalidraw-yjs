@@ -1687,15 +1687,14 @@ describe("textWysiwyg", () => {
       });
     });
 
-    // Native-Yjs core (M2): "wrap text in a container" creates a container around
-    // an existing text element; the native Scene orders reads strictly by
-    // fractional index (the doc is the source of truth) whereas the pre-rewrite
-    // Scene preserved the caller's array order, so the container/bound-text appear
-    // at different array positions (this test asserts `h.elements[1]` is the
-    // container). Same fractional-index-ordering divergence documented on the
-    // duplicate "(out-of-order)" tests. The wrap still works; only positional
-    // ordering differs. Deferred.
-    it.skip("should wrap text in a container when wrap text in container triggered from context menu", async () => {
+    // Native-Yjs core (M2): "wrap text in a container" creates a new container
+    // around an existing text element and re-`index`es both so the container sorts
+    // before its bound text. The new container is a structural add whose Pass-1
+    // recompute used to clobber the text's reassigned index back to the stale value
+    // — leaving container and text with colliding indices (id-tie broke the wrong
+    // way, text before container). Fixed by the snapshot-based write in
+    // `Scene.replaceAllElements`; the container now correctly precedes its text.
+    it("should wrap text in a container when wrap text in container triggered from context menu", async () => {
       UI.clickTool("text");
       mouse.clickAt(20, 30);
       const editor = await getTextEditor();
