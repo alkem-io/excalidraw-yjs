@@ -213,7 +213,7 @@ describe("native-yjs Scene collaboration: two replicas converge on one doc", () 
     b.destroy();
   });
 
-  it("a concurrent remote DELETE while A holds a live reference is handled (no stale read)", () => {
+  it("a concurrent remote DELETE converges; a RE-READ reflects it (snapshots, not held refs)", () => {
     const a = new Scene();
     const b = new Scene();
     const seed = new InProcessLink(a, b);
@@ -223,9 +223,11 @@ describe("native-yjs Scene collaboration: two replicas converge on one doc", () 
 
     const link = new InProcessLink(a, b);
 
-    // A holds a LIVE reference to "a" (as the editor pervasively does).
-    const heldByA = a.getElement("a")! as Mutable<ExcalidrawElement>;
-    expect(heldByA.isDeleted).toBe(false);
+    // A reads "a" into a local variable. Under the fresh-snapshot contract this is
+    // an immutable SNAPSHOT of the current doc state, NOT a live view — exactly the
+    // anti-pattern the editor avoids (it re-reads the scene every turn).
+    const snapshotOfA = a.getElement("a")! as Mutable<ExcalidrawElement>;
+    expect(snapshotOfA.isDeleted).toBe(false);
 
     // B deletes "a" the Excalidraw way (isDeleted:true tombstone) — concurrently
     // A also touches a DIFFERENT property of the same element.
@@ -233,16 +235,23 @@ describe("native-yjs Scene collaboration: two replicas converge on one doc", () 
     a.mutateElement(a.getElement("a")!, { strokeColor: "#0f0" });
     link.flush();
 
-    // The held reference reflects the remote delete — NOT a stale `isDeleted:false`
-    // read. (The Scene reuses the per-id object and rewrote it from the merged doc.)
-    expect(heldByA.isDeleted).toBe(true);
+    // The previously-held snapshot did NOT silently change — it is a frozen view of
+    // the pre-delete doc state. Mutation/observation flows through the doc, so a
+    // held reference is stale by design (you must re-read).
+    expect(snapshotOfA.isDeleted).toBe(false);
+
+    // A RE-READ reflects the merged remote delete (no stale read on re-read)…
     expect(a.getElement("a")!.isDeleted).toBe(true);
+    // …a fresh object, not the stale snapshot (identity is not stable)…
+    expect(a.getElement("a")).not.toBe(snapshotOfA);
     // …and A's concurrent strokeColor edit survived on the tombstone (per-property).
     expect(a.getElement("a")!.strokeColor).toBe("#0f0");
     // "a" is hidden from the live view on both; "keep" remains.
     for (const s of [a, b]) {
       expect(s.getNonDeletedElements().map((e) => e.id)).toEqual(["keep"]);
     }
+    // Convergence is unaffected — a snapshot can't be stale on the doc, so collab
+    // is strictly more correct.
     expect(docContent(a)).toEqual(docContent(b));
     expect(sameStateVector(a, b)).toBe(true);
 

@@ -467,12 +467,15 @@ const rotateMultipleElements = (
         }
       }
 
-      const boundText = getBoundTextElement(element, elementsMap);
+      // fresh-snapshot: re-read post-mutation (element + updateBoundElements wrote
+      // to the doc, so the captured map is stale for the bound-text read)
+      const freshElementsMap = scene.getNonDeletedElementsMap();
+      const boundText = getBoundTextElement(element, freshElementsMap);
       if (boundText && !isArrowElement(element)) {
         const { x, y } = computeBoundTextPosition(
           element,
           boundText,
-          elementsMap,
+          freshElementsMap,
         );
 
         scene.mutateElement(boundText, {
@@ -904,24 +907,30 @@ export const resizeSingleElement = (
       }
     }
 
-    scene.mutateElement(latestElement, updates, {
+    // fresh-snapshot: re-read post-mutation
+    const nextLatestElement = scene.mutateElement(latestElement, updates, {
       informMutation: shouldInformMutation,
       isDragging: false,
     });
 
     if (boundTextElement && boundTextFont != null) {
-      scene.mutateElement(boundTextElement, {
+      // fresh-snapshot: re-read post-mutation (boundTextElement was captured
+      // before the container resize wrote to the doc)
+      const nextBoundTextElement =
+        scene.getElement<typeof boundTextElement>(boundTextElement.id) ??
+        boundTextElement;
+      scene.mutateElement(nextBoundTextElement, {
         fontSize: boundTextFont.fontSize,
       });
     }
     handleBindTextResize(
-      latestElement,
+      nextLatestElement,
       scene,
       handleDirection,
       shouldMaintainAspectRatio,
     );
 
-    updateBoundElements(latestElement, scene);
+    updateBoundElements(nextLatestElement, scene);
   }
 };
 
@@ -1466,32 +1475,38 @@ export const resizeMultipleElements = (
     } of elementsAndUpdates) {
       const { angle } = update;
 
-      scene.mutateElement(element, update);
+      // fresh-snapshot: re-read post-mutation
+      const nextElement = scene.mutateElement(element, update);
 
-      updateBoundElements(element, scene, {
+      updateBoundElements(nextElement, scene, {
         simultaneouslyUpdated: elementsToUpdate,
       });
 
-      if (isBindingElement(element)) {
-        if (element.startBinding) {
-          if (!resizedElementsMap.has(element.startBinding.elementId)) {
-            unbindBindingElement(element, "start", scene);
+      if (isBindingElement(nextElement)) {
+        if (nextElement.startBinding) {
+          if (!resizedElementsMap.has(nextElement.startBinding.elementId)) {
+            unbindBindingElement(nextElement, "start", scene);
           }
         }
-        if (element.endBinding) {
-          if (!resizedElementsMap.has(element.endBinding.elementId)) {
-            unbindBindingElement(element, "end", scene);
+        if (nextElement.endBinding) {
+          if (!resizedElementsMap.has(nextElement.endBinding.elementId)) {
+            unbindBindingElement(nextElement, "end", scene);
           }
         }
       }
 
-      const boundTextElement = getBoundTextElement(element, elementsMap);
+      // fresh-snapshot: re-read post-mutation (the captured map is stale after
+      // the element mutation + updateBoundElements wrote to the doc)
+      const boundTextElement = getBoundTextElement(
+        nextElement,
+        scene.getNonDeletedElementsMap(),
+      );
       if (boundTextElement && boundTextFontSize) {
         scene.mutateElement(boundTextElement, {
           fontSize: boundTextFontSize,
-          angle: isLinearElement(element) ? undefined : angle,
+          angle: isLinearElement(nextElement) ? undefined : angle,
         });
-        handleBindTextResize(element, scene, handleDirection, true);
+        handleBindTextResize(nextElement, scene, handleDirection, true);
       }
     }
 

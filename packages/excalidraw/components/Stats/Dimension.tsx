@@ -193,11 +193,14 @@ const handleDimensionChange: DragInputCallbackType<
         },
       );
 
-      // Handle frame membership update for resized frames
-      if (isFrameLikeElement(latestElement)) {
+      // Handle frame membership update for resized frames.
+      // fresh-snapshot: re-read post-mutation (resizeSingleElement wrote the
+      // frame's new geometry to the doc; the passed ref is stale scratch).
+      const latestFrame = scene.getElement(latestElement.id);
+      if (latestFrame && isFrameLikeElement(latestFrame)) {
         const nextElementsInFrame = getElementsInResizingFrame(
           scene.getElementsIncludingDeleted(),
-          latestElement,
+          latestFrame,
           originalAppState,
           scene.getNonDeletedElementsMap(),
         );
@@ -205,7 +208,7 @@ const handleDimensionChange: DragInputCallbackType<
         const updatedElements = replaceAllElementsInFrame(
           scene.getElementsIncludingDeleted(),
           nextElementsInFrame,
-          latestElement,
+          latestFrame,
         );
 
         scene.replaceAllElements(updatedElements);
@@ -261,11 +264,13 @@ const handleDimensionChange: DragInputCallbackType<
         },
       );
 
-      // Handle highlighting frame element candidates
-      if (isFrameLikeElement(latestElement)) {
+      // Handle highlighting frame element candidates.
+      // fresh-snapshot: re-read post-mutation (the passed ref is stale scratch).
+      const latestFrame = scene.getElement(latestElement.id);
+      if (latestFrame && isFrameLikeElement(latestFrame)) {
         const nextElementsInFrame = getElementsInResizingFrame(
           scene.getElementsIncludingDeleted(),
-          latestElement,
+          latestFrame,
           originalAppState,
           scene.getNonDeletedElementsMap(),
         );

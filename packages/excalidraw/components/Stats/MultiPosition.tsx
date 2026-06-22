@@ -79,7 +79,6 @@ const moveGroupTo = (
   scene: Scene,
   appState: AppState,
 ) => {
-  const elementsMap = scene.getNonDeletedElementsMap();
   const [x1, y1, ,] = getCommonBounds(originalElements);
   const offsetX = nextX - x1;
   const offsetY = nextY - y1;
@@ -87,7 +86,9 @@ const moveGroupTo = (
   for (let i = 0; i < originalElements.length; i++) {
     const origElement = originalElements[i];
 
-    const latestElement = elementsMap.get(origElement.id);
+    // fresh-snapshot: re-read post-mutation (prior iterations may have moved
+    // this element via frame/bound-text propagation)
+    const latestElement = scene.getNonDeletedElementsMap().get(origElement.id);
     if (!latestElement) {
       continue;
     }

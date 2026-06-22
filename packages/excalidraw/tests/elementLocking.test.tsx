@@ -101,7 +101,11 @@ describe("element locking", () => {
     mouse.moveTo(100, 100);
     mouse.upAt(100, 100);
     expect(lockedRectangle).toEqual(expect.objectContaining({ x: 0, y: 0 }));
-    expect(rectangle).toEqual(expect.objectContaining({ x: 50, y: 50 }));
+    // the drag mints a fresh element snapshot, so the captured `rectangle`
+    // reference is stale — read the moved element live from the scene by id.
+    expect(h.elements.find((e) => e.id === rectangle.id)).toEqual(
+      expect.objectContaining({ x: 50, y: 50 }),
+    );
     expect(API.getSelectedElements().length).toBe(1);
     expect(API.getSelectedElement().id).toBe(rectangle.id);
   });

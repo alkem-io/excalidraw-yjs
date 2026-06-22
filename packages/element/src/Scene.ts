@@ -52,7 +52,6 @@ import {
   elementToYMap,
   yMapToElement,
   writeChangedKeys,
-  deepEqual,
   type ElementRecord,
 } from "./yjs";
 
@@ -70,12 +69,13 @@ type SelectionHash = string & { __brand: "selectionHash" };
  * Native-Yjs core (M1): the `Y.Doc` is the element store, but it deliberately does
  * NOT persist `version`/`versionNonce`/`updated` (`RECONCILE_META_KEYS` in the
  * schema) — they are locally derived per replica (OPEN-3, echo-loop fix). The live
- * `Scene` still has to expose them on every derived element because the editor's
- * change-detection, history, and reconciliation read them. We therefore maintain
- * them in this side table, keyed by element id, and re-attach them on every
- * recompute. The write paths (`replaceAllElements`, `scene.mutateElement`) refresh
- * the entry from the (in-place mutated) element so the values match exactly what
- * the editor produced.
+ * `Scene` still has to expose them on every derived (freshly minted) snapshot
+ * because the editor's change-detection, history, and reconciliation read them. We
+ * therefore maintain them in this side table, keyed by element id, and re-attach
+ * them on every recompute. The write paths (`replaceAllElements`,
+ * `scene.mutateElement`) refresh the entry from the just-normalized scratch
+ * element / pre-write snapshot so the values match exactly what the editor
+ * produced.
  *
  * `symbols` carries forward own-`Symbol` properties that the schema cannot store
  * (the doc round-trip goes through `Object.keys`, which omits symbols and
@@ -224,6 +224,31 @@ export class Scene {
   // ---------------------------------------------------------------------------
   // native-Yjs core — the element store IS the doc
   // ---------------------------------------------------------------------------
+  //
+  // DERIVED ELEMENTS ARE FRESH, IMMUTABLE SNAPSHOTS (native-Yjs core, bridge
+  // elimination). The `Y.Doc` is the ONLY mutable state. `recomputeFromDoc` mints
+  // a BRAND-NEW object per id every pass — there is no stable-identity reuse, no
+  // per-id object cache; identity is deliberately NOT stable across recomputes.
+  // A derived element is a read-only view of one coherent committed doc state:
+  //
+  //  - To CHANGE an element you MUST funnel through `scene.mutateElement(idOrEl,
+  //    updates)` (or `replaceAllElements`), which writes to the doc inside
+  //    `doc.transact`; the observer then re-derives fresh snapshots. Mutating a
+  //    derived object in place is a no-op against the doc (nothing ever reads a
+  //    derived object back into `yElements`) — so such a mutation is silently
+  //    lost. Callers that need the post-mutation element must use the value
+  //    `scene.mutateElement` RETURNS (`el = scene.mutateElement(el, {...})`), or
+  //    re-read via `getElement(id)`; a reference held across a mutation is a stale
+  //    snapshot and does NOT reflect the change.
+  //  - A reference held across a REMOTE apply is likewise a stale snapshot — but
+  //    that is correct: the editor's synchronous handlers always re-read the scene
+  //    on the next turn, and a remote apply only runs *between* turns (JS is
+  //    single-threaded, the Scene has no `await`). A snapshot can never be torn
+  //    (each recompute reads one fully-merged, post-commit doc state) and can
+  //    never be *stale within a turn* — so collaboration gets strictly MORE
+  //    correct, not less, than the old reuse bridge (which mutated a shared object
+  //    in place and could in principle be observed mid-rewrite by an aliasing
+  //    holder). This is why the M3 convergence proof still holds.
 
   /**
    * The single source of truth for this scene's elements.
@@ -283,56 +308,6 @@ export class Scene {
    * restored element rather than treating the stale tombstone as still current.
    */
   private versionHighWater = 1;
-
-  /**
-   * Stable per-id derived element objects.
-   *
-   * The doc is the source of truth, but Excalidraw holds live element references
-   * pervasively (drag/resize state, React props, test fixtures) and mutates/reads
-   * them in place. To keep the editor working natively off the doc in M1 — rather
-   * than rewriting every one of those ~200 reference holders (staged for M2–M4) —
-   * the recompute REUSES the same object per id and updates its fields in place to
-   * match the doc, instead of minting a fresh object each time. So a held
-   * reference always reflects current doc state. This does not reintroduce an
-   * array-as-source: there is no `this.elements = next` of caller-supplied
-   * objects; every field of every derived object is (re)written *from* `yElements`
-   * on each change. A brand-new `Scene` built from doc bytes derives its own fresh
-   * objects, so the doc remains the portable, authoritative representation.
-   *
-   * CONCURRENCY CORRECTNESS (native-Yjs core, M3). M1 flagged this stable-identity
-   * reuse as a potential "cross-replica hazard for held references under
-   * concurrency": an object reused across recomputes *sounds* like it could be
-   * observed half-updated while a remote apply rewrites it. It cannot, for three
-   * combining reasons — which together make a held reference never torn, never
-   * stale across a remote (REMOTE_ORIGIN) apply:
-   *
-   *  1. **Full re-derivation per recompute.** {@link recomputeFromDoc} re-reads the
-   *     *entire* `yElements` map and rewrites every derived object from the doc on
-   *     every change (it takes no "changed ids" set — `changedElementIds` scopes
-   *     only the meta bump, never the read). So a derived object can only ever
-   *     reflect ONE coherent committed doc state, never an incremental mix of pre-
-   *     and post-apply values.
-   *  2. **Synchronous, post-commit observer.** Yjs integrates a remote update
-   *     inside a `doc.transact`; `observeDeep` fires from `cleanupTransactions`
-   *     *after* the merge is committed and the post-apply state is readable. So
-   *     when `recomputeFromDoc` runs, `yElements` already holds the fully-merged
-   *     state — the recompute lands on a single consistent snapshot.
-   *  3. **No async window in the Scene.** The whole apply→observe→recompute→
-   *     `reconcileDerived` chain is synchronous (the Scene has no `await`), and so
-   *     are the editor's drag/resize handlers (`mutateElement`). JS is
-   *     single-threaded, so a remote apply runs *between* synchronous editor turns,
-   *     never *inside* one — no editor turn holds a derived reference across a
-   *     suspension point while a remote apply mutates the same object underneath.
-   *
-   * The only residual: an element *structurally removed* by a remote apply is
-   * dropped from `derivedById`/`meta` and from `elements`/`elementsMap`; a
-   * reference a caller still holds becomes a detached orphan frozen at its last
-   * values (correct "this element no longer exists" semantics, identical to the
-   * pre-rewrite array-source behaviour). The editor's Store catches the removal by
-   * *absence*, not by a version bump, so the deletion is never lost.
-   */
-  private derivedById: Map<string, Mutable<OrderedExcalidrawElement>> =
-    new Map();
 
   /**
    * When set, `recomputeFromDoc` rebuilds the derived caches but does NOT fire
@@ -673,17 +648,18 @@ export class Scene {
     }
 
     // Snapshot every element's intended own-enumerable properties BEFORE any doc
-    // write. This is load-bearing: Pass 1 (the structural add of new ids) commits a
-    // transaction whose observer synchronously runs `recomputeFromDoc`, which
-    // reconciles the stable per-id derived objects *in place from the doc*. Many
-    // callers pass those very derived objects back in (e.g. the duplicate /
-    // wrap-in-container flows hand us `scene.getElementsIncludingDeleted()` with a
-    // re-`index`ed subset). So that intermediate recompute would overwrite a
-    // caller's freshly-assigned `index` (and any other not-yet-persisted field) back
-    // to the *stale* doc value — and Pass 2 would then see "record == doc" and skip
-    // the write, silently dropping the reorder. Writing Pass 2 from these immutable
-    // snapshots makes the persisted values independent of the live objects, so a
-    // reorder that coincides with an add (new clone + reordered originals) survives.
+    // write, and write Pass 2 from these snapshots rather than the live objects.
+    // Two reasons:
+    //  1. Pass 1 (the structural add of new ids) commits a transaction whose
+    //     observer synchronously runs `recomputeFromDoc`. Under the old reuse
+    //     bridge that recompute mutated the caller's derived objects in place,
+    //     which could clobber a freshly-assigned `index`. Fresh-snapshot derivation
+    //     no longer touches caller objects at all, so that clobber is gone — but
+    //     writing from an immutable pre-write snapshot keeps Pass 2 independent of
+    //     ANY aliasing the caller might have (e.g. a caller that mutates `ordered`
+    //     between passes), so a reorder coinciding with an add still survives.
+    //  2. The snapshot is also where the per-element values feeding `meta` come
+    //     from, so the metadata we record matches exactly what we persist.
     const snapshots = new Map<string, ElementRecord>();
     for (const element of ordered) {
       snapshots.set(element.id, { ...(element as unknown as ElementRecord) });
@@ -733,18 +709,17 @@ export class Scene {
     // by diffing the derived elements), write each element's real property values
     // (the "reveal" for new ids flips `isDeleted` to its actual value; for existing
     // ids this is the ordinary per-property diff), and refresh the local
-    // reconciliation metadata + stable derived object per id.
+    // reconciliation metadata per id. The doc is the only state written; the
+    // derived snapshots are minted fresh from it by the recompute that follows.
     this.doc.transact(() => {
       for (const id of removedIds) {
         this.yElements.delete(id);
         this.meta.delete(id);
-        this.derivedById.delete(id);
       }
       for (const element of ordered) {
-        // Write from the pre-write snapshot (not the live object): the Pass-1
-        // recompute may have reconciled `element` in place from the still-stale
-        // doc, so its `index`/props can no longer reflect the caller's intent. The
-        // snapshot does.
+        // Write from the pre-write snapshot, not the live object — see the
+        // snapshot rationale above (keeps the persisted values independent of any
+        // caller aliasing of `ordered`).
         const record = snapshots.get(element.id)!;
         const ymap = this.yElements.get(element.id);
         if (ymap) {
@@ -752,11 +727,11 @@ export class Scene {
         }
         // Capture the element's (locally maintained) reconciliation metadata +
         // any own-Symbol props (e.g. ORIG_ID) — not stored in the doc, but the
-        // derived element must expose them. Version/etc. come from the snapshot so
-        // a Pass-1 recompute that bumped the live object cannot make the meta
-        // disagree with what we just persisted. Own-Symbols are read from the live
-        // `element`: they are non-enumerable (ORIG_ID) so a spread snapshot omits
-        // them, and the recompute re-stamps them, so the live object is canonical.
+        // derived snapshot must expose them. Version/etc. come from the snapshot,
+        // so the meta matches exactly what we just persisted. Own-Symbols are read
+        // from the live `element`: they are non-enumerable (ORIG_ID) so a spread
+        // snapshot omits them, and the recompute re-stamps them onto the fresh
+        // snapshot, so the live object is the canonical carrier.
         this.meta.set(element.id, {
           version: record.version as number,
           versionNonce: record.versionNonce as number,
@@ -767,15 +742,6 @@ export class Scene {
         if ((record.version as number) > this.versionHighWater) {
           this.versionHighWater = record.version as number;
         }
-        // Adopt the caller-supplied object as this id's stable derived object, so
-        // a reference the caller still holds tracks the doc (the recompute that
-        // follows overwrites this object's fields *from* `yElements` — the doc
-        // stays the source of truth). Matches the pre-rewrite behaviour, where
-        // `replaceAllElements` kept the passed array's objects live.
-        this.derivedById.set(
-          element.id,
-          element as unknown as Mutable<OrderedExcalidrawElement>,
-        );
       }
     }, revealOrigin);
 
@@ -789,65 +755,16 @@ export class Scene {
   }
 
   /**
-   * Reconcile the stable per-id derived object with a freshly materialized
-   * `record` (doc state + metadata). Reuses the existing object's identity,
-   * overwriting changed enumerable keys and deleting keys the doc no longer has,
-   * then re-stamps own-`Symbol` props (e.g. ORIG_ID). For a new id, the `record`
-   * itself becomes the stable object. Returns the stable object.
+   * Stamp the carried own-`Symbol` props (e.g. ORIG_ID — a non-enumerable
+   * test-only marker the doc cannot store; see {@link ElementMeta}) onto a freshly
+   * materialized derived snapshot. No-op when there are none (the common case).
    */
-  private reconcileDerived(
-    id: string,
-    record: ElementRecord,
-    meta: ElementMeta,
-  ): OrderedExcalidrawElement {
-    const existing = this.derivedById.get(id);
-
-    const applySymbols = (obj: object) => {
-      if (meta.symbols) {
-        for (const [sym, desc] of meta.symbols) {
-          Object.defineProperty(obj, sym, desc);
-        }
-      }
-    };
-
-    if (!existing) {
-      applySymbols(record);
-      const fresh = record as unknown as Mutable<OrderedExcalidrawElement>;
-      this.derivedById.set(id, fresh);
-      return fresh;
-    }
-
-    const target = existing as unknown as ElementRecord;
-    // Remove keys the doc no longer has (excluding own symbols, handled below).
-    for (const key of Object.keys(target)) {
-      if (!Object.prototype.hasOwnProperty.call(record, key)) {
-        delete target[key];
+  private applySymbols(obj: object, meta: ElementMeta): void {
+    if (meta.symbols) {
+      for (const [sym, desc] of meta.symbols) {
+        Object.defineProperty(obj, sym, desc);
       }
     }
-    // Overwrite/insert the current keys — but only when the value actually
-    // changed, so an unchanged object/array sub-value keeps its existing
-    // reference (Excalidraw relies on sub-value identity stability, e.g. an
-    // image's `crop` object staying `===` across operations that don't touch it,
-    // and stable refs avoid spurious renderer cache invalidation).
-    for (const key of Object.keys(record)) {
-      const nextValue = record[key];
-      const prevValue = target[key];
-      if (prevValue === nextValue) {
-        continue;
-      }
-      if (
-        typeof nextValue === "object" &&
-        nextValue !== null &&
-        typeof prevValue === "object" &&
-        prevValue !== null &&
-        deepEqual(prevValue, nextValue)
-      ) {
-        continue; // value-equal object/array → keep the existing reference
-      }
-      target[key] = nextValue;
-    }
-    applySymbols(existing);
-    return existing as OrderedExcalidrawElement;
   }
 
   /**
@@ -883,13 +800,20 @@ export class Scene {
   /**
    * Recompute every derived cache from `yElements` and fire `triggerUpdate()`.
    *
-   * This is the single read-derivation point: each element's fields are
-   * (re)written from its `Y.Map` via `yMapToElement`, the locally-maintained
-   * reconciliation metadata is re-attached, the array is ordered by fractional
-   * `index`, and the frames/non-deleted views are rebuilt. Derived objects have
-   * stable identity per id (reused + updated in place — see {@link derivedById})
-   * so the editor's pervasive held references keep reflecting the doc; the doc
-   * remains the single source of truth (every field comes *from* `yElements`).
+   * This is the single read-derivation point. For each element it mints a
+   * **brand-new, immutable snapshot object** from its `Y.Map` via `yMapToElement`
+   * (the locally-maintained reconciliation metadata + own-Symbol props are
+   * re-attached), orders the array by fractional `index`, and rebuilds the
+   * frames/non-deleted views.
+   *
+   * Identity is deliberately NOT stable: a recompute does not reuse the previous
+   * pass's objects (there is no per-id object cache). A reference a caller held
+   * before this recompute keeps pointing at the OLD snapshot — it does not observe
+   * the new doc state. That is the fresh-snapshot contract: the doc is the only
+   * mutable state, derived elements are read-only views of one coherent committed
+   * doc state, and every mutation must funnel through `scene.mutateElement` /
+   * `replaceAllElements` (which write the doc, then this recompute mints the next
+   * snapshot). See the class header for why this is correct under collaboration.
    */
   private recomputeFromDoc() {
     const next: OrderedExcalidrawElement[] = [];
@@ -897,6 +821,8 @@ export class Scene {
 
     for (const [id, ymap] of this.yElements.entries()) {
       seen.add(id);
+      // Fresh object every pass — `yMapToElement` deep-clones JSON-leaf values, so
+      // the snapshot never aliases doc-internal data.
       const record = yMapToElement(ymap);
       record.id = id;
 
@@ -929,24 +855,17 @@ export class Scene {
         record.boundElements = [];
       }
 
-      // Reuse the stable per-id object (so held references stay valid), updating
-      // its fields in place to match the doc. New ids get a fresh object.
-      const target = this.reconcileDerived(id, record, meta);
-      next.push(target);
+      // Re-stamp any carried own-Symbol props (e.g. ORIG_ID) onto the fresh
+      // snapshot, then push it. No object reuse — identity is fresh per pass.
+      this.applySymbols(record, meta);
+      next.push(record as unknown as OrderedExcalidrawElement);
     }
 
-    // Drop metadata + stable objects for elements that no longer exist in the doc.
+    // Drop metadata for elements that no longer exist in the doc.
     if (this.meta.size > seen.size) {
       for (const id of [...this.meta.keys()]) {
         if (!seen.has(id)) {
           this.meta.delete(id);
-        }
-      }
-    }
-    if (this.derivedById.size > seen.size) {
-      for (const id of [...this.derivedById.keys()]) {
-        if (!seen.has(id)) {
-          this.derivedById.delete(id);
         }
       }
     }
@@ -1179,7 +1098,6 @@ export class Scene {
       new Map(),
     );
     this.meta.clear();
-    this.derivedById.clear();
     this.selectedElementsCache.selectedElementIds = null;
     this.selectedElementsCache.elements = null;
     this.selectedElementsCache.cache.clear();
@@ -1260,13 +1178,26 @@ export class Scene {
   // Mutate an element with passed updates and trigger the component to update. Make sure you
   // are calling it either from a React event handler or within unstable_batchedUpdates().
   //
-  // Native-Yjs core (M1): the normalization (elbow-arrow/points/size) and the
-  // skip-if-unchanged rules still run via the in-place `mutateElement` (which also
-  // bumps `version`/`versionNonce`/`updated` on the passed object — these are kept
-  // for the editor's reconciliation but NOT stored in the doc). The *changed*
-  // properties are then written to that element's per-property `Y.Map` inside a
-  // `doc.transact`, which makes the doc the source of truth. The element returned
-  // reflects the doc (the fresh doc-derived object when one exists).
+  // Native-Yjs core (write-to-doc → re-read). The `Y.Doc` is the only mutable
+  // state; derived elements are fresh immutable snapshots (no stable-identity
+  // reuse). This method is the WRITE path:
+  //
+  //  1. The passed `element` is used purely as a *scratch* object: the bare
+  //     `mutateElement` mutates it in place to run the normalization (elbow-arrow /
+  //     points / size) + skip-if-unchanged rules and bump
+  //     `version`/`versionNonce`/`updated` (kept for the editor's reconciliation,
+  //     NOT stored in the doc). It does NOT become scene state.
+  //  2. The *changed* properties are diffed into that id's per-property `Y.Map`
+  //     inside a `doc.transact` (the doc is the source of truth). `mutateElement`
+  //     can normalize beyond the literal `updates` (elbow arrows rewrite
+  //     points/x/y/width/…), so we diff the whole post-state element via
+  //     `writeChangedKeys`, not `updates`.
+  //  3. The observer re-derives a FRESH snapshot for the id, which this method
+  //     RETURNS. The passed object is no longer the scene's element — a caller that
+  //     needs the post-mutation element MUST use the returned value
+  //     (`el = scene.mutateElement(el, {...})`) or re-read `getElement(id)`. A
+  //     reference held across this call is a stale snapshot and will not reflect
+  //     the change; mutating a derived element in place never reaches the doc.
   mutateElement<TElement extends Mutable<ExcalidrawElement>>(
     element: TElement,
     updates: ElementUpdate<TElement>,
@@ -1302,14 +1233,10 @@ export class Scene {
     const changed = prevVersion !== nextVersion;
 
     if (inScene && changed) {
-      // Persist the per-property delta to the doc. `mutateElement` may normalize
-      // beyond the literal `updates` (elbow arrows rewrite points/x/y/width/…),
-      // so we diff the whole post-state element against the doc's current map via
-      // `writeChangedKeys` (which writes only the keys that actually differ),
-      // rather than trusting `updates`.
-      //
       // `informMutation: false` ⇒ write the change but don't notify the component
       // (mid-drag), so we suppress the `triggerUpdate()` the observer would fire.
+      // The observer still runs and re-derives the snapshot, so the returned
+      // element reflects the doc even mid-drag.
       const prevSuppress = this.suppressTrigger;
       this.suppressTrigger = prevSuppress || !options.informMutation;
       try {
@@ -1329,6 +1256,9 @@ export class Scene {
           if (ymap) {
             writeChangedKeys(ymap, element as unknown as ElementRecord);
           }
+          // Refresh the locally-maintained reconciliation metadata + own-Symbol
+          // props from the just-normalized scratch object (the doc does not store
+          // them); the recompute re-attaches them to the fresh snapshot.
           this.meta.set(element.id, {
             version: element.version,
             versionNonce: element.versionNonce,
@@ -1341,24 +1271,24 @@ export class Scene {
           if (element.version > this.versionHighWater) {
             this.versionHighWater = element.version;
           }
-          // Adopt the just-mutated object as this id's stable derived object, so
-          // the caller's reference stays the live one and tracks future recomputes
-          // (its fields are overwritten *from* the doc by the recompute — the doc
-          // stays the source of truth).
-          this.derivedById.set(
-            element.id,
-            element as unknown as Mutable<OrderedExcalidrawElement>,
-          );
         }, writeOrigin);
       } finally {
         this.suppressTrigger = prevSuppress;
       }
 
-      // `element` was adopted as this id's stable derived object and the recompute
-      // (re)wrote its fields from the doc, so it now reflects the doc — return it.
-      return element;
+      // The observer minted a fresh snapshot for this id from the merged doc;
+      // return THAT, not the scratch object. Fall back to the scratch object only
+      // in the (theoretical) event the id is somehow absent post-write.
+      return (
+        (this.elementsMap.get(element.id) as TElement | undefined) ?? element
+      );
     }
 
-    return element;
+    // No-op (or out-of-scene) mutation: nothing was written, so no fresh snapshot
+    // was minted. Return the scene's current snapshot for an in-scene id (strictly
+    // fresher than a possibly-stale passed reference); otherwise the passed object.
+    return (
+      (this.elementsMap.get(element.id) as TElement | undefined) ?? element
+    );
   }
 }

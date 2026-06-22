@@ -46,13 +46,19 @@ const handleDegreeChange: DragInputCallbackType<AngleProps["property"]> = ({
 
     if (nextValue !== undefined) {
       const nextAngle = degreesToRadians(nextValue as Degrees);
-      scene.mutateElement(latestElement, {
+      const mutated = scene.mutateElement(latestElement, {
         angle: nextAngle,
       });
-      updateBindings(latestElement, scene, app.state);
+      updateBindings(mutated, scene, app.state);
 
-      const boundTextElement = getBoundTextElement(latestElement, elementsMap);
-      if (boundTextElement && !isArrowElement(latestElement)) {
+      // Derived elements are fresh snapshots: re-read the bound text from the
+      // post-mutation scene (the stale pre-mutation map would hand back a stale
+      // snapshot, and writing it back could clobber `updateBindings`' edits).
+      const boundTextElement = getBoundTextElement(
+        mutated,
+        scene.getNonDeletedElementsMap(),
+      );
+      if (boundTextElement && !isArrowElement(mutated)) {
         scene.mutateElement(boundTextElement, { angle: nextAngle });
       }
 
@@ -72,13 +78,16 @@ const handleDegreeChange: DragInputCallbackType<AngleProps["property"]> = ({
 
     const nextAngle = degreesToRadians(nextAngleInDegrees as Degrees);
 
-    scene.mutateElement(latestElement, {
+    const mutated = scene.mutateElement(latestElement, {
       angle: nextAngle,
     });
-    updateBindings(latestElement, scene, app.state);
+    updateBindings(mutated, scene, app.state);
 
-    const boundTextElement = getBoundTextElement(latestElement, elementsMap);
-    if (boundTextElement && !isArrowElement(latestElement)) {
+    const boundTextElement = getBoundTextElement(
+      mutated,
+      scene.getNonDeletedElementsMap(),
+    );
+    if (boundTextElement && !isArrowElement(mutated)) {
       scene.mutateElement(boundTextElement, { angle: nextAngle });
     }
   }
