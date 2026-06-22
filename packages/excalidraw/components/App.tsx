@@ -854,7 +854,11 @@ class App extends React.Component<AppProps, AppState> {
     this.visibleElements = [];
 
     this.store = new Store(this);
-    this.history = new History(this.store);
+    // Element history lives on the doc's `Y.UndoManager` (`scene.undoManager`).
+    // Pass a live scene accessor rather than a captured reference: the editor may
+    // swap the `Scene` (e.g. on reset), and `History` must always resolve the
+    // current one.
+    this.history = new History(this.store, () => this.scene);
 
     this.excalidrawContainerValue = {
       container: this.excalidrawContainerRef.current,
@@ -862,7 +866,6 @@ class App extends React.Component<AppProps, AppState> {
     };
 
     this.fonts = new Fonts(this.scene);
-    this.history = new History(this.store);
 
     this.actionManager.registerAll(actions);
     this.actionManager.registerAction(createUndoAction(this.history));
@@ -2803,7 +2806,14 @@ class App extends React.Component<AppProps, AppState> {
 
     let editingTextElement: AppState["editingTextElement"] | null = null;
     if (actionResult.elements) {
-      this.scene.replaceAllElements(actionResult.elements);
+      // Native element history (M2): a `CaptureUpdateAction.NEVER` update must
+      // never become an undo step — drive the Scene write under the non-tracked
+      // origin so the doc updates but the UndoManager does not capture it (scene
+      // load, programmatic non-capturing updates, and the re-application of an
+      // undo/redo all funnel through here with NEVER).
+      this.scene.replaceAllElements(actionResult.elements, {
+        recordHistory: actionResult.captureUpdate !== CaptureUpdateAction.NEVER,
+      });
       didUpdate = true;
     }
 
@@ -2906,7 +2916,8 @@ class App extends React.Component<AppProps, AppState> {
    */
   private resetScene = withBatchedUpdates(
     (opts?: { resetLoadingState: boolean }) => {
-      this.scene.replaceAllElements([]);
+      // Not an undoable edit — history is cleared right after (resetHistory()).
+      this.scene.replaceAllElements([], { recordHistory: false });
       this.setState((state) => ({
         ...getDefaultAppState(),
         isLoading: opts?.resetLoadingState ? false : state.isLoading,
@@ -4632,7 +4643,14 @@ class App extends React.Component<AppProps, AppState> {
       }
 
       if (elements) {
-        this.scene.replaceAllElements(elements);
+        // Native element history (M2): only let the UndoManager capture this
+        // write when the caller did not request `CaptureUpdateAction.NEVER`
+        // (scene init / load / remote updates pass NEVER and must not be
+        // undoable). `EVENTUALLY` (the default) stays tracked — it coalesces
+        // into the next durable step, as before.
+        this.scene.replaceAllElements(elements, {
+          recordHistory: captureUpdate !== CaptureUpdateAction.NEVER,
+        });
       }
 
       if (collaborators) {

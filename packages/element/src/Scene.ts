@@ -46,6 +46,8 @@ import type {
 import {
   ELEMENTS,
   LOCAL_ORIGIN,
+  STRUCTURAL_ORIGIN,
+  EPHEMERAL_ORIGIN,
   elementToYMap,
   yMapToElement,
   writeChangedKeys,
@@ -126,6 +128,37 @@ const captureOwnSymbols = (
     }
   }
   return out;
+};
+
+/**
+ * Derive the set of element ids touched by an `observeDeep` event batch on
+ * `yElements`. Each event's `path` is the route from the observed root to the
+ * mutated type: `path.length === 0` is a top-level add/remove (ids = the event's
+ * keys); `path[0]` (a string) is the element id for a per-element / nested
+ * (`boundElements`) change. Returns `"full"` if any event can't be resolved to a
+ * concrete id — the caller then conservatively treats *all* known ids as
+ * changed. (Same derivation as the M1 `yjs-binding` apply path.)
+ */
+const changedElementIds = (
+  events: readonly Y.YEvent<Y.AbstractType<unknown>>[],
+): Set<string> | "full" => {
+  const ids = new Set<string>();
+  for (const event of events) {
+    const path = event.path;
+    if (path.length === 0) {
+      for (const key of event.keys.keys()) {
+        ids.add(key);
+      }
+      continue;
+    }
+    const head = path[0];
+    if (typeof head === "string") {
+      ids.add(head);
+    } else {
+      return "full";
+    }
+  }
+  return ids;
 };
 
 const getNonDeletedElements = <T extends ExcalidrawElement>(
@@ -209,9 +242,46 @@ export class Scene {
 
   public readonly yElements: Y.Map<Y.Map<unknown>>;
 
+  /**
+   * Native element history (native-Yjs core, M2).
+   *
+   * `Y.UndoManager` over `yElements`, **scoped to `LOCAL_ORIGIN`** via
+   * `trackedOrigins`, so it captures only this replica's own edits and an
+   * `undo()`/`redo()` reverts ONLY local doc mutations — never a remote /
+   * system-origin transaction (the origin-scope M3 collaboration relies on). It
+   * replaces the snapshot-based element history: the doc is the single source of
+   * truth for element history too, so undo/redo is a real inverse doc mutation
+   * that flows back through `observeDeep` → {@link recomputeFromDoc} → the editor
+   * re-renders.
+   *
+   * `captureTimeout` is set astronomically high and merge boundaries are defined
+   * **purely** by explicit {@link stopElementCapture} calls (driven by the
+   * editor's durable-commit cadence), NOT by wall-clock time — so however slowly
+   * a user drags, the whole gesture collapses to a single undo step (Excalidraw's
+   * coalescing UX), deterministically and independent of timing.
+   *
+   * The doc deliberately does not store `version`/`versionNonce`/`updated`
+   * (`RECONCILE_META_KEYS`), so the UndoManager never touches them; the recompute
+   * re-derives them, approaching each undo/redo as a fresh local edit — matching
+   * the old history's "new version on undo" semantics.
+   */
+  public readonly undoManager: Y.UndoManager;
+
   /** Carries `version`/`versionNonce`/`updated` forward across recomputes (these
    * are intentionally NOT stored in the doc — see {@link ElementMeta}). */
   private meta: Map<string, ElementMeta> = new Map();
+
+  /**
+   * Monotonically-increasing high-water mark of every `version` this Scene has
+   * assigned. When an element REAPPEARS after having been structurally removed —
+   * e.g. undo re-adds an element a destructive replace dropped, so its `meta` was
+   * gone — recompute must seed it with a version strictly greater than the one the
+   * editor's Store last saw for that id (the Store synthesized an `isDeleted:true`
+   * delta at its old version when it was dropped). Seeding from this counter
+   * guarantees the Store's `version`-based change-detection re-picks-up the
+   * restored element rather than treating the stale tombstone as still current.
+   */
+  private versionHighWater = 1;
 
   /**
    * Stable per-id derived element objects.
@@ -326,11 +396,50 @@ export class Scene {
     this.doc = options?.doc ?? new Y.Doc();
     this.yElements = this.doc.getMap<Y.Map<unknown>>(ELEMENTS);
 
+    // Native element history (M2): track only LOCAL_ORIGIN, so undo/redo revert
+    // exclusively this replica's edits — a remote / system-origin transaction is
+    // never captured nor reverted (the origin-scope M3 collaboration depends on).
+    // Boundaries between undo steps are set explicitly via `stopElementCapture`
+    // (see field doc), so `captureTimeout` is effectively disabled by being huge.
+    this.undoManager = new Y.UndoManager(this.yElements, {
+      trackedOrigins: new Set([LOCAL_ORIGIN]),
+      captureTimeout: Number.MAX_SAFE_INTEGER,
+    });
+
     // Recompute the derived caches whenever the doc's elements change — our own
     // writes (LOCAL_ORIGIN) and, in later milestones, remote applies both flow
     // through here, so reads are always a faithful view of the doc.
-    const observer = () => {
+    //
+    // A transaction whose origin is NOT `LOCAL_ORIGIN` mutated the doc *without*
+    // going through `mutateElement` / `replaceAllElements` — i.e. an undo/redo
+    // (origin = the UndoManager) or, in M3, a remote apply. Those paths therefore
+    // did NOT refresh the local reconciliation `meta` (`version`/`versionNonce`/
+    // `updated`, which the doc deliberately does not store). We bump the meta for
+    // every element the transaction touched so the derived element looks like a
+    // fresh change to the editor's downstream change-detection (Store snapshot
+    // diffing keys off `version`, renderer cache) — matching the old history's
+    // "undo produces a new version" contract. The initial doc adoption (no
+    // transaction) is excluded.
+    const observer = (
+      events: Y.YEvent<Y.AbstractType<unknown>>[],
+      transaction: Y.Transaction,
+    ) => {
       this.observerFired = true;
+      // Local origins (our own write paths) maintain `meta` themselves; only a
+      // non-local transaction — an undo/redo (origin = the UndoManager) or, in
+      // M3, a remote apply — needs the meta version bumped so the change is seen
+      // downstream. The Scene's other local origins are excluded:
+      //  - STRUCTURAL_ORIGIN: born-revealed add / prune; meta is (re)written by
+      //    the paired reveal pass.
+      //  - EPHEMERAL_ORIGIN: a local non-undoable write (scene load, etc.) whose
+      //    meta the write path sets directly.
+      if (
+        transaction.origin !== LOCAL_ORIGIN &&
+        transaction.origin !== STRUCTURAL_ORIGIN &&
+        transaction.origin !== EPHEMERAL_ORIGIN
+      ) {
+        this.bumpMetaVersionsFor(changedElementIds(events));
+      }
       this.recomputeFromDoc();
     };
     this.yElements.observeDeep(observer);
@@ -438,26 +547,63 @@ export class Scene {
   }
 
   /**
-   * Bulk-replace the scene's elements by diffing `nextElements` into `yElements`
-   * inside a single `doc.transact`. There is no `this.elements = …` source
-   * assignment any more — the doc is the source, and the derived caches are
-   * rebuilt by the `observeDeep` handler the transaction triggers.
+   * Structurally materialize a *new* element entry into `yElements` as a
+   * **tombstone** (`isDeleted: true`) under `STRUCTURAL_ORIGIN`, so the
+   * `Y.UndoManager` does NOT track the structural add (it would otherwise reverse
+   * undo-of-create into a hard removal, losing the entry + tombstone). The real
+   * `isDeleted` value is then applied by the subsequent `LOCAL_ORIGIN` "reveal"
+   * pass — making creation undoable as an `isDeleted` toggle, not a structural
+   * add/remove (Excalidraw's model). See {@link STRUCTURAL_ORIGIN}.
+   *
+   * MUST be called inside a `STRUCTURAL_ORIGIN` transaction.
+   */
+  private materializeNewEntry(record: ElementRecord): Y.Map<unknown> {
+    const ymap = elementToYMap(record);
+    // Born as a tombstone regardless of the element's real `isDeleted`; the
+    // reveal pass flips it to the actual value under LOCAL_ORIGIN.
+    ymap.set("isDeleted", true);
+    this.yElements.set(record.id as string, ymap);
+    return ymap;
+  }
+
+  /**
+   * Bulk-replace the scene's elements by diffing `nextElements` into `yElements`.
+   * There is no `this.elements = …` source assignment any more — the doc is the
+   * source, and the derived caches are rebuilt by the `observeDeep` handler the
+   * transactions trigger.
    *
    * Per element:
-   * - **new** → a fresh per-property `Y.Map` (`elementToYMap`).
-   * - **existing** → only the changed properties are written (`writeChangedKeys`),
-   *   so a concurrent edit to a different property of the same element survives.
-   * - **removed** (present in the doc, absent from `nextElements`) → the element
-   *   entry is deleted from `yElements`. (Excalidraw's own "delete" is a
-   *   `isDeleted: true` tombstone that arrives as an *update*, not a removal; a
-   *   true removal here means the element is no longer part of the scene at all.)
+   * - **new** → "born-revealed": a fresh per-property `Y.Map` is structurally
+   *   added as an `isDeleted: true` tombstone under `STRUCTURAL_ORIGIN`
+   *   (untracked by history), then the `LOCAL_ORIGIN` pass writes its real
+   *   properties — including flipping `isDeleted` to its actual value — so undo
+   *   of the creation returns it to a tombstone rather than hard-removing it.
+   * - **existing** → only the changed properties are written (`writeChangedKeys`)
+   *   under `LOCAL_ORIGIN`, so a concurrent edit to a different property of the
+   *   same element survives, and the change is an undoable history step.
+   * - **removed** (present in the doc, absent from `nextElements`) → the entry is
+   *   structurally deleted under `STRUCTURAL_ORIGIN` (untracked). This path is
+   *   only used by non-undoable flows (reconciliation, save-time pruning of
+   *   tombstones) — Excalidraw's user-facing "delete" is an `isDeleted: true`
+   *   *update*, which travels through the existing-element branch above. Keeping
+   *   it untracked means it never desynchronizes the element history.
    */
   replaceAllElements(
     nextElements: ElementsMapOrArray,
     options?: {
       skipValidation?: true;
+      /**
+       * Whether this replace is an undoable local edit (default `true`). Pass
+       * `false` for `CaptureUpdateAction.NEVER` writes — scene load/init,
+       * non-capturing programmatic updates, undo/redo re-application, remote
+       * applies — so the change lands in the doc but produces NO undo step. See
+       * {@link EPHEMERAL_ORIGIN}.
+       */
+      recordHistory?: boolean;
     },
   ) {
+    const revealOrigin =
+      options?.recordHistory === false ? EPHEMERAL_ORIGIN : LOCAL_ORIGIN;
     // we do trust the insertion order on the map, though maybe we shouldn't and should prefer order defined by fractional indices
     const _nextElements = toArray(nextElements);
 
@@ -477,16 +623,76 @@ export class Scene {
       nextIds.add(element.id);
     }
 
+    // Which ids are brand-new (need the structural tombstone add) vs already in
+    // the doc (plain update). Resolved before any write so the two passes agree.
+    const newIds = new Set<string>();
+    for (const element of ordered) {
+      if (!this.yElements.has(element.id)) {
+        newIds.add(element.id);
+      }
+    }
+    const removedIds: string[] = [];
+    for (const id of this.yElements.keys()) {
+      if (!nextIds.has(id)) {
+        removedIds.push(id);
+      }
+    }
+
     this.observerFired = false;
+
+    // Pass 1 (STRUCTURAL_ORIGIN, untracked by history): born-as-tombstone adds for
+    // NEW ids only. Skipped when there are no new ids (the common edit case), so a
+    // pure update is a single tracked transaction.
+    //
+    // Why only adds here, not removals: an element dropped from `nextElements` is
+    // *structurally removed* in the tracked reveal pass below, so undo can RE-ADD
+    // it (restore). New-element adds, by contrast, must be untracked here so that
+    // undo-of-create reverses only the tracked "reveal" (→ tombstone) rather than
+    // hard-removing the entry — see {@link STRUCTURAL_ORIGIN}.
+    //
+    // Its `triggerUpdate()` is suppressed: this pass produces an intermediate
+    // state (new elements still tombstoned, pre-reveal), and a single
+    // `replaceAllElements` must fire exactly one update — the reveal pass below
+    // fires it once the elements hold their real values.
+    if (newIds.size) {
+      const prevSuppress = this.suppressTrigger;
+      this.suppressTrigger = true;
+      try {
+        this.doc.transact(() => {
+          for (const element of ordered) {
+            if (newIds.has(element.id)) {
+              this.materializeNewEntry(element as unknown as ElementRecord);
+            }
+          }
+        }, STRUCTURAL_ORIGIN);
+      } finally {
+        this.suppressTrigger = prevSuppress;
+      }
+    }
+
+    // Reset so `observerFired` reflects ONLY whether the (trigger-firing) reveal
+    // pass below changed the doc.
+    this.observerFired = false;
+
+    // Pass 2 (reveal/update, tracked unless recordHistory:false): structurally
+    // remove dropped ids (so the doc — and thus `getElementsIncludingDeleted()` —
+    // matches the passed set exactly, as the pre-rewrite scene array did; a
+    // recording removal is captured so undo RE-ADDS the entry, and the editor's
+    // Store still synthesizes an `isDeleted:true` delta for reconciliation/history
+    // by diffing the derived elements), write each element's real property values
+    // (the "reveal" for new ids flips `isDeleted` to its actual value; for existing
+    // ids this is the ordinary per-property diff), and refresh the local
+    // reconciliation metadata + stable derived object per id.
     this.doc.transact(() => {
-      // upserts
+      for (const id of removedIds) {
+        this.yElements.delete(id);
+        this.meta.delete(id);
+        this.derivedById.delete(id);
+      }
       for (const element of ordered) {
         const record = element as unknown as ElementRecord;
-        let ymap = this.yElements.get(element.id);
-        if (!ymap) {
-          ymap = elementToYMap(record);
-          this.yElements.set(element.id, ymap);
-        } else {
+        const ymap = this.yElements.get(element.id);
+        if (ymap) {
           writeChangedKeys(ymap, record);
         }
         // Capture the element's (locally maintained) reconciliation metadata +
@@ -499,6 +705,9 @@ export class Scene {
           symbols: captureOwnSymbols(element),
           boundElementsEmpty: isEmptyBoundElements(record),
         });
+        if (element.version > this.versionHighWater) {
+          this.versionHighWater = element.version;
+        }
         // Adopt the caller-supplied object as this id's stable derived object, so
         // a reference the caller still holds tracks the doc (the recompute that
         // follows overwrites this object's fields *from* `yElements` — the doc
@@ -509,18 +718,9 @@ export class Scene {
           element as unknown as Mutable<OrderedExcalidrawElement>,
         );
       }
+    }, revealOrigin);
 
-      // removals: ids in the doc but not in the next set
-      for (const id of [...this.yElements.keys()]) {
-        if (!nextIds.has(id)) {
-          this.yElements.delete(id);
-          this.meta.delete(id);
-          this.derivedById.delete(id);
-        }
-      }
-    }, LOCAL_ORIGIN);
-
-    // Yjs fires the observer (→ recompute → triggerUpdate) iff the transaction
+    // Yjs fires the observer (→ recompute → triggerUpdate) iff a transaction
     // changed the doc. For a true no-op (e.g. re-asserting identical elements) it
     // does not, so recompute once here to keep the derived caches coherent and to
     // preserve the historical side effect of always firing on replaceAllElements.
@@ -592,6 +792,36 @@ export class Scene {
   }
 
   /**
+   * Bump the local reconciliation `meta` (`version`/`versionNonce`/`updated`) for
+   * every element id changed by a non-local (undo/redo, or M3 remote) doc
+   * transaction, so the next `recomputeFromDoc` re-derives the element with a
+   * strictly-greater `version` — making the editor's change-detection treat it as
+   * a fresh change (the old history bumped `version` on undo for the same reason).
+   *
+   * `"full"` (an unresolvable event path) bumps every currently-known id, erring
+   * toward over-notifying rather than dropping a change.
+   */
+  private bumpMetaVersionsFor(changed: Set<string> | "full") {
+    const ids =
+      changed === "full" ? new Set<string>(this.meta.keys()) : changed;
+    for (const id of ids) {
+      const meta = this.meta.get(id);
+      if (meta) {
+        meta.version = meta.version + 1;
+        if (meta.version > this.versionHighWater) {
+          this.versionHighWater = meta.version;
+        }
+        meta.versionNonce = randomInteger();
+        meta.updated = getUpdatedTimestamp();
+      }
+      // No local meta yet (e.g. an element re-created by redo, or a brand-new
+      // remote element): `recomputeFromDoc` seeds fresh meta for it from the
+      // version high-water mark, which is already a "new" version — nothing to
+      // bump here.
+    }
+  }
+
+  /**
    * Recompute every derived cache from `yElements` and fire `triggerUpdate()`.
    *
    * This is the single read-derivation point: each element's fields are
@@ -614,12 +844,16 @@ export class Scene {
       // Re-attach the per-peer reconciliation metadata the doc does not store.
       let meta = this.meta.get(id);
       if (!meta) {
-        // An element present in the doc with no local metadata — e.g. a doc
-        // decoded from `applyUpdateV2` on a fresh Scene. Seed deterministic
-        // initial metadata (the editor only needs these to be present + to
-        // change on edit; cross-replica they are re-derived, per OPEN-3).
+        // An element present in the doc with no local metadata — either a doc
+        // decoded from `applyUpdateV2` on a fresh Scene, or an element that
+        // REAPPEARED after a structural removal (e.g. undo re-adding a dropped
+        // element). Seed its version from the monotonic high-water mark so a
+        // reappearance always out-versions whatever the editor's Store last saw
+        // for this id (see {@link versionHighWater}); the values only need to be
+        // present + to advance on change (cross-replica they are re-derived,
+        // OPEN-3).
         meta = {
-          version: 1,
+          version: ++this.versionHighWater,
           versionNonce: randomInteger(),
           updated: getUpdatedTimestamp(),
         };
@@ -710,8 +944,75 @@ export class Scene {
     };
   }
 
+  // ---------------------------------------------------------------------------
+  // native element history (native-Yjs core, M2) — thin pass-throughs over the
+  // doc's `Y.UndoManager`. The excalidraw-layer `History` facade pairs these with
+  // its appState-undo side stack and exposes the editor-facing API.
+  // ---------------------------------------------------------------------------
+
+  /** Whether an element-undo step is available on the doc's UndoManager. */
+  canUndoElements(): boolean {
+    return this.undoManager.canUndo();
+  }
+
+  /** Whether an element-redo step is available on the doc's UndoManager. */
+  canRedoElements(): boolean {
+    return this.undoManager.canRedo();
+  }
+
+  /**
+   * Revert the most recent local element undo step on the doc.
+   *
+   * `undoManager.undo()` applies the inverse mutation to `yElements` in a
+   * transaction whose origin is the UndoManager itself (NOT `LOCAL_ORIGIN`), so
+   * it is not re-captured as a new step; the `observeDeep` handler fires and
+   * `recomputeFromDoc` refreshes the derived reads + the React render. Returns
+   * `true` iff a step was actually applied.
+   */
+  undoElements(): boolean {
+    return this.undoManager.undo() !== null;
+  }
+
+  /** Re-apply the most recently undone local element step on the doc. */
+  redoElements(): boolean {
+    return this.undoManager.redo() !== null;
+  }
+
+  /**
+   * Seal the current undo step. The next captured local edit starts a fresh
+   * `StackItem` instead of merging into the current one — this is how discrete
+   * user actions become discrete undo steps while rapid edits within one action
+   * still coalesce. Called by the editor at each durable-commit boundary.
+   */
+  stopElementCapture(): void {
+    this.undoManager.stopCapturing();
+  }
+
+  /** Clear both element undo + redo stacks (e.g. on scene reset / load). */
+  clearElementHistory(): void {
+    this.undoManager.clear();
+  }
+
+  /**
+   * Subscribe to element undo/redo stack changes (item added / popped /
+   * cleared). Used by the `History` facade to re-emit the editor's
+   * "history changed" event so the toolbar undo/redo buttons enable/disable.
+   * Returns an unsubscribe function.
+   */
+  onElementHistoryChange(cb: () => void): () => void {
+    this.undoManager.on("stack-item-added", cb);
+    this.undoManager.on("stack-item-popped", cb);
+    this.undoManager.on("stack-cleared", cb);
+    return () => {
+      this.undoManager.off("stack-item-added", cb);
+      this.undoManager.off("stack-item-popped", cb);
+      this.undoManager.off("stack-cleared", cb);
+    };
+  }
+
   destroy() {
     this.detachObserver();
+    this.undoManager.destroy();
     this.doc.destroy();
 
     this.elements = [];
@@ -819,11 +1120,19 @@ export class Scene {
       isDragging: boolean;
       isBindingEnabled?: boolean;
       isMidpointSnappingEnabled?: boolean;
+      /**
+       * Whether this mutation is an undoable local edit (default `true`). Pass
+       * `false` for `CaptureUpdateAction.NEVER` mutations so the doc changes but
+       * no undo step is produced. See {@link EPHEMERAL_ORIGIN}.
+       */
+      recordHistory?: boolean;
     } = {
       informMutation: true,
       isDragging: false,
     },
   ): TElement {
+    const writeOrigin =
+      options.recordHistory === false ? EPHEMERAL_ORIGIN : LOCAL_ORIGIN;
     const elementsMap = this.getNonDeletedElementsMap();
 
     const { version: prevVersion } = element;
@@ -849,12 +1158,20 @@ export class Scene {
       const prevSuppress = this.suppressTrigger;
       this.suppressTrigger = prevSuppress || !options.informMutation;
       try {
+        // Born-revealed: if this element is not yet in the doc, structurally add
+        // it as a tombstone under STRUCTURAL_ORIGIN (untracked by history) first,
+        // so the LOCAL_ORIGIN write below is a history-tracked reveal/update
+        // rather than a structural add (which undo would hard-remove). Mirrors
+        // `replaceAllElements`. (Normally `mutateElement` targets an existing
+        // element; this is the rare create-via-mutate path.)
+        if (!this.yElements.has(element.id)) {
+          this.doc.transact(() => {
+            this.materializeNewEntry(element as unknown as ElementRecord);
+          }, STRUCTURAL_ORIGIN);
+        }
         this.doc.transact(() => {
-          let ymap = this.yElements.get(element.id);
-          if (!ymap) {
-            ymap = elementToYMap(element as unknown as ElementRecord);
-            this.yElements.set(element.id, ymap);
-          } else {
+          const ymap = this.yElements.get(element.id);
+          if (ymap) {
             writeChangedKeys(ymap, element as unknown as ElementRecord);
           }
           this.meta.set(element.id, {
@@ -866,6 +1183,9 @@ export class Scene {
               element as unknown as ElementRecord,
             ),
           });
+          if (element.version > this.versionHighWater) {
+            this.versionHighWater = element.version;
+          }
           // Adopt the just-mutated object as this id's stable derived object, so
           // the caller's reference stays the live one and tracks future recomputes
           // (its fields are overwritten *from* the doc by the recompute — the doc
@@ -874,7 +1194,7 @@ export class Scene {
             element.id,
             element as unknown as Mutable<OrderedExcalidrawElement>,
           );
-        }, LOCAL_ORIGIN);
+        }, writeOrigin);
       } finally {
         this.suppressTrigger = prevSuppress;
       }

@@ -132,14 +132,21 @@ describe("native-yjs Scene: the element store IS the doc", () => {
     scene.destroy();
   });
 
-  it("removing an element from the next set deletes its entry from yElements", () => {
+  it("dropping an element from a replace structurally removes its entry from the doc", () => {
+    // Native-Yjs core (M2): an element dropped from `nextElements` is structurally
+    // removed, so the doc — and thus `getElementsIncludingDeleted()` — matches the
+    // passed set exactly (as the pre-rewrite scene array did). The editor's Store
+    // still synthesizes an `isDeleted:true` delta for reconciliation/history by
+    // diffing the derived elements; and a recording removal is captured so undo
+    // RE-ADDS it (covered in the history test). Hard removal is the same whether or
+    // not recording — only the undoability (origin) differs.
     const scene = new Scene([rect("a"), rect("b"), rect("c")]);
     expect([...scene.yElements.keys()].sort()).toEqual(["a", "b", "c"]);
 
     const keep = scene
       .getElementsIncludingDeleted()
       .filter((e) => e.id !== "b");
-    scene.replaceAllElements(keep);
+    scene.replaceAllElements(keep); // recordHistory defaults to true
 
     expect([...scene.yElements.keys()].sort()).toEqual(["a", "c"]);
     expect(scene.getElement("b")).toBeNull();
@@ -148,7 +155,15 @@ describe("native-yjs Scene: the element store IS the doc", () => {
       "c",
     ]);
 
+    // same structural removal in the non-recording (load/prune) case
+    const scene2 = new Scene([rect("a"), rect("b")]);
+    scene2.replaceAllElements([scene2.getElement("a")!], {
+      recordHistory: false,
+    });
+    expect([...scene2.yElements.keys()]).toEqual(["a"]);
+
     scene.destroy();
+    scene2.destroy();
   });
 
   it("isDeleted tombstone survives as an UPDATE (the entry stays in the doc)", () => {
