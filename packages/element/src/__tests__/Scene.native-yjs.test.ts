@@ -108,9 +108,10 @@ describe("native-yjs Scene: the element store IS the doc", () => {
     const scene = new Scene([rect("a"), rect("b")]);
 
     const a = scene.getElement("a")!;
-    // Capture the version as a number BEFORE mutating (scene.mutateElement also
-    // mutates the passed object in place as an M1 compatibility bridge, so reading
-    // `a.version` after the call would already show the bumped value).
+    // Capture the version BEFORE mutating: `scene.mutateElement` uses the passed
+    // object as a scratch for normalization and mutates it in place (bumping
+    // version), so reading `a.version` after the call would already show the bumped
+    // value. Use the RETURNED (fresh doc-derived) element for post-state reads.
     const versionBefore = a.version;
     const returned = scene.mutateElement(a, { x: 42, y: 7 });
 
@@ -346,5 +347,141 @@ describe("native-yjs Scene: the element store IS the doc", () => {
 
     off();
     scene.destroy();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Fresh-snapshot semantics (native-Yjs core, stable-identity bridge eliminated)
+  //
+  // Derived elements are FRESH, IMMUTABLE SNAPSHOTS minted per recompute — there is
+  // no per-id object reuse, identity is NOT stable across recomputes, and the
+  // `Y.Doc` is the only mutable state. These tests pin that contract: a held
+  // reference is a stale snapshot after a mutation (you must re-read / use the
+  // return value), and mutating a derived object in place never reaches the doc.
+  // ---------------------------------------------------------------------------
+  describe("fresh-snapshot semantics: the doc is the only mutable state", () => {
+    it("a reference held across an UNRELATED mutation does NOT reflect later doc state (it's a snapshot — re-read)", () => {
+      // The defining case the bridge elimination changes: hold a reference to "a",
+      // then change the doc via an UNRELATED write (mutating "b"). The held "a"
+      // snapshot is frozen — it does not track the doc — and after the recompute a
+      // re-read of "a" returns a DIFFERENT, fresh object. Under the old reuse bridge
+      // the held "a" would have been the same reused object the recompute rewrote.
+      const scene = new Scene([rect("a", { x: 1 }), rect("b", { x: 0 })]);
+
+      const heldA = scene.getElement("a")!;
+      expect(heldA.x).toBe(1);
+
+      // Unrelated write → full re-derivation (recompute re-reads the whole map).
+      scene.mutateElement(scene.getElement("b")!, { x: 7 });
+
+      // The held "a" reference is now stale: it is NOT the scene's current "a"
+      // object (identity is not stable across recomputes).
+      expect(scene.getElement("a")).not.toBe(heldA);
+      // "a" is unchanged in the doc, and a re-read reflects the doc — you must
+      // re-read rather than trust the stashed reference.
+      expect(scene.getElement("a")!.x).toBe(1);
+      expect(scene.yElements.get("a")!.get("x")).toBe(1);
+
+      scene.destroy();
+    });
+
+    it("scene.mutateElement returns the FRESH doc-derived snapshot (el = scene.mutateElement(el, {...}))", () => {
+      const scene = new Scene([rect("a", { x: 0 })]);
+
+      const before = scene.getElement("a")!;
+      const returned = scene.mutateElement(before, { x: 42 });
+
+      // The return value is the post-mutation element straight from the doc — a
+      // fresh object, NOT the same instance the scene held before.
+      expect(returned).not.toBe(before);
+      expect(returned).toBe(scene.getElement("a")); // it IS the new scene element
+      expect(returned.x).toBe(42);
+      expect(scene.yElements.get("a")!.get("x")).toBe(42);
+
+      scene.destroy();
+    });
+
+    it("mutating a derived element IN PLACE does NOT reach the doc (mutations MUST go through scene.mutateElement)", () => {
+      const scene = new Scene([
+        rect("a", { x: 0, strokeColor: "#000" }),
+        rect("b"),
+      ]);
+
+      const derived = scene.getElement("a")! as Mutable<ExcalidrawElement>;
+
+      // Illegally mutate the snapshot in place (the pattern the elimination forbids).
+      // Nothing reads a derived object back into `yElements`, so this write is lost.
+      derived.x = 999;
+      (derived as { strokeColor: string }).strokeColor = "#fff";
+
+      // The doc is untouched — the in-place write went nowhere.
+      expect(scene.yElements.get("a")!.get("x")).toBe(0);
+      expect(scene.yElements.get("a")!.get("strokeColor")).toBe("#000");
+
+      // Force a recompute via an UNRELATED doc write (mutating "b", NOT feeding the
+      // polluted "a" object back into any write path). The recompute re-reads "a"
+      // straight from the doc, so the rogue in-place mutation is overwritten —
+      // proving the doc, not the held object, is authoritative.
+      scene.mutateElement(scene.getElement("b")!, { x: 5 });
+
+      const reread = scene.getElement("a")!;
+      expect(reread.x).toBe(0); // doc value, NOT the rogue 999
+      expect(reread.strokeColor).toBe("#000"); // doc value, NOT "#fff"
+      // …and it is a fresh object, not the polluted one.
+      expect(reread).not.toBe(derived);
+
+      scene.destroy();
+    });
+
+    it("recomputeFromDoc mints fresh objects — derived identity is NOT stable across recomputes", () => {
+      const scene = new Scene([rect("a", { x: 0 }), rect("b", { x: 0 })]);
+
+      const a1 = scene.getElement("a");
+      const b1 = scene.getElement("b");
+
+      // Any doc write triggers a full re-derivation. Mutate "a"…
+      scene.mutateElement(scene.getElement("a")!, { x: 1 });
+
+      const a2 = scene.getElement("a");
+      const b2 = scene.getElement("b");
+
+      // The mutated element is a fresh object (expected)…
+      expect(a2).not.toBe(a1);
+      // …AND the UNTOUCHED element is ALSO a fresh object: the recompute re-reads
+      // the entire map and mints every object anew — no stable-identity reuse, even
+      // for elements the write did not change. This is the bridge elimination.
+      expect(b2).not.toBe(b1);
+      // Content is still correct on both.
+      expect(a2!.x).toBe(1);
+      expect(b2!.x).toBe(0);
+
+      scene.destroy();
+    });
+
+    it("a snapshot read before a remote-style doc apply stays frozen; a re-read reflects the apply", () => {
+      // The single-user shape of the M3 'no stale read on re-read' guarantee: a
+      // non-LOCAL doc transaction (simulating a remote apply) re-derives fresh
+      // snapshots; a reference held BEFORE it is a frozen pre-apply view.
+      const scene = new Scene([rect("a", { x: 0 })]);
+
+      const snapshot = scene.getElement("a")!;
+      expect(snapshot.x).toBe(0);
+
+      // Apply a change under a non-local origin (the M3 remote-apply shape).
+      scene.doc.transact(
+        () => {
+          scene.yElements.get("a")!.set("x", 500);
+        },
+        { name: "remote" },
+      );
+
+      // Held snapshot is frozen at the pre-apply value…
+      expect(snapshot.x).toBe(0);
+      // …a re-read reflects the applied change, as a fresh object.
+      const fresh = scene.getElement("a")!;
+      expect(fresh.x).toBe(500);
+      expect(fresh).not.toBe(snapshot);
+
+      scene.destroy();
+    });
   });
 });

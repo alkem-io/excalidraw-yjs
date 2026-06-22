@@ -194,12 +194,23 @@ export const actionFinalize = register<FormData>({
 
     let element: NonDeleted<ExcalidrawElement> | null = null;
     if (appState.multiElement) {
-      element = appState.multiElement;
+      // Fresh-snapshot (native-Yjs core): `appState.multiElement` is a held
+      // reference that no longer tracks the doc after the editor appended points
+      // with `informMutation:false`. Re-read the live element so the finalize
+      // logic (point trim, `isInvisiblySmallElement`) sees the committed points —
+      // a stale snapshot would look degenerate and wrongly tombstone the element.
+      element =
+        (scene.getElement(
+          appState.multiElement.id,
+        ) as typeof appState.multiElement) ?? appState.multiElement;
     } else if (
       appState.newElement?.type === "freedraw" ||
       isBindingElement(appState.newElement)
     ) {
-      element = appState.newElement;
+      element =
+        (scene.getElement(
+          appState.newElement.id,
+        ) as typeof appState.newElement) ?? appState.newElement;
     } else if (Object.keys(appState.selectedElementIds).length === 1) {
       const candidate = elementsMap.get(
         Object.keys(appState.selectedElementIds)[0],

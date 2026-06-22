@@ -52,14 +52,18 @@ const testInputProperty = (
   expect(input).toBeDefined();
   expect(input.value).toBe(initialValue.toString());
   UI.updateInput(input, String(nextValue));
+  // Derived elements are fresh immutable snapshots (native-Yjs core): the change
+  // landed in the doc, but the `element` reference passed in is the pre-mutation
+  // snapshot. Re-read the live element by id from the scene before asserting.
+  const latest = h.elements.find((el) => el.id === element.id) ?? element;
   if (property === "angle") {
-    expect(element[property]).toBe(
+    expect(latest[property]).toBe(
       degreesToRadians(Number(nextValue) as Degrees),
     );
-  } else if (property === "fontSize" && isTextElement(element)) {
-    expect(element[property]).toBe(Number(nextValue));
+  } else if (property === "fontSize" && isTextElement(latest)) {
+    expect(latest[property]).toBe(Number(nextValue));
   } else if (property !== "fontSize") {
-    expect(element[property]).toBe(Number(nextValue));
+    expect(latest[property]).toBe(Number(nextValue));
   }
 };
 
@@ -233,11 +237,12 @@ describe("stats for a generic element", () => {
     expect(h.elements.length).toBe(1);
     expect(rectangle.id).toBe(rectangleId);
     expect(input.value).toBe("123.12");
-    expect(rectangle.width).toBe(123.12);
+    // Derived elements are fresh immutable snapshots: re-read live by id.
+    expect(h.elements.find((el) => el.id === rectangleId)!.width).toBe(123.12);
 
     UI.updateInput(input, "88.98766");
     expect(input.value).toBe("88.99");
-    expect(rectangle.width).toBe(88.99);
+    expect(h.elements.find((el) => el.id === rectangleId)!.width).toBe(88.99);
   });
 
   it("should update input x and y when angle is changed", () => {
@@ -375,7 +380,11 @@ describe("stats for a non-generic element", () => {
     expect(input).toBeDefined();
     expect(input.value).toBe(text.fontSize.toString());
     UI.updateInput(input, "36");
-    expect(text.fontSize).toBe(36);
+    // Derived elements are fresh immutable snapshots: re-read live by id
+    // after each mutating input change before asserting.
+    const liveText = () =>
+      h.elements.find((el) => el.id === text.id) as ExcalidrawTextElement;
+    expect(liveText().fontSize).toBe(36);
 
     // can change width or height
     const width = UI.queryStatsProperty("W")?.querySelector(
@@ -387,18 +396,18 @@ describe("stats for a non-generic element", () => {
     ) as HTMLInputElement;
     expect(height).toBeDefined();
 
-    const textHeightBeforeWrapping = text.height;
-    const textBeforeWrapping = text.text;
+    const textHeightBeforeWrapping = liveText().height;
+    const textBeforeWrapping = liveText().text;
     const originalTextBeforeWrapping = textBeforeWrapping;
     UI.updateInput(width, "30");
-    expect(text.height).toBeGreaterThan(textHeightBeforeWrapping);
-    expect(text.text).not.toBe(textBeforeWrapping);
-    expect(text.originalText).toBe(originalTextBeforeWrapping);
+    expect(liveText().height).toBeGreaterThan(textHeightBeforeWrapping);
+    expect(liveText().text).not.toBe(textBeforeWrapping);
+    expect(liveText().originalText).toBe(originalTextBeforeWrapping);
 
     // min font size is 4
     UI.updateInput(input, "0");
-    expect(text.fontSize).not.toBe(0);
-    expect(text.fontSize).toBe(4);
+    expect(liveText().fontSize).not.toBe(0);
+    expect(liveText().fontSize).toBe(4);
   });
 
   it("frame element", () => {
@@ -440,15 +449,17 @@ describe("stats for a non-generic element", () => {
     elementStats = stats?.querySelector("#elementStats");
     expect(elementStats).toBeDefined();
     const widthToHeight = image.width / image.height;
+    // Derived elements are fresh immutable snapshots: re-read live by id.
+    const liveImage = () => h.elements.find((el) => el.id === image.id)!;
 
     // when width or height is changed, the aspect ratio is preserved
     testInputProperty(image, "width", "W", image.width, 400);
-    expect(image.width).toBe(400);
-    expect(image.width / image.height).toBe(widthToHeight);
+    expect(liveImage().width).toBe(400);
+    expect(liveImage().width / liveImage().height).toBe(widthToHeight);
 
-    testInputProperty(image, "height", "H", image.height, 80);
-    expect(image.height).toBe(80);
-    expect(image.width / image.height).toBe(widthToHeight);
+    testInputProperty(image, "height", "H", liveImage().height, 80);
+    expect(liveImage().height).toBe(80);
+    expect(liveImage().width / liveImage().height).toBe(widthToHeight);
   });
 
   it("should display fontSize for bound text", () => {
@@ -477,7 +488,11 @@ describe("stats for a non-generic element", () => {
 
     UI.updateInput(fontSize, "40");
 
-    expect(text.fontSize).toBe(40);
+    // Derived elements are fresh immutable snapshots: re-read live by id.
+    expect(
+      (h.elements.find((el) => el.id === text.id) as ExcalidrawTextElement)
+        .fontSize,
+    ).toBe(40);
   });
 });
 
@@ -615,18 +630,23 @@ describe("stats for multiple elements", () => {
     ) as HTMLInputElement;
     expect(fontSize).toBeDefined();
 
+    // Derived elements are fresh immutable snapshots: re-read live by id
+    // after each mutating input change before asserting.
+    const live = (el: { id: string } | undefined) =>
+      el ? h.elements.find((e) => e.id === el.id) : undefined;
+
     UI.updateInput(width, "200");
 
-    expect(rectangle?.width).toBe(200);
-    expect(frame.width).toBe(200);
-    expect(text?.width).toBe(200);
+    expect(live(rectangle)?.width).toBe(200);
+    expect(live(frame)?.width).toBe(200);
+    expect(live(text)?.width).toBe(200);
 
     UI.updateInput(angle, "40");
 
     const angleInRadian = degreesToRadians(40 as Degrees);
-    expect(rectangle?.angle).toBeCloseTo(angleInRadian, 4);
-    expect(text?.angle).toBeCloseTo(angleInRadian, 4);
-    expect(frame.angle).toBe(0);
+    expect(live(rectangle)?.angle).toBeCloseTo(angleInRadian, 4);
+    expect(live(text)?.angle).toBeCloseTo(angleInRadian, 4);
+    expect(live(frame)?.angle).toBe(0);
   });
 
   it("should treat groups as single units", () => {
@@ -650,8 +670,15 @@ describe("stats for multiple elements", () => {
 
     createAndSelectGroup();
 
-    const elementsInGroup = h.elements.filter((el) => isInGroup(el));
-    let [x1, y1, x2, y2] = getCommonBounds(elementsInGroup);
+    // Derived elements are fresh immutable snapshots: capture the group's ids
+    // once and re-derive the live members from the scene before each bounds
+    // computation that follows a mutating input change.
+    const groupIds = new Set(
+      h.elements.filter((el) => isInGroup(el)).map((el) => el.id),
+    );
+    const elementsInGroup = () =>
+      h.elements.filter((el) => groupIds.has(el.id));
+    let [x1, y1, x2, y2] = getCommonBounds(elementsInGroup());
 
     elementStats = stats?.querySelector("#elementStats");
 
@@ -695,20 +722,20 @@ describe("stats for multiple elements", () => {
 
     UI.updateInput(width, "400");
 
-    [x1, y1, x2, y2] = getCommonBounds(elementsInGroup);
+    [x1, y1, x2, y2] = getCommonBounds(elementsInGroup());
     let newGroupWidth = x2 - x1;
 
     expect(newGroupWidth).toBeCloseTo(400, 4);
 
     UI.updateInput(width, "300");
 
-    [x1, y1, x2, y2] = getCommonBounds(elementsInGroup);
+    [x1, y1, x2, y2] = getCommonBounds(elementsInGroup());
     newGroupWidth = x2 - x1;
     expect(newGroupWidth).toBeCloseTo(300, 4);
 
     UI.updateInput(height, "500");
 
-    [x1, y1, x2, y2] = getCommonBounds(elementsInGroup);
+    [x1, y1, x2, y2] = getCommonBounds(elementsInGroup());
     const newGroupHeight = y2 - y1;
     expect(newGroupHeight).toBeCloseTo(500, 4);
   });

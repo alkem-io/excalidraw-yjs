@@ -293,7 +293,10 @@ describe("elbow arrow ui", () => {
     ) as HTMLInputElement;
     UI.updateInput(inputAngle, String("40"));
 
-    expect(arrow.points.map((point) => point.map(Math.round))).toEqual([
+    const liveArrow = h.elements.find(
+      (e) => e.id === arrow.id,
+    )! as ExcalidrawArrowElement;
+    expect(liveArrow.points.map((point) => point.map(Math.round))).toEqual([
       [0, 0],
       [36, 0],
       [36, 90],

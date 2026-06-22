@@ -83,25 +83,29 @@ const resizeElementInGroup = (
   originalElementsMap: ElementsMap,
   scene: Scene,
 ) => {
-  const elementsMap = scene.getNonDeletedElementsMap();
   const updates = getResizedUpdates(anchorX, anchorY, scale, origElement);
 
-  scene.mutateElement(latestElement, updates);
+  // fresh-snapshot: re-read post-mutation
+  const nextLatestElement = scene.mutateElement(latestElement, updates);
 
+  // Intentionally reads the ORIGINAL element/map (pre-drag) to scale fontSize.
   const boundTextElement = getBoundTextElement(
     origElement,
     originalElementsMap,
   );
   if (boundTextElement) {
     const newFontSize = boundTextElement.fontSize * scale;
-    updateBoundElements(latestElement, scene);
-    const latestBoundTextElement = elementsMap.get(boundTextElement.id);
+    updateBoundElements(nextLatestElement, scene);
+    // fresh-snapshot: re-read post-mutation
+    const latestBoundTextElement = scene
+      .getNonDeletedElementsMap()
+      .get(boundTextElement.id);
     if (latestBoundTextElement && isTextElement(latestBoundTextElement)) {
       scene.mutateElement(latestBoundTextElement, {
         fontSize: newFontSize,
       });
       handleBindTextResize(
-        latestElement,
+        nextLatestElement,
         scene,
         property === "width" ? "e" : "s",
         true,
@@ -248,11 +252,14 @@ const handleDimensionChange: DragInputCallbackType<
             },
           );
 
-          // Handle frame membership update for resized frames
-          if (isFrameLikeElement(latestElement)) {
+          // Handle frame membership update for resized frames.
+          // fresh-snapshot: re-read post-mutation (resizeSingleElement wrote the
+          // frame's new geometry to the doc; the passed ref is stale scratch).
+          const latestFrame = scene.getElement(latestElement.id);
+          if (latestFrame && isFrameLikeElement(latestFrame)) {
             const nextElementsInFrame = getElementsInResizingFrame(
               scene.getElementsIncludingDeleted(),
-              latestElement,
+              latestFrame,
               originalAppState,
               scene.getNonDeletedElementsMap(),
             );
@@ -260,7 +267,7 @@ const handleDimensionChange: DragInputCallbackType<
             const updatedElements = replaceAllElementsInFrame(
               scene.getElementsIncludingDeleted(),
               nextElementsInFrame,
-              latestElement,
+              latestFrame,
             );
 
             scene.replaceAllElements(updatedElements);
@@ -370,11 +377,13 @@ const handleDimensionChange: DragInputCallbackType<
           },
         );
 
-        // Handle highlighting frame element candidates
-        if (isFrameLikeElement(latestElement)) {
+        // Handle highlighting frame element candidates.
+        // fresh-snapshot: re-read post-mutation (the passed ref is stale scratch).
+        const latestFrame = scene.getElement(latestElement.id);
+        if (latestFrame && isFrameLikeElement(latestFrame)) {
           const nextElementsInFrame = getElementsInResizingFrame(
             scene.getElementsIncludingDeleted(),
-            latestElement,
+            latestFrame,
             originalAppState,
             scene.getNonDeletedElementsMap(),
           );

@@ -1617,6 +1617,16 @@ describe("history", () => {
           captureUpdate: CaptureUpdateAction.IMMEDIATELY,
         });
 
+        // The Scene mints derived elements as fresh immutable snapshots on every
+        // recompute, so the raw `rect1`/`text`/`rect2`/`arrow` captured above are
+        // STALE after any mutation/undo/redo. Re-read the LIVE element by its
+        // stable id for every post-mutation assertion. (id is stable across
+        // re-derivation; the captured reference is not.)
+        const liveRect1 = () => h.elements.find((e) => e.id === rect1.id)!;
+        const liveRect2 = () => h.elements.find((e) => e.id === rect2.id)!;
+        const liveText = () =>
+          h.elements.find((e) => e.id === text.id)! as ExcalidrawTextElement;
+
         // bind text1 to rect1
         mouse.select([rect1, text]);
         fireEvent.contextMenu(GlobalTestState.interactiveCanvas);
@@ -1628,8 +1638,8 @@ describe("history", () => {
         );
 
         expect(API.getUndoStack().length).toBe(4);
-        expect(text.containerId).toBe(rect1.id);
-        expect(rect1.boundElements).toStrictEqual([
+        expect(liveText().containerId).toBe(rect1.id);
+        expect(liveRect1().boundElements).toStrictEqual([
           { id: text.id, type: "text" },
         ]);
 
@@ -1640,23 +1650,25 @@ describe("history", () => {
         mouse.up(47, 0);
 
         arrow = h.elements[3] as ExcalidrawLinearElement;
+        const liveArrow = () =>
+          h.elements.find((e) => e.id === arrow.id) as ExcalidrawLinearElement;
 
         expect(API.getUndoStack().length).toBe(5);
-        expect(arrow.startBinding).toEqual({
+        expect(liveArrow().startBinding).toEqual({
           elementId: rect1.id,
           fixedPoint: expect.arrayContaining([1, 0.5001]),
           mode: "orbit",
         });
-        expect(arrow.endBinding).toEqual({
+        expect(liveArrow().endBinding).toEqual({
           elementId: rect2.id,
           fixedPoint: expect.arrayContaining([0.5001, 0.5001]),
           mode: "orbit",
         });
-        expect(rect1.boundElements).toStrictEqual([
+        expect(liveRect1().boundElements).toStrictEqual([
           { id: text.id, type: "text" },
           { id: arrow.id, type: "arrow" },
         ]);
-        expect(rect2.boundElements).toStrictEqual([
+        expect(liveRect2().boundElements).toStrictEqual([
           { id: arrow.id, type: "arrow" },
         ]);
       });
@@ -1673,13 +1685,18 @@ describe("history", () => {
       // while deleted), and an emptied `boundElements` round-trips as null rather
       // than `[]` (the CRDT does not distinguish the two — schema note).
       it("should unbind arrow from non deleted bindable elements on undo and rebind on redo", async () => {
+        // `arrow` captured in beforeEach is stale after undo/redo (Scene re-derives
+        // fresh snapshots); re-read the live element by its stable id.
+        const liveArrow = () =>
+          h.elements.find((e) => e.id === arrow.id) as ExcalidrawLinearElement;
+
         Keyboard.undo();
         expect(API.getUndoStack().length).toBe(4);
         expect(API.getRedoStack().length).toBe(1);
         // The arrow is tombstoned; its bindings were reverted with the creation.
-        expect(arrow.isDeleted).toBe(true);
-        expect(arrow.startBinding).toBeNull();
-        expect(arrow.endBinding).toBeNull();
+        expect(liveArrow().isDeleted).toBe(true);
+        expect(liveArrow().startBinding).toBeNull();
+        expect(liveArrow().endBinding).toBeNull();
         // rect1 keeps its text binding but no longer references the arrow; rect2 no
         // longer references the arrow either (empty → null natively).
         expect(h.elements).toEqual([
@@ -1695,12 +1712,12 @@ describe("history", () => {
         Keyboard.redo();
         expect(API.getUndoStack().length).toBe(5);
         expect(API.getRedoStack().length).toBe(0);
-        expect(arrow.startBinding).toEqual({
+        expect(liveArrow().startBinding).toEqual({
           elementId: rect1.id,
           fixedPoint: expect.arrayContaining([1, 0.5001]),
           mode: "orbit",
         });
-        expect(arrow.endBinding).toEqual({
+        expect(liveArrow().endBinding).toEqual({
           elementId: rect2.id,
           fixedPoint: expect.arrayContaining([0.5001, 0.5001]),
           mode: "orbit",
@@ -1723,15 +1740,20 @@ describe("history", () => {
       });
 
       it("should unbind arrow from non deleted bindable elements on deletion and rebind on undo", async () => {
+        // `arrow` captured in beforeEach is stale after delete/undo (Scene
+        // re-derives fresh snapshots); re-read the live element by its stable id.
+        const liveArrow = () =>
+          h.elements.find((e) => e.id === arrow.id) as ExcalidrawLinearElement;
+
         Keyboard.keyDown(KEYS.DELETE);
         expect(API.getUndoStack().length).toBe(6);
         expect(API.getRedoStack().length).toBe(0);
-        expect(arrow.startBinding).toEqual({
+        expect(liveArrow().startBinding).toEqual({
           elementId: rect1.id,
           fixedPoint: expect.arrayContaining([1, 0.5001]),
           mode: "orbit",
         });
-        expect(arrow.endBinding).toEqual({
+        expect(liveArrow().endBinding).toEqual({
           elementId: rect2.id,
           fixedPoint: expect.arrayContaining([0.5001, 0.5001]),
           mode: "orbit",
@@ -1749,12 +1771,12 @@ describe("history", () => {
         Keyboard.undo();
         expect(API.getUndoStack().length).toBe(5);
         expect(API.getRedoStack().length).toBe(1);
-        expect(arrow.startBinding).toEqual({
+        expect(liveArrow().startBinding).toEqual({
           elementId: rect1.id,
           fixedPoint: expect.arrayContaining([1, 0.5001]),
           mode: "orbit",
         });
-        expect(arrow.endBinding).toEqual({
+        expect(liveArrow().endBinding).toEqual({
           elementId: rect2.id,
           fixedPoint: expect.arrayContaining([0.5001, 0.5001]),
           mode: "orbit",
@@ -1872,7 +1894,12 @@ describe("history", () => {
       });
 
       it("should unbind rectangle from arrow on deletion and rebind on undo", async () => {
-        mouse.select(rect1);
+        // `rect1` captured in beforeEach is stale (its geometry changed when the
+        // text was bound into it); select the live element so the click geometry
+        // is correct.
+        const liveRect1 = () => h.elements.find((e) => e.id === rect1.id)!;
+
+        mouse.select(liveRect1());
         Keyboard.keyPress(KEYS.DELETE);
         expect(API.getUndoStack().length).toBe(7);
         expect(API.getRedoStack().length).toBe(0);
@@ -1960,7 +1987,13 @@ describe("history", () => {
       });
 
       it("should unbind rectangles from arrow on deletion and rebind on undo", async () => {
-        mouse.select([rect1, rect2]);
+        // `rect1`/`rect2` captured in beforeEach are stale (rect1's geometry
+        // changed when the text was bound in); select the live elements so the
+        // click geometry is correct.
+        const liveRect1 = () => h.elements.find((e) => e.id === rect1.id)!;
+        const liveRect2 = () => h.elements.find((e) => e.id === rect2.id)!;
+
+        mouse.select([liveRect1(), liveRect2()]);
         Keyboard.keyPress(KEYS.DELETE);
         expect(API.getUndoStack().length).toBe(8);
         expect(API.getRedoStack().length).toBe(0);

@@ -7159,7 +7159,16 @@ class App extends React.Component<AppProps, AppState> {
     }
 
     if (this.state.multiElement && this.state.selectedLinearElement) {
-      const { multiElement, selectedLinearElement } = this.state;
+      const { selectedLinearElement } = this.state;
+      // Fresh-snapshot (native-Yjs core): `state.multiElement` is a held reference
+      // that stops tracking the doc once we mutate it with `informMutation:false`
+      // below. Re-read the live element so `points`/`x`/`y` reflect the committed
+      // points (otherwise an appended point is built from a stale array).
+      const multiElement =
+        (this.scene.getElement(
+          this.state.multiElement.id,
+        ) as NonDeleted<ExcalidrawLinearElement> | null) ??
+        this.state.multiElement;
       const { x: rx, y: ry, points } = multiElement;
       const lastPoint = points[points.length - 1];
 
@@ -9242,7 +9251,15 @@ class App extends React.Component<AppProps, AppState> {
     }
 
     if (this.state.multiElement) {
-      const { multiElement, selectedLinearElement } = this.state;
+      const { selectedLinearElement } = this.state;
+      // Fresh-snapshot: re-read the live multi-point element so its committed
+      // `points` are seen here (the move handler appended points with
+      // informMutation:false, leaving `state.multiElement` stale).
+      const multiElement =
+        (this.scene.getElement(
+          this.state.multiElement.id,
+        ) as NonDeleted<ExcalidrawLinearElement> | null) ??
+        this.state.multiElement;
 
       invariant(
         selectedLinearElement,
@@ -10843,7 +10860,12 @@ class App extends React.Component<AppProps, AppState> {
           isLinearElement(this.state.newElement) &&
           this.state.selectedLinearElement
         ) {
-          const { multiElement } = this.state;
+          // Fresh-snapshot: re-read so the committed last point is read from the doc.
+          const multiElement =
+            (this.scene.getElement(
+              this.state.multiElement.id,
+            ) as NonDeleted<ExcalidrawLinearElement> | null) ??
+            this.state.multiElement;
 
           this.setState({
             selectedLinearElement: {
