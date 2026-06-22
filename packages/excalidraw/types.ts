@@ -978,6 +978,12 @@ export interface ExcalidrawImperativeAPI {
   getSceneElementsMapIncludingDeleted: InstanceType<
     typeof App
   >["getSceneElementsMapIncludingDeleted"];
+  /**
+   * The scene's `Y.Doc` — the native-Yjs element store (native-Yjs core, M3).
+   * A collaboration provider attaches to this doc directly to exchange Yjs
+   * updates (no scene-array broadcast / JSON reconciliation). See `App.getSceneDoc`.
+   */
+  getSceneDoc: InstanceType<typeof App>["getSceneDoc"];
   history: {
     clear: InstanceType<typeof App>["resetHistory"];
   };

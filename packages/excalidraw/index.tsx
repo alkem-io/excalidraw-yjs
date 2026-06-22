@@ -329,7 +329,15 @@ export {
   restoreLibraryItems,
 } from "./data/restore";
 
-export { reconcileElements } from "./data/reconcile";
+// Native-Yjs collaboration (native-Yjs core, M3): the unified provider attaches
+// to the scene's `Y.Doc` and exchanges Yjs updates on it. This replaces the old
+// scene-array broadcast + JSON `reconcileElements` merge (both deleted) — Yjs
+// converges per-property natively.
+export { CollabEngine } from "./collab/CollabEngine";
+export type {
+  CollabTransport,
+  CollabEngineOptions,
+} from "./collab/CollabEngine";
 
 export {
   exportToCanvas,

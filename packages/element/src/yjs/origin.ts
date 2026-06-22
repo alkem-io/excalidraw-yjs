@@ -73,8 +73,32 @@ export const EPHEMERAL_ORIGIN: { readonly name: "alkemio-yjs-ephemeral" } = {
 export type EphemeralOrigin = typeof EPHEMERAL_ORIGIN;
 
 /**
- * @deprecated Use {@link LOCAL_ORIGIN}. Kept as an alias so the legacy
- * `packages/yjs-binding` (deleted at M3) keeps compiling.
+ * Origin for a *remote* update applied to `Scene.doc` by the collaboration
+ * provider (native-Yjs core, M3 — collaboration).
+ *
+ * A remote peer's Yjs update is integrated via `Scene.applyRemoteUpdate`, which
+ * wraps `Y.applyUpdate(doc, bytes, REMOTE_ORIGIN)` so the transaction carries
+ * this sentinel. It is deliberately a DISTINCT object from {@link LOCAL_ORIGIN}
+ * /{@link STRUCTURAL_ORIGIN}/{@link EPHEMERAL_ORIGIN}, which gives M3 its two core
+ * guarantees for free:
+ *
+ *  1. **Undo isolation.** The `Y.UndoManager` tracks ONLY `LOCAL_ORIGIN`
+ *     (`trackedOrigins`), so a remote apply is never captured as a local undo
+ *     step — a local `undo()` can never revert a peer's edit (the M2 guarantee,
+ *     now under real concurrency).
+ *  2. **Change propagation.** The Scene's `observeDeep` handler bumps the local
+ *     reconciliation `meta` (`version`/`versionNonce`/`updated`) for every id a
+ *     non-local transaction touched. A remote apply is non-local, so its changed
+ *     elements re-derive with a strictly-greater `version` and the editor's
+ *     Store change-detection (which keys off `version`) picks the remote edit up.
+ *
+ * No bespoke remote-apply *handling* is needed beyond using this origin: the
+ * existing `observeDeep` → `recomputeFromDoc` derivation already produces correct,
+ * non-stale derived objects (every recompute fully re-reads the committed doc),
+ * so held element references stay valid across remote applies.
  */
-export const BINDING_ORIGIN = LOCAL_ORIGIN;
-export type BindingOrigin = LocalOrigin;
+export const REMOTE_ORIGIN: { readonly name: "alkemio-yjs-remote" } = {
+  name: "alkemio-yjs-remote",
+};
+
+export type RemoteOrigin = typeof REMOTE_ORIGIN;

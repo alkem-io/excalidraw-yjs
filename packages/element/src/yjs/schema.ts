@@ -1,6 +1,6 @@
 import * as Y from "yjs";
 
-import { LOCAL_ORIGIN, BINDING_ORIGIN } from "./origin";
+import { LOCAL_ORIGIN } from "./origin";
 
 import type { BoundElement } from "../types";
 
@@ -410,4 +410,4 @@ export const diffBoundElements = (
   return mutations;
 };
 
-export { LOCAL_ORIGIN, BINDING_ORIGIN };
+export { LOCAL_ORIGIN };

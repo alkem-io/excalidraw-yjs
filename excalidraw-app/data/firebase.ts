@@ -1,5 +1,4 @@
-import { reconcileElements } from "@excalidraw/excalidraw";
-import { MIME_TYPES, toBrandedType } from "@excalidraw/common";
+import { MIME_TYPES } from "@excalidraw/common";
 import { decompressData } from "@excalidraw/excalidraw/data/encode";
 import {
   encryptData,
@@ -17,12 +16,7 @@ import {
 } from "firebase/firestore";
 import { getStorage, ref, uploadBytes } from "firebase/storage";
 
-import type { RemoteExcalidrawElement } from "@excalidraw/excalidraw/data/reconcile";
-import type {
-  ExcalidrawElement,
-  FileId,
-  OrderedExcalidrawElement,
-} from "@excalidraw/element/types";
+import type { ExcalidrawElement, FileId } from "@excalidraw/element/types";
 import type {
   AppState,
   BinaryFileData,
@@ -187,8 +181,8 @@ const createFirebaseSceneDocument = async (
 export const saveToFirebase = async (
   portal: Portal,
   elements: readonly SyncableExcalidrawElement[],
-  appState: AppState,
-) => {
+  _appState: AppState,
+): Promise<readonly SyncableExcalidrawElement[] | null> => {
   const { roomId, roomKey, socket } = portal;
   if (
     // bail if no room exists as there's nothing we can do at this point
@@ -203,37 +197,24 @@ export const saveToFirebase = async (
   const firestore = _getFirestore();
   const docRef = doc(firestore, "scenes", roomId);
 
+  // Native-Yjs core (M3): collaboration converges on the scene's `Y.Doc` (Yjs
+  // CRDT merge), so by the time we persist, `elements` already reflects the
+  // merged scene — there is NO `reconcileElements` merge against the previously
+  // stored snapshot any more. Firebase here is a last-writer scene snapshot for
+  // late joiners / reload; the full Yjs-bytes persistence cutover is M4. We still
+  // run the write in a transaction for atomicity, but it is a plain set/update of
+  // the current elements.
   const storedScene = await runTransaction(firestore, async (transaction) => {
     const snapshot = await transaction.get(docRef);
 
+    const storedScene = await createFirebaseSceneDocument(elements, roomKey);
+
     if (!snapshot.exists()) {
-      const storedScene = await createFirebaseSceneDocument(elements, roomKey);
-
       transaction.set(docRef, storedScene);
-
-      return storedScene;
+    } else {
+      transaction.update(docRef, storedScene);
     }
 
-    const prevStoredScene = snapshot.data() as FirebaseStoredScene;
-    const prevStoredElements = getSyncableElements(
-      restoreElements(await decryptElements(prevStoredScene, roomKey), null),
-    );
-    const reconciledElements = getSyncableElements(
-      reconcileElements(
-        elements,
-        prevStoredElements as OrderedExcalidrawElement[] as RemoteExcalidrawElement[],
-        appState,
-      ),
-    );
-
-    const storedScene = await createFirebaseSceneDocument(
-      reconciledElements,
-      roomKey,
-    );
-
-    transaction.update(docRef, storedScene);
-
-    // Return the stored elements as the in memory `reconciledElements` could have mutated in the meantime
     return storedScene;
   });
 
@@ -243,7 +224,7 @@ export const saveToFirebase = async (
 
   FirebaseSceneVersionCache.set(socket, storedElements);
 
-  return toBrandedType<RemoteExcalidrawElement[]>(storedElements);
+  return storedElements;
 };
 
 export const loadFromFirebase = async (

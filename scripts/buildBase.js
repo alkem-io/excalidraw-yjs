@@ -18,19 +18,19 @@ const getConfig = (outdir) => ({
     "@excalidraw/element",
     "@excalidraw/math",
     "@excalidraw/fractional-indexing",
-    // Public upstream package the yjs-binding now depends on directly (its order
-    // helpers were re-pointed off the internal, unpublished
-    // `@excalidraw/fractional-indexing` so the published binding installs without
-    // a consumer override). Kept external so it resolves from the consumer's
-    // node_modules rather than being inlined into the bundle.
+    // Public upstream package the order helpers depend on directly (re-pointed off
+    // the internal, unpublished `@excalidraw/fractional-indexing` so the published
+    // package installs without a consumer override). Kept external so it resolves
+    // from the consumer's node_modules rather than being inlined into the bundle.
     "fractional-indexing",
-    // The CRDT runtime MUST be externalized, never bundled: a consumer that
-    // creates its own `Y.Doc` (every client whiteboard/memo content path) and
-    // hands it to `populateYDoc` / `exportSceneJSON` / `hashDocState` /
-    // `WhiteboardBinding` would otherwise mix two distinct `yjs` instances, and
-    // yjs's `instanceof` checks fail across copies ("Unexpected content type",
-    // yjs#438). Externalizing makes the binding share the single `yjs` /
-    // `y-protocols` / `lib0` the consumer installs (declared as peerDependencies).
+    // The CRDT runtime MUST be externalized, never bundled. Native-Yjs core: the
+    // editor's element store IS a `Y.Doc` (`@excalidraw/element`'s `Scene` owns it)
+    // and collaboration/persistence exchange Yjs updates on it. A consumer that
+    // creates or receives its own `Y.Doc` (collab provider, persistence) and a
+    // bundled copy of yjs would be two distinct `yjs` instances, and yjs's
+    // `instanceof` checks fail across copies ("Unexpected content type", yjs#438).
+    // Externalizing makes everything share the single `yjs` / `y-protocols` /
+    // `lib0` the consumer installs (declared as peerDependencies).
     "yjs",
     "y-protocols",
     "y-protocols/*",
