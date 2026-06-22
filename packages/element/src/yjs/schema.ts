@@ -410,4 +410,220 @@ export const diffBoundElements = (
   return mutations;
 };
 
+// ---------------------------------------------------------------------------
+// files schema (native-Yjs core, M4 — persistence cutover)
+//
+// `yFiles: Y.Map<fileId, BinaryFileData>` (`doc.getMap(FILES)`) — the scene's
+// image binaries live IN the doc, alongside `yElements`, so the encoded doc
+// (`encodeStateAsUpdateV2`) carries the WHOLE whiteboard: a persisted doc the
+// editor saves is exactly what the server / collab-service stores
+// (`getMap("elements")` + `getMap("files")` + `getMap("appState")`). Data-model
+// §1: a `BinaryFileData` is a flat JSON record (`{mimeType,id,dataURL,created,
+// lastRetrieved?,version?}`), stored whole as a **JSON-leaf** value — it is only
+// ever added/removed, never sub-merged, so there is no per-property nesting.
+// ---------------------------------------------------------------------------
+
+/** A binary-file record as it travels through the schema (a flat JSON object —
+ * structurally Excalidraw's `BinaryFileData`, kept loose here so the element
+ * package does not depend on `packages/excalidraw`'s types). Keyed by `id`. */
+export type FileRecord = { id: string } & Record<string, unknown>;
+
+/**
+ * Diff a full `files` map into `yFiles` (the doc's `Y.Map<fileId,
+ * BinaryFileData>`): add/replace any file whose JSON value changed, and — when
+ * `prune` is set — remove files absent from `next`. Each file value is stored
+ * whole (deep-cloned JSON-leaf), so it round-trips byte-stable through the doc.
+ *
+ * Files are append-mostly in Excalidraw (a deleted image's binary is normally
+ * left in place), so `prune` defaults to `false`: a normal save MERGES files in
+ * rather than dropping any a peer may have just added. MUST run inside a
+ * `doc.transact`. Returns the number of `Y.Map` mutations applied.
+ */
+export const writeFiles = (
+  yFiles: Y.Map<unknown>,
+  next: Readonly<Record<string, FileRecord>>,
+  options?: { prune?: boolean },
+): number => {
+  let mutations = 0;
+  if (options?.prune) {
+    const keep = new Set(Object.keys(next));
+    for (const id of [...yFiles.keys()]) {
+      if (!keep.has(id)) {
+        yFiles.delete(id);
+        mutations++;
+      }
+    }
+  }
+  for (const [id, file] of Object.entries(next)) {
+    if (file === undefined || file === null) {
+      continue;
+    }
+    if (!deepEqual(yFiles.get(id), file)) {
+      yFiles.set(id, cloneJSON(file));
+      mutations++;
+    }
+  }
+  return mutations;
+};
+
+/**
+ * Materialize the doc's `yFiles` back into a plain `Record<fileId,
+ * BinaryFileData>` (deep-cloned, so the result never aliases doc-internal data)
+ * — the inverse of {@link writeFiles}.
+ */
+export const readFiles = (
+  yFiles: Y.Map<unknown>,
+): Record<string, FileRecord> => {
+  const out: Record<string, FileRecord> = {};
+  for (const [id, value] of yFiles.entries()) {
+    out[id] = cloneJSON(value) as FileRecord;
+  }
+  return out;
+};
+
+// ---------------------------------------------------------------------------
+// appState schema (native-Yjs core, M4 — persistence cutover)
+//
+// `yAppState: Y.Map<key, value>` (`doc.getMap(APPSTATE)`) holds ONLY the
+// persistable / collaborative subset of appState — the `APPSTATE_ALLOW_LIST`
+// (scene background + name). Everything else in Excalidraw's appState is
+// local-only (selection, zoom, scroll, active tool, …) and is NEVER written to
+// the doc (data-model §1, FR-B-008): it must not persist and must not
+// collaborate. Each allow-listed key is a plain LWW scalar.
+// ---------------------------------------------------------------------------
+
+/**
+ * Write the persistable appState subset into `yAppState`. Only the
+ * `APPSTATE_ALLOW_LIST` keys are considered; a key whose value is `undefined`
+ * (or simply absent) is left untouched (we never clobber a stored background
+ * with a partial update that omits it). MUST run inside a `doc.transact`.
+ * Returns the number of `Y.Map` mutations applied.
+ */
+export const writeAppState = (
+  yAppState: Y.Map<unknown>,
+  appState: Readonly<Partial<Record<AppStateAllowKey, unknown>>>,
+): number => {
+  let mutations = 0;
+  for (const key of APPSTATE_ALLOW_LIST) {
+    const next = appState[key];
+    if (next === undefined) {
+      continue;
+    }
+    if (yAppState.get(key) !== next) {
+      yAppState.set(key, next);
+      mutations++;
+    }
+  }
+  return mutations;
+};
+
+/**
+ * Read the persistable appState subset (the `APPSTATE_ALLOW_LIST` keys present)
+ * out of `yAppState` — the inverse of {@link writeAppState}. Returns only the
+ * keys actually stored, so a caller can merge them over its defaults.
+ */
+export const readAppState = (
+  yAppState: Y.Map<unknown>,
+): Partial<Record<AppStateAllowKey, unknown>> => {
+  const out: Partial<Record<AppStateAllowKey, unknown>> = {};
+  for (const key of APPSTATE_ALLOW_LIST) {
+    if (yAppState.has(key)) {
+      out[key] = yAppState.get(key);
+    }
+  }
+  return out;
+};
+
+// ---------------------------------------------------------------------------
+// whole-whiteboard doc ↔ bytes persistence (native-Yjs core, M4)
+//
+// The persistence unit is the WHOLE `Y.Doc` — elements + files + appState in the
+// ONE doc — encoded as Yjs **V2** bytes (`encodeStateAsUpdateV2`). This is the
+// exact format the Alkemio server / collab-service stores (a base64 V2 snapshot
+// over `getMap("elements")` / `getMap("files")` / `getMap("appState")`), so a
+// doc the editor persists IS what the backend stores, and vice-versa. These two
+// helpers are the editor-side persistence LAYER: build a portable doc from a
+// scene's content and encode it, or decode stored bytes back into a doc the
+// `Scene` constructor adopts (`new Scene(null, { doc })`). They deliberately do
+// NOT touch the network — the live backend transport is follow-on wiring.
+// ---------------------------------------------------------------------------
+
+/** The portable content of one whiteboard: everything that persists. */
+export type WhiteboardSnapshot = {
+  elements: readonly Record<string, unknown>[];
+  files: Readonly<Record<string, FileRecord>>;
+  appState: Readonly<Partial<Record<AppStateAllowKey, unknown>>>;
+};
+
+/**
+ * Build a fresh `Y.Doc` populated with `elements` + `files` + `appState` under
+ * the canonical root-map names. The doc is a portable, self-contained snapshot;
+ * the caller typically `encodeStateAsUpdateV2`s it (see {@link encodeSnapshot}).
+ * Writes happen under `LOCAL_ORIGIN` for consistency, though a one-shot
+ * population has no observers attached.
+ */
+export const buildSnapshotDoc = (snapshot: WhiteboardSnapshot): Y.Doc => {
+  const doc = new Y.Doc();
+  const yElements = doc.getMap<Y.Map<unknown>>(ELEMENTS);
+  const yFiles = doc.getMap<unknown>(FILES);
+  const yAppState = doc.getMap<unknown>(APPSTATE);
+  doc.transact(() => {
+    for (const element of snapshot.elements) {
+      const id = element.id as string;
+      yElements.set(id, elementToYMap(element as ElementRecord));
+    }
+    writeFiles(yFiles, snapshot.files, { prune: false });
+    writeAppState(yAppState, snapshot.appState);
+  }, LOCAL_ORIGIN);
+  return doc;
+};
+
+/**
+ * Encode a whiteboard snapshot to Yjs **V2** bytes — the editor's native
+ * persistence wire/storage form, matching the server's stored doc format.
+ */
+export const encodeSnapshot = (snapshot: WhiteboardSnapshot): Uint8Array => {
+  const doc = buildSnapshotDoc(snapshot);
+  const bytes = Y.encodeStateAsUpdateV2(doc);
+  doc.destroy();
+  return bytes;
+};
+
+/**
+ * Decode stored Yjs **V2** bytes back into a whiteboard snapshot
+ * (`elements` ordered by fractional index, `files`, persistable `appState`) —
+ * the inverse of {@link encodeSnapshot}. The decoded `elements` carry no
+ * reconciliation metadata (the doc never stores it); a live `Scene` re-derives
+ * it on adoption. `version`/`versionNonce`/`updated` are seeded here so the
+ * snapshot is a valid standalone element set (the app's `restoreElements`
+ * normalizes them anyway).
+ */
+export const decodeSnapshot = (bytes: Uint8Array): WhiteboardSnapshot => {
+  const doc = new Y.Doc();
+  Y.applyUpdateV2(doc, bytes);
+  const yElements = doc.getMap<Y.Map<unknown>>(ELEMENTS);
+  const yFiles = doc.getMap<unknown>(FILES);
+  const yAppState = doc.getMap<unknown>(APPSTATE);
+
+  const elements: Record<string, unknown>[] = [];
+  for (const [id, ymap] of yElements.entries()) {
+    const record = yMapToElement(ymap);
+    record.id = id;
+    elements.push(record);
+  }
+  elements.sort((a, b) => {
+    const ai = a.index as string;
+    const bi = b.index as string;
+    if (ai !== bi) {
+      return ai < bi ? -1 : 1;
+    }
+    return (a.id as string) < (b.id as string) ? -1 : 1;
+  });
+
+  const files = readFiles(yFiles);
+  const appState = readAppState(yAppState);
+  doc.destroy();
+  return { elements, files, appState };
+};
+
 export { LOCAL_ORIGIN };

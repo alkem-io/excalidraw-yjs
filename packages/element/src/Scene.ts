@@ -45,6 +45,8 @@ import type {
 
 import {
   ELEMENTS,
+  FILES,
+  APPSTATE,
   LOCAL_ORIGIN,
   STRUCTURAL_ORIGIN,
   EPHEMERAL_ORIGIN,
@@ -52,7 +54,13 @@ import {
   elementToYMap,
   yMapToElement,
   writeChangedKeys,
+  writeFiles,
+  readFiles,
+  writeAppState,
+  readAppState,
   type ElementRecord,
+  type FileRecord,
+  type AppStateAllowKey,
 } from "./yjs";
 
 import type { AppState } from "../../excalidraw/types";
@@ -261,12 +269,38 @@ export class Scene {
    * recomputed from it by `recomputeFromDoc` on `observeDeep` and then
    * `triggerUpdate()` fires.
    *
-   * appState / files are NOT yet on the doc — they move in a later milestone
-   * (M2–M4). For now they remain wherever the editor keeps them.
+   * Native-Yjs core (M4): files and the persistable appState subset are ALSO on
+   * this doc ({@link yFiles} / {@link yAppState}), so `encodeStateAsUpdateV2(doc)`
+   * is a complete, portable whiteboard snapshot — the exact format the Alkemio
+   * server / collab-service stores (`getMap("elements")` + `getMap("files")` +
+   * `getMap("appState")`). Persistence is therefore native: create/load/save
+   * encode/decode THIS doc, not element JSON. (Local-only appState — selection /
+   * zoom / scroll / active tool — is NEVER on the doc.)
    */
   public readonly doc: Y.Doc;
 
   public readonly yElements: Y.Map<Y.Map<unknown>>;
+
+  /**
+   * The scene's image binaries (native-Yjs core, M4): `Y.Map<fileId,
+   * BinaryFileData>` (`doc.getMap(FILES)`), in the SAME doc as the elements so a
+   * saved doc carries the whole whiteboard. Each value is the flat
+   * `BinaryFileData` record stored whole (JSON-leaf) — files are only ever
+   * added/removed, never sub-merged. Written via {@link setFiles} / read via
+   * {@link getFiles}. The renderer keeps consuming a plain files object; the doc
+   * is just where they now live and persist.
+   */
+  public readonly yFiles: Y.Map<unknown>;
+
+  /**
+   * The persistable / collaborative appState subset (native-Yjs core, M4):
+   * `Y.Map<key, value>` (`doc.getMap(APPSTATE)`) holding ONLY the
+   * `APPSTATE_ALLOW_LIST` keys (scene background + name). Everything else in
+   * Excalidraw's appState is local-only and is NEVER written here (it must not
+   * persist and must not collaborate). Written via {@link setAppState} / read via
+   * {@link getPersistedAppState}.
+   */
+  public readonly yAppState: Y.Map<unknown>;
 
   /**
    * Native element history (native-Yjs core, M2).
@@ -403,6 +437,11 @@ export class Scene {
   ) {
     this.doc = options?.doc ?? new Y.Doc();
     this.yElements = this.doc.getMap<Y.Map<unknown>>(ELEMENTS);
+    // Files + the persistable appState subset live in the SAME doc (M4), so an
+    // encoded doc is a complete whiteboard snapshot. `getMap` is idempotent —
+    // when a pre-decoded doc is adopted these resolve to its existing maps.
+    this.yFiles = this.doc.getMap<unknown>(FILES);
+    this.yAppState = this.doc.getMap<unknown>(APPSTATE);
 
     // Native element history (M2): track only LOCAL_ORIGIN, so undo/redo revert
     // exclusively this replica's edits — a remote / system-origin transaction is
@@ -1016,6 +1055,99 @@ export class Scene {
     };
     this.doc.on(event, handler);
     return () => this.doc.off(event, handler);
+  }
+
+  // ---------------------------------------------------------------------------
+  // files + persistable appState on the doc (native-Yjs core, M4 — persistence)
+  //
+  // Image binaries and the persistable appState subset live in THIS doc, so an
+  // encoded doc is the whole whiteboard (see {@link encodeSnapshot}). These thin
+  // accessors are how the editor reads/writes them; the renderer keeps consuming
+  // a plain files object and the plain appState — the doc is just where the
+  // durable copy lives and collaborates. Writes go under a chosen origin so a
+  // load (`EPHEMERAL_ORIGIN`) is non-undoable while a normal edit (`LOCAL_ORIGIN`,
+  // the default) is broadcast to peers and recorded; a remote files/appState
+  // change arrives via the same `applyRemoteUpdate` path the elements do.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Merge `files` into the doc's `yFiles` (`doc.getMap(FILES)`). Append-mostly:
+   * an existing file is left in place unless its bytes changed (Excalidraw never
+   * removes an image's binary on element delete), so this never drops a file a
+   * peer just added. Pass `recordHistory: false` for a load / programmatic write
+   * (non-undoable). No-op (no transaction) when nothing changed.
+   */
+  setFiles(
+    files: Readonly<Record<string, FileRecord>>,
+    options?: { recordHistory?: boolean },
+  ): void {
+    const origin =
+      options?.recordHistory === false ? EPHEMERAL_ORIGIN : LOCAL_ORIGIN;
+    let wrote = 0;
+    this.doc.transact(() => {
+      wrote = writeFiles(this.yFiles, files, { prune: false });
+    }, origin);
+    void wrote;
+  }
+
+  /** The scene's files as a plain `Record<fileId, BinaryFileData>`, read out of
+   * the doc (deep-cloned, never aliasing doc-internal data). */
+  getFiles(): Record<string, FileRecord> {
+    return readFiles(this.yFiles);
+  }
+
+  /**
+   * Write the persistable appState subset (the `APPSTATE_ALLOW_LIST` keys —
+   * background + name) into the doc's `yAppState`. Only those keys are
+   * considered; every other appState field is local-only and ignored here (it
+   * must not persist or collaborate). Pass `recordHistory: false` for a load.
+   */
+  setAppState(
+    appState: Readonly<Partial<Record<AppStateAllowKey, unknown>>>,
+    options?: { recordHistory?: boolean },
+  ): void {
+    const origin =
+      options?.recordHistory === false ? EPHEMERAL_ORIGIN : LOCAL_ORIGIN;
+    this.doc.transact(() => {
+      writeAppState(this.yAppState, appState);
+    }, origin);
+  }
+
+  /** The persisted appState subset (the allow-list keys present) from the doc. */
+  getPersistedAppState(): Partial<Record<AppStateAllowKey, unknown>> {
+    return readAppState(this.yAppState);
+  }
+
+  // ---------------------------------------------------------------------------
+  // persistence (native-Yjs core, M4) — the doc IS the persistence unit.
+  //
+  // Save = encode THIS doc (elements + files + appState) to Yjs V2 bytes; load =
+  // decode bytes into a doc the `Scene` constructor adopts. There is no element
+  // JSON: the bytes a `Scene` produces are exactly what the server / collab-
+  // service stores (a base64 V2 snapshot over `getMap("elements"/"files"/
+  // "appState")`), so editor↔backend persistence is one format end to end.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Encode the WHOLE scene doc (elements + files + persistable appState) to Yjs
+   * **V2** bytes — the native persistence/storage form. This is what a save
+   * writes; the server stores these bytes verbatim (base64). Equivalent to
+   * `encodeStateAsUpdate("v2")`, named for the persistence intent.
+   */
+  encodeSnapshot(): Uint8Array {
+    return Y.encodeStateAsUpdateV2(this.doc);
+  }
+
+  /**
+   * Build a `Scene` by decoding stored Yjs **V2** snapshot bytes into a fresh
+   * doc and adopting it — the load path. The decoded doc is the source of truth;
+   * elements/files/appState all come straight from it. The inverse of
+   * {@link encodeSnapshot} at the Scene boundary.
+   */
+  static fromSnapshot(bytes: Uint8Array): Scene {
+    const doc = new Y.Doc();
+    Y.applyUpdateV2(doc, bytes);
+    return new Scene(null, { doc });
   }
 
   // ---------------------------------------------------------------------------
