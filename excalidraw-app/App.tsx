@@ -3,7 +3,6 @@ import {
   LiveCollaborationTrigger,
   TTDDialogTrigger,
   CaptureUpdateAction,
-  reconcileElements,
   useEditorInterface,
   ExcalidrawAPIProvider,
   useExcalidrawAPI,
@@ -61,7 +60,6 @@ import {
   useHandleLibrary,
 } from "@excalidraw/excalidraw/data/library";
 
-import type { RemoteExcalidrawElement } from "@excalidraw/excalidraw/data/reconcile";
 import type { RestoredDataState } from "@excalidraw/excalidraw/data/restore";
 import type {
   FileId,
@@ -330,9 +328,12 @@ const initializeScene = async (opts: {
     const scene = await opts.collabAPI.startCollaboration(roomLinkData);
 
     return {
-      // when collaborating, the state may have already been updated at this
-      // point (we may have received updates from other clients), so reconcile
-      // elements and appState with existing state
+      // Native-Yjs core (M3): collaboration converges on the scene's `Y.Doc`, so
+      // by the time `startCollaboration` resolves, the editor's scene already
+      // holds the merged state (remote updates were applied to the doc under
+      // REMOTE_ORIGIN). There is no `reconcileElements` merge here — the resolved
+      // `scene.elements` ARE the converged elements (the collab layer resolves it
+      // from `getSceneElementsIncludingDeleted()`), so we use them directly.
       scene: {
         ...scene,
         appState: {
@@ -347,11 +348,8 @@ const initializeScene = async (opts: {
           // go through App.initializeScene() that resets this flag
           isLoading: false,
         },
-        elements: reconcileElements(
-          scene?.elements || [],
-          excalidrawAPI.getSceneElementsIncludingDeleted() as RemoteExcalidrawElement[],
-          excalidrawAPI.getAppState(),
-        ),
+        elements:
+          scene?.elements || excalidrawAPI.getSceneElementsIncludingDeleted(),
       },
       isExternalScene: true,
       id: roomLinkData.roomId,

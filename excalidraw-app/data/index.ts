@@ -80,16 +80,21 @@ export type SocketUpdateDataSource = {
   INVALID_RESPONSE: {
     type: WS_SUBTYPES.INVALID_RESPONSE;
   };
+  // Native-Yjs core (M3): the scene channel carries Yjs updates on the scene's
+  // `Y.Doc`, NOT element JSON. INIT is the full doc state for a newly-joined peer
+  // (`encodeStateAsUpdate`); UPDATE is an incremental update this replica
+  // originated. The bytes are serialized as a number[] so they survive the
+  // JSON.stringify the encrypted socket payload goes through.
   SCENE_INIT: {
     type: WS_SUBTYPES.INIT;
     payload: {
-      elements: readonly OrderedExcalidrawElement[];
+      update: number[];
     };
   };
   SCENE_UPDATE: {
     type: WS_SUBTYPES.UPDATE;
     payload: {
-      elements: readonly OrderedExcalidrawElement[];
+      update: number[];
     };
   };
   MOUSE_LOCATION: {

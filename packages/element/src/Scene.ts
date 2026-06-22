@@ -48,6 +48,7 @@ import {
   LOCAL_ORIGIN,
   STRUCTURAL_ORIGIN,
   EPHEMERAL_ORIGIN,
+  REMOTE_ORIGIN,
   elementToYMap,
   yMapToElement,
   writeChangedKeys,
@@ -297,6 +298,38 @@ export class Scene {
    * objects; every field of every derived object is (re)written *from* `yElements`
    * on each change. A brand-new `Scene` built from doc bytes derives its own fresh
    * objects, so the doc remains the portable, authoritative representation.
+   *
+   * CONCURRENCY CORRECTNESS (native-Yjs core, M3). M1 flagged this stable-identity
+   * reuse as a potential "cross-replica hazard for held references under
+   * concurrency": an object reused across recomputes *sounds* like it could be
+   * observed half-updated while a remote apply rewrites it. It cannot, for three
+   * combining reasons — which together make a held reference never torn, never
+   * stale across a remote (REMOTE_ORIGIN) apply:
+   *
+   *  1. **Full re-derivation per recompute.** {@link recomputeFromDoc} re-reads the
+   *     *entire* `yElements` map and rewrites every derived object from the doc on
+   *     every change (it takes no "changed ids" set — `changedElementIds` scopes
+   *     only the meta bump, never the read). So a derived object can only ever
+   *     reflect ONE coherent committed doc state, never an incremental mix of pre-
+   *     and post-apply values.
+   *  2. **Synchronous, post-commit observer.** Yjs integrates a remote update
+   *     inside a `doc.transact`; `observeDeep` fires from `cleanupTransactions`
+   *     *after* the merge is committed and the post-apply state is readable. So
+   *     when `recomputeFromDoc` runs, `yElements` already holds the fully-merged
+   *     state — the recompute lands on a single consistent snapshot.
+   *  3. **No async window in the Scene.** The whole apply→observe→recompute→
+   *     `reconcileDerived` chain is synchronous (the Scene has no `await`), and so
+   *     are the editor's drag/resize handlers (`mutateElement`). JS is
+   *     single-threaded, so a remote apply runs *between* synchronous editor turns,
+   *     never *inside* one — no editor turn holds a derived reference across a
+   *     suspension point while a remote apply mutates the same object underneath.
+   *
+   * The only residual: an element *structurally removed* by a remote apply is
+   * dropped from `derivedById`/`meta` and from `elements`/`elementsMap`; a
+   * reference a caller still holds becomes a detached orphan frozen at its last
+   * values (correct "this element no longer exists" semantics, identical to the
+   * pre-rewrite array-source behaviour). The editor's Store catches the removal by
+   * *absence*, not by a version bump, so the deletion is never lost.
    */
   private derivedById: Map<string, Mutable<OrderedExcalidrawElement>> =
     new Map();
@@ -407,18 +440,19 @@ export class Scene {
     });
 
     // Recompute the derived caches whenever the doc's elements change — our own
-    // writes (LOCAL_ORIGIN) and, in later milestones, remote applies both flow
-    // through here, so reads are always a faithful view of the doc.
+    // writes (LOCAL_ORIGIN), undo/redo, AND remote applies (REMOTE_ORIGIN, M3)
+    // all flow through here, so reads are always a faithful view of the doc.
     //
     // A transaction whose origin is NOT `LOCAL_ORIGIN` mutated the doc *without*
     // going through `mutateElement` / `replaceAllElements` — i.e. an undo/redo
-    // (origin = the UndoManager) or, in M3, a remote apply. Those paths therefore
-    // did NOT refresh the local reconciliation `meta` (`version`/`versionNonce`/
-    // `updated`, which the doc deliberately does not store). We bump the meta for
-    // every element the transaction touched so the derived element looks like a
-    // fresh change to the editor's downstream change-detection (Store snapshot
-    // diffing keys off `version`, renderer cache) — matching the old history's
-    // "undo produces a new version" contract. The initial doc adoption (no
+    // (origin = the UndoManager) or a remote apply (origin = REMOTE_ORIGIN, M3).
+    // Those paths therefore did NOT refresh the local reconciliation `meta`
+    // (`version`/`versionNonce`/`updated`, which the doc deliberately does not
+    // store). We bump the meta for every element the transaction touched so the
+    // derived element looks like a fresh change to the editor's downstream
+    // change-detection (Store snapshot diffing keys off `version`, renderer cache)
+    // — matching the old history's "undo produces a new version" contract, and
+    // making the editor pick up a peer's edit. The initial doc adoption (no
     // transaction) is excluded.
     const observer = (
       events: Y.YEvent<Y.AbstractType<unknown>>[],
@@ -967,6 +1001,102 @@ export class Scene {
       }
       this.callbacks.delete(cb);
     };
+  }
+
+  // ---------------------------------------------------------------------------
+  // collaboration surface (native-Yjs core, M3) — the doc IS the wire.
+  //
+  // Collaboration is just exchanging Yjs updates on `this.doc`. There is no
+  // scene-broadcast and no JSON reconciliation any more: a local edit (already a
+  // `LOCAL_ORIGIN` doc transaction) emits an update via {@link onDocUpdate}; a
+  // remote peer's update is integrated via {@link applyRemoteUpdate} under
+  // `REMOTE_ORIGIN`, which flows through `observeDeep` → `recomputeFromDoc` so the
+  // editor re-renders, while the UndoManager (tracking only `LOCAL_ORIGIN`)
+  // ignores it. Yjs converges per-property natively, so concurrent edits merge
+  // without a bespoke merge path. These thin methods are the provider's hook
+  // points; the provider owns only the transport (sockets/awareness/files).
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Apply a remote peer's Yjs update to `this.doc` under {@link REMOTE_ORIGIN}.
+   *
+   * The update integrates inside a `doc.transact` whose origin is `REMOTE_ORIGIN`
+   * (distinct from every local origin), which is the linchpin of M3:
+   *  - the `Y.UndoManager` (tracks only `LOCAL_ORIGIN`) never captures it, so a
+   *    local `undo()` can never revert a peer's edit;
+   *  - the `observeDeep` handler sees a non-local origin and bumps the local
+   *    reconciliation `meta` for every changed id, so the editor's Store
+   *    change-detection (which keys off `version`) picks the remote edit up;
+   *  - `recomputeFromDoc` then re-derives the affected elements from the merged
+   *    doc and fires `triggerUpdate()` → the editor re-renders.
+   *
+   * Accepts both the v1 (`Y.applyUpdate`) and v2 (`Y.applyUpdateV2`) wire formats;
+   * the provider/transport decides which it speaks. Idempotent: re-applying an
+   * already-integrated update is a Yjs no-op (and fires no observer).
+   */
+  applyRemoteUpdate(update: Uint8Array, format: "v1" | "v2" = "v1"): void {
+    if (format === "v2") {
+      Y.applyUpdateV2(this.doc, update, REMOTE_ORIGIN);
+    } else {
+      Y.applyUpdate(this.doc, update, REMOTE_ORIGIN);
+    }
+  }
+
+  /**
+   * Encode the doc's current state as a Yjs update the provider can send to a
+   * peer (e.g. the initial state for a newly-joined client, or a full resync).
+   * `v2` is the more compact format; pass the encoded `targetStateVector` to send
+   * only the delta a peer is missing.
+   */
+  encodeStateAsUpdate(
+    format: "v1" | "v2" = "v1",
+    targetStateVector?: Uint8Array,
+  ): Uint8Array {
+    return format === "v2"
+      ? Y.encodeStateAsUpdateV2(this.doc, targetStateVector)
+      : Y.encodeStateAsUpdate(this.doc, targetStateVector);
+  }
+
+  /** The doc's state vector — what this replica already has — so a peer can
+   * compute the minimal delta to send back (`encodeStateAsUpdate(v, sv)`). The
+   * state vector is wire-format-agnostic (a map of client→clock), so a single
+   * encoding feeds both `encodeStateAsUpdate` and `encodeStateAsUpdateV2`. */
+  encodeStateVector(): Uint8Array {
+    return Y.encodeStateVector(this.doc);
+  }
+
+  /**
+   * Subscribe to Yjs updates the provider must broadcast — i.e. updates this
+   * replica ORIGINATED (local edits + undo/redo), NOT echoes of remote applies.
+   *
+   * The handler is invoked with the encoded update bytes and only for
+   * transactions whose origin is NOT `REMOTE_ORIGIN`: a remote apply must never
+   * be re-broadcast (that is the echo loop the old binding fought with a
+   * re-entrancy guard; here it falls out of the origin). Pass `format: "v2"` to
+   * receive the v2 wire format. Returns an unsubscribe function.
+   *
+   * (Awareness/cursors/emoji/files are ephemeral or out-of-band and are NOT part
+   * of this — they never touch `this.doc`; the provider routes them separately.)
+   */
+  onDocUpdate(
+    cb: (update: Uint8Array) => void,
+    format: "v1" | "v2" = "v1",
+  ): () => void {
+    const event = format === "v2" ? "updateV2" : "update";
+    const handler = (
+      update: Uint8Array,
+      origin: unknown,
+      _doc: Y.Doc,
+      _tr: Y.Transaction,
+    ) => {
+      // Do not re-broadcast a remote apply — only updates this replica originated.
+      if (origin === REMOTE_ORIGIN) {
+        return;
+      }
+      cb(update);
+    };
+    this.doc.on(event, handler);
+    return () => this.doc.off(event, handler);
   }
 
   // ---------------------------------------------------------------------------

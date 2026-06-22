@@ -5,20 +5,14 @@ import { newElementWith } from "@excalidraw/element";
 import throttle from "lodash.throttle";
 
 import type { UserIdleState } from "@excalidraw/common";
-import type { OrderedExcalidrawElement } from "@excalidraw/element/types";
 import type {
   OnUserFollowedPayload,
   SocketId,
 } from "@excalidraw/excalidraw/types";
 
 import { WS_EVENTS, FILE_UPLOAD_TIMEOUT, WS_SUBTYPES } from "../app_constants";
-import { isSyncableElement } from "../data";
 
-import type {
-  SocketUpdateData,
-  SocketUpdateDataSource,
-  SyncableExcalidrawElement,
-} from "../data";
+import type { SocketUpdateData, SocketUpdateDataSource } from "../data";
 import type { TCollabClass } from "./Collab";
 import type { Socket } from "socket.io-client";
 
@@ -28,7 +22,6 @@ class Portal {
   socketInitialized: boolean = false; // we don't want the socket to emit any updates until it is fully initialized
   roomId: string | null = null;
   roomKey: string | null = null;
-  broadcastedElementVersions: Map<string, number> = new Map();
 
   constructor(collab: TCollabClass) {
     this.collab = collab;
@@ -47,11 +40,9 @@ class Portal {
       }
     });
     this.socket.on("new-user", async (_socketId: string) => {
-      this.broadcastScene(
-        WS_SUBTYPES.INIT,
-        this.collab.getSceneElementsIncludingDeleted(),
-        /* syncAll */ true,
-      );
+      // Native-Yjs core (M3): seed a newly-joined peer with the FULL scene-doc
+      // state (`encodeStateAsUpdate`), not an element-JSON snapshot.
+      this.broadcastSceneInit();
     });
     this.socket.on("room-user-change", (clients: SocketId[]) => {
       this.collab.setCollaborators(clients);
@@ -70,7 +61,6 @@ class Portal {
     this.roomId = null;
     this.roomKey = null;
     this.socketInitialized = false;
-    this.broadcastedElementVersions = new Map();
   }
 
   isOpen() {
@@ -139,47 +129,36 @@ class Portal {
     }
   }, FILE_UPLOAD_TIMEOUT);
 
-  broadcastScene = async (
+  /**
+   * Broadcast a Yjs update on the scene's `Y.Doc` to the room (native-Yjs core,
+   * M3). `updateType` is INIT (full state for a new peer) or UPDATE (incremental
+   * update this replica originated). The bytes are serialized as a number[] so
+   * they survive the JSON-encoded encrypted socket payload. Yjs dedups/merges on
+   * the receiving side, so there is no per-element version gating any more.
+   */
+  broadcastSceneUpdate = async (
     updateType: WS_SUBTYPES.INIT | WS_SUBTYPES.UPDATE,
-    elements: readonly OrderedExcalidrawElement[],
-    syncAll: boolean,
+    update: Uint8Array,
   ) => {
-    if (updateType === WS_SUBTYPES.INIT && !syncAll) {
-      throw new Error("syncAll must be true when sending SCENE.INIT");
-    }
-
-    // sync out only the elements we think we need to to save bandwidth.
-    // periodically we'll resync the whole thing to make sure no one diverges
-    // due to a dropped message (server goes down etc).
-    const syncableElements = elements.reduce((acc, element) => {
-      if (
-        (syncAll ||
-          !this.broadcastedElementVersions.has(element.id) ||
-          element.version > this.broadcastedElementVersions.get(element.id)!) &&
-        isSyncableElement(element)
-      ) {
-        acc.push(element);
-      }
-      return acc;
-    }, [] as SyncableExcalidrawElement[]);
-
     const data: SocketUpdateDataSource[typeof updateType] = {
       type: updateType,
       payload: {
-        elements: syncableElements,
+        update: Array.from(update),
       },
     };
-
-    for (const syncableElement of syncableElements) {
-      this.broadcastedElementVersions.set(
-        syncableElement.id,
-        syncableElement.version,
-      );
-    }
 
     this.queueFileUpload();
 
     await this._broadcastSocketData(data as SocketUpdateData);
+  };
+
+  /** Send the FULL current scene-doc state to (re)seed a peer — used on
+   * `new-user` and as a periodic full-resync safety net. */
+  broadcastSceneInit = async () => {
+    await this.broadcastSceneUpdate(
+      WS_SUBTYPES.INIT,
+      this.collab.encodeSceneAsUpdate(),
+    );
   };
 
   broadcastIdleChange = (userState: UserIdleState) => {

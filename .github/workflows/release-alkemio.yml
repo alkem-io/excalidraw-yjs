@@ -1,14 +1,17 @@
 name: Release Alkemio package
 
-# Dual-registry publish, modelled on matrix-adapter's publish-lib.yml:
-#   - Tag push (v*)        -> publish BOTH packages to npmjs (OIDC + provenance, no token)
-#   - Pull request / manual -> publish a pkg.pr.new preview for BOTH packages (PR comment)
+# Single-registry publish, modelled on matrix-adapter's publish-lib.yml:
+#   - Tag push (v*)        -> publish @alkemio/excalidraw to npmjs (OIDC + provenance, no token)
+#   - Pull request / manual -> publish a pkg.pr.new preview for @alkemio/excalidraw (PR comment)
+#
+# Native-Yjs core: the editor's element store IS a `Y.Doc` (no separate scene↔doc
+# binding package), so there is one published package — @alkemio/excalidraw. The
+# former @alkemio/excalidraw-yjs-binding was deleted when collaboration went native.
 #
 # Versioning note: @alkemio/excalidraw uses a hand-maintained version string
-# (e.g. 0.18.0-<sha>-alkemio-N) that is committed into packages/excalidraw/package.json,
-# and @alkemio/excalidraw-yjs-binding locksteps at the same base (0.18.0). These are NOT
-# derived from the git tag — so, unlike matrix-adapter, this workflow does NOT run
-# `npm version` from the tag. It publishes whatever version is committed in each
+# (e.g. 0.18.0-<sha>-alkemio-N) that is committed into packages/excalidraw/package.json.
+# It is NOT derived from the git tag — so, unlike matrix-adapter, this workflow does
+# NOT run `npm version` from the tag. It publishes whatever version is committed in
 # package.json. Bump the version by committing the package.json change before tagging.
 
 on:
@@ -18,7 +21,6 @@ on:
   pull_request:
     paths:
       - "packages/excalidraw/**"
-      - "packages/yjs-binding/**"
   workflow_dispatch:
 
 permissions:
@@ -49,15 +51,12 @@ jobs:
       - name: Install workspace dependencies
         run: yarn install
 
-      # --- Release path: tag v* -> publish both packages to npmjs (OIDC + provenance) ---
+      # --- Release path: tag v* -> publish @alkemio/excalidraw to npmjs (OIDC + provenance) ---
 
-      # Build BOTH packages before publishing either one, so a build failure does not
-      # leave one package published and the other missing from the registry.
-      - name: Build packages for release (Tag)
+      - name: Build package for release (Tag)
         if: ${{ startsWith(github.ref, 'refs/tags/v') }}
         run: |
           yarn --cwd packages/excalidraw build:esm
-          yarn --cwd packages/yjs-binding build:esm
 
       - name: Publish @alkemio/excalidraw to npmjs (Tag)
         if: ${{ startsWith(github.ref, 'refs/tags/v') }}
@@ -76,30 +75,12 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "[View on npmjs](https://www.npmjs.com/package/@alkemio/excalidraw/v/${VERSION})" >> $GITHUB_STEP_SUMMARY
 
-      - name: Publish @alkemio/excalidraw-yjs-binding to npmjs (Tag)
-        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
-        working-directory: packages/yjs-binding
-        run: |
-          VERSION=$(node -p "require('./package.json').version")
-          echo "Publishing @alkemio/excalidraw-yjs-binding@${VERSION} to npmjs"
-          npm publish --access public --provenance --tag latest
-          echo "## 📦 Published to npmjs" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Package:** \`@alkemio/excalidraw-yjs-binding@${VERSION}\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "npm i @alkemio/excalidraw-yjs-binding@${VERSION}" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "[View on npmjs](https://www.npmjs.com/package/@alkemio/excalidraw-yjs-binding/v/${VERSION})" >> $GITHUB_STEP_SUMMARY
+      # --- PR / manual path: non-tag -> pkg.pr.new preview for @alkemio/excalidraw ---
 
-      # --- PR / manual path: non-tag -> pkg.pr.new preview for both packages ---
-
-      - name: Build packages for preview (PR/Manual)
+      - name: Build package for preview (PR/Manual)
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         run: |
           yarn --cwd packages/excalidraw build:esm
-          yarn --cwd packages/yjs-binding build:esm
 
       - name: Publish preview to pkg.pr.new (PR/Manual, pinned v0.0.65)
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
@@ -117,7 +98,7 @@ jobs:
           else
             COMMENT_ARG="--comment=off"
           fi
-          OUTPUT=$(npx pkg-pr-new@0.0.65 publish "${COMMENT_ARG}" ./packages/excalidraw ./packages/yjs-binding 2>&1)
+          OUTPUT=$(npx pkg-pr-new@0.0.65 publish "${COMMENT_ARG}" ./packages/excalidraw 2>&1)
           STATUS=$?
           set -e
           echo "$OUTPUT"
