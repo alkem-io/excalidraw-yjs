@@ -368,11 +368,14 @@ class Collab extends PureComponent<CollabProps, CollabState> {
     try {
       // Persistence only — the scene `Y.Doc` is the source of truth and already
       // holds the merged state, so there is nothing to reconcile back in from
-      // what Firebase stored (native-Yjs core, M3).
+      // what Firebase stored. Native-Yjs core (M4): the stored scene document is
+      // the doc encoded to Yjs V2 bytes (elements + files + persistable appState),
+      // not element JSON — so we pass the files through to be encoded into it.
       await saveToFirebase(
         this.portal,
         syncableElements,
         this.excalidrawAPI.getAppState(),
+        this.excalidrawAPI.getFiles(),
       );
 
       this.resetErrorIndicator();
