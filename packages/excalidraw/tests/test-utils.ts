@@ -427,51 +427,41 @@ export const assertElements = <T extends AllPossibleKeys<ExcalidrawElement>>(
   expect(h.state.selectedElementIds).toEqual(selectedElementIds);
 };
 
-const stripProps = (
-  deltas: Record<string, { deleted: any; inserted: any }>,
-  props: string[],
-) =>
-  Object.entries(deltas).reduce((acc, curr) => {
-    const { inserted, deleted, ...rest } = curr[1];
-
-    for (const prop of props) {
-      delete inserted[prop];
-      delete deleted[prop];
-    }
-
-    acc[curr[0]] = {
-      inserted,
-      deleted,
-      ...rest,
-    };
-
-    return acc;
-  }, {} as Record<string, any>);
-
+/**
+ * Native-Yjs core (M2): history is split — element steps live on the doc's
+ * `Y.UndoManager` (`scene.undoManager`), so a `History` stack entry no longer
+ * carries an element delta, only the paired inverse appState delta and a
+ * `hasElementChange` flag. We therefore snapshot:
+ *
+ *  - the editor-facing stacks (appState delta + element-change flag per entry),
+ *    which capture the appState-undo half + the entry/step alignment, and
+ *  - the doc UndoManager's stack depths, which capture the element-history half
+ *    (the actual reverted element state is asserted behaviourally elsewhere via
+ *    `h.elements`, and the doc round-trips it natively — there is nothing
+ *    element-shaped to snapshot here any more).
+ */
 export const checkpointHistory = (history: History, name: string) => {
-  expect(
-    history.undoStack.map((x) => ({
-      ...x,
-      elements: {
-        ...x.elements,
-        added: stripProps(x.elements.added, ["seed", "versionNonce"]),
-        removed: stripProps(x.elements.removed, ["seed", "versionNonce"]),
-        updated: stripProps(x.elements.updated, ["seed", "versionNonce"]),
-      },
-    })),
-  ).toMatchSnapshot(`[${name}] undo stack`);
+  const { h } = window;
+  const summarize = (entry: {
+    appState: unknown;
+    hasElementChange: boolean;
+  }) => ({
+    hasElementChange: entry.hasElementChange,
+    appState: entry.appState,
+  });
 
-  expect(
-    history.redoStack.map((x) => ({
-      ...x,
-      elements: {
-        ...x.elements,
-        added: stripProps(x.elements.added, ["seed", "versionNonce"]),
-        removed: stripProps(x.elements.removed, ["seed", "versionNonce"]),
-        updated: stripProps(x.elements.updated, ["seed", "versionNonce"]),
-      },
-    })),
-  ).toMatchSnapshot(`[${name}] redo stack`);
+  expect(history.undoStack.map(summarize)).toMatchSnapshot(
+    `[${name}] undo stack`,
+  );
+  expect(history.redoStack.map(summarize)).toMatchSnapshot(
+    `[${name}] redo stack`,
+  );
+
+  const scene = h.app.scene;
+  expect({
+    elementUndoDepth: scene.undoManager.undoStack.length,
+    elementRedoDepth: scene.undoManager.redoStack.length,
+  }).toMatchSnapshot(`[${name}] element history depth`);
 };
 
 /**
