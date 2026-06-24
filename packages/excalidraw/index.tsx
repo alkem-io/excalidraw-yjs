@@ -422,6 +422,12 @@ export { Fonts } from "./fonts/Fonts";
 
 export { setCustomTextMetricsProvider } from "@excalidraw/element";
 
+// 006-collab-content-unification: re-export the native-Yjs snapshot schema so consumers
+// (client-web) get it from the single published @alkemio/excalidraw package rather than
+// a separately-published @excalidraw/element.
+export { encodeSnapshot, decodeSnapshot } from "@excalidraw/element";
+export type { WhiteboardSnapshot } from "@excalidraw/element";
+
 export { CommandPalette } from "./components/CommandPalette/CommandPalette";
 
 export {
