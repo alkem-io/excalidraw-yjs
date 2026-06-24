@@ -291,6 +291,18 @@ export const yMapToElement = (ymap: Y.Map<unknown>): ElementRecord => {
       element[key] = value;
     }
   }
+  // Enforce the universal Excalidraw element invariant `groupIds: []` at the
+  // materialization boundary. The doc only carries keys that were present when the
+  // element was written, and `elementToYMap` skips `undefined` values — so an
+  // element authored by an earlier schema (or with `groupIds` omitted) comes back
+  // WITHOUT the key. Upstream guarantees `groupIds` is always an array and
+  // `renderStaticScene` reads `element.groupIds.length`/`.forEach` unguarded, so a
+  // missing value throws and the React error boundary unmounts the whole editor.
+  // Default it here so the native store always yields renderable elements (this is
+  // the documented element contract, not a renderer band-aid).
+  if (!Array.isArray(element.groupIds)) {
+    element.groupIds = [];
+  }
   return element;
 };
 

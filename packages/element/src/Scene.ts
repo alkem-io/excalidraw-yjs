@@ -491,7 +491,30 @@ export class Scene {
       this.recomputeFromDoc();
     };
     this.yElements.observeDeep(observer);
-    this.detachObserver = () => this.yElements.unobserveDeep(observer);
+
+    // Files live on the SAME doc (M4), so a change to `yFiles` — a local
+    // `setFiles`, OR a remote files apply (REMOTE_ORIGIN, M3), OR a load
+    // (`EPHEMERAL_ORIGIN`) — must notify the same `callbacks` as an element
+    // change, so the editor refreshes its in-memory files cache and re-renders.
+    // `.observe` (not `observeDeep`): each `yFiles` value is a whole FileRecord
+    // stored as a JSON-leaf — files are added/removed, never sub-merged (see the
+    // {@link yFiles} doc), so a shallow observe captures every file mutation.
+    // Read-only on the App side (refresh from `getFiles()`), so this can never
+    // echo: the observer does not write back, it only fires `triggerUpdate`.
+    const filesObserver = () => {
+      // Honor the same `informMutation:false` suppression window as the element
+      // recompute, so a files write coinciding with a suppressed element write
+      // (e.g. mid-gesture) does not force a React re-render early.
+      if (!this.suppressTrigger) {
+        this.triggerUpdate();
+      }
+    };
+    this.yFiles.observe(filesObserver);
+
+    this.detachObserver = () => {
+      this.yElements.unobserveDeep(observer);
+      this.yFiles.unobserve(filesObserver);
+    };
 
     if (options?.doc) {
       // Adopt an existing doc: derive the caches from whatever it already holds.

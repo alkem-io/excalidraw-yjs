@@ -778,7 +778,10 @@ class App extends React.Component<AppProps, AppState> {
       scrollToContent: this.scrollToContent,
       getSceneElements: this.getSceneElements,
       getAppState: () => this.state,
-      getFiles: () => this.files,
+      // Doc-backed (M4): files live on `scene.doc`, so always read them from the
+      // doc (refreshing the cache) — a host calling `getFiles()` sees files added
+      // by a remote peer or restored on load, even between renders. Read-only.
+      getFiles: () => (this.files = this.scene.getFiles() as BinaryFiles),
       getName: this.getName,
       registerAction: (action: Action) => {
         this.actionManager.registerAction(action);
@@ -3192,6 +3195,14 @@ class App extends React.Component<AppProps, AppState> {
       });
     }
 
+    // Keep the in-memory files cache in lock-step with the scene doc (M4).
+    // Files live on `scene.doc`; the doc is the source of truth. On every scene
+    // update — a local `setFiles`, a remote files apply (collaboration), a load,
+    // or undo/redo — refresh `this.files` from the doc, then render. This is a
+    // READ-ONLY mirror (`scene.getFiles()`): it must NEVER call `setFiles` /
+    // `addMissingFiles`, or the write→observe→refresh cycle would loop. Ordered
+    // before `triggerRender` so the render sees the freshest files.
+    this.scene.onUpdate(this.refreshFilesFromScene);
     this.scene.onUpdate(this.triggerRender);
     this.addEventListeners();
 
@@ -4614,6 +4625,21 @@ class App extends React.Component<AppProps, AppState> {
 
     this.files = nextFiles;
 
+    // Persist the newly-added files into the scene doc (M4): files live in the
+    // SAME `Y.Doc` as the elements, so `encodeStateAsUpdateV2(scene.doc)` captures
+    // them on save and they sync to peers over collaboration — the doc is the
+    // source of truth for files too. Only `addedFiles` are written (append-mostly,
+    // `prune:false`), so this never drops a file a peer just added and never
+    // re-writes an unchanged one. The `yFiles.observe` this fires only triggers a
+    // read-only refresh on the App side (`this.files = scene.getFiles()`), so
+    // there is no echo loop. No-op when nothing was added.
+    if (Object.keys(addedFiles).length) {
+      // `BinaryFileData` is structurally a `FileRecord` (a flat `{id, …}` JSON
+      // object) but lacks its index signature, so cast to the doc-side type the
+      // element package owns (kept decoupled from `BinaryFileData` on purpose).
+      this.scene.setFiles(addedFiles as Parameters<Scene["setFiles"]>[0]);
+    }
+
     return { addedFiles };
   };
 
@@ -4705,6 +4731,21 @@ class App extends React.Component<AppProps, AppState> {
       informMutation,
       isDragging: false,
     });
+  };
+
+  /**
+   * Refresh the in-memory files cache from the scene doc (M4). Files persist and
+   * collaborate via `scene.doc` (`yFiles`); this mirrors the doc's current files
+   * into `this.files` so files added by a remote peer or restored on load appear
+   * in the editor. Subscribed to `scene.onUpdate` (fires on every doc change).
+   *
+   * STRICTLY read-only — it pulls from `scene.getFiles()` and never writes back
+   * (no `setFiles` / `addMissingFiles`); the write path is `addMissingFiles`,
+   * which writes the doc, whose observe fires this refresh. A re-write here would
+   * create an infinite observe loop (and a collaboration broadcast echo).
+   */
+  private refreshFilesFromScene = () => {
+    this.files = this.scene.getFiles() as BinaryFiles;
   };
 
   private triggerRender = (
