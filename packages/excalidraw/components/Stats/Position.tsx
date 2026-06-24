@@ -1,14 +1,14 @@
-import { clamp, pointFrom, pointRotateRads, round } from "@excalidraw/math";
+import { clamp, pointFrom, pointRotateRads, round } from "@excalidraw-yjs/math";
 
 import {
   getFlipAdjustedCropPosition,
   getUncroppedWidthAndHeight,
-} from "@excalidraw/element";
-import { isImageElement } from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
+import { isImageElement } from "@excalidraw-yjs/element";
 
-import type { ElementsMap, ExcalidrawElement } from "@excalidraw/element/types";
+import type { ElementsMap, ExcalidrawElement } from "@excalidraw-yjs/element/types";
 
-import type { Scene } from "@excalidraw/element";
+import type { Scene } from "@excalidraw-yjs/element";
 
 import StatsDragInput from "./DragInput";
 import { getStepSizedValue, moveElement, STEP_SIZE } from "./utils";

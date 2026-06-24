@@ -1,15 +1,15 @@
-import { degreesToRadians, radiansToDegrees } from "@excalidraw/math";
+import { degreesToRadians, radiansToDegrees } from "@excalidraw-yjs/math";
 
-import { getBoundTextElement } from "@excalidraw/element";
-import { isArrowElement } from "@excalidraw/element";
+import { getBoundTextElement } from "@excalidraw-yjs/element";
+import { isArrowElement } from "@excalidraw-yjs/element";
 
-import { isInGroup } from "@excalidraw/element";
+import { isInGroup } from "@excalidraw-yjs/element";
 
-import type { Degrees } from "@excalidraw/math";
+import type { Degrees } from "@excalidraw-yjs/math";
 
-import type { ExcalidrawElement } from "@excalidraw/element/types";
+import type { ExcalidrawElement } from "@excalidraw-yjs/element/types";
 
-import type { Scene } from "@excalidraw/element";
+import type { Scene } from "@excalidraw-yjs/element";
 
 import { angleIcon } from "../icons";
 

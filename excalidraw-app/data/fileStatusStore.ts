@@ -1,6 +1,6 @@
-import { VersionedSnapshotStore } from "@excalidraw/common";
+import { VersionedSnapshotStore } from "@excalidraw-yjs/common";
 
-import type { FileId } from "@excalidraw/element/types";
+import type { FileId } from "@excalidraw-yjs/element/types";
 
 export type FileLoadingStatus = "loading" | "loaded" | "error";
 

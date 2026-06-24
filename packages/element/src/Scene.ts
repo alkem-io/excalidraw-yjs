@@ -9,21 +9,21 @@ import {
   isTestEnv,
   toArray,
   getUpdatedTimestamp,
-} from "@excalidraw/common";
-import { isNonDeletedElement } from "@excalidraw/element";
-import { isFrameLikeElement } from "@excalidraw/element";
-import { getElementsInGroup } from "@excalidraw/element";
+} from "@excalidraw-yjs/common";
+import { isNonDeletedElement } from "@excalidraw-yjs/element";
+import { isFrameLikeElement } from "@excalidraw-yjs/element";
+import { getElementsInGroup } from "@excalidraw-yjs/element";
 
 import {
   syncInvalidIndices,
   syncMovedIndices,
   validateFractionalIndices,
   orderByFractionalIndex,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
-import { getSelectedElements } from "@excalidraw/element";
+import { getSelectedElements } from "@excalidraw-yjs/element";
 
-import { mutateElement, type ElementUpdate } from "@excalidraw/element";
+import { mutateElement, type ElementUpdate } from "@excalidraw-yjs/element";
 
 import type {
   ExcalidrawElement,
@@ -35,13 +35,13 @@ import type {
   NonDeletedSceneElementsMap,
   OrderedExcalidrawElement,
   Ordered,
-} from "@excalidraw/element/types";
+} from "@excalidraw-yjs/element/types";
 
 import type {
   Assert,
   Mutable,
   SameType,
-} from "@excalidraw/common/utility-types";
+} from "@excalidraw-yjs/common/utility-types";
 
 import {
   ELEMENTS,

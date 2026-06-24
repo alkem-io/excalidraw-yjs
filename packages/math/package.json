@@ -1,5 +1,5 @@
 {
-  "name": "@excalidraw/math",
+  "name": "@excalidraw-yjs/math",
   "version": "0.18.0",
   "type": "module",
   "types": "./dist/types/math/src/index.d.ts",
@@ -58,9 +58,9 @@
   "repository": "https://github.com/excalidraw/excalidraw",
   "scripts": {
     "gen:types": "rimraf types && tsc",
-    "build:esm": "rimraf dist && node ../../scripts/buildBase.js && yarn gen:types"
+    "build:esm": "rimraf dist && node ../../scripts/buildBase.js && pnpm run gen:types"
   },
   "dependencies": {
-    "@excalidraw/common": "0.18.0"
+    "@excalidraw-yjs/common": "workspace:*"
   }
 }

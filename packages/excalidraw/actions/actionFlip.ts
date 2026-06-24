@@ -1,14 +1,14 @@
-import { getNonDeletedElements } from "@excalidraw/element";
-import { bindOrUnbindBindingElements } from "@excalidraw/element";
-import { getCommonBoundingBox } from "@excalidraw/element";
-import { newElementWith } from "@excalidraw/element";
-import { deepCopyElement } from "@excalidraw/element";
-import { resizeMultipleElements } from "@excalidraw/element";
-import { isArrowElement, isElbowArrow } from "@excalidraw/element";
-import { updateFrameMembershipOfSelectedElements } from "@excalidraw/element";
-import { CODES, KEYS, arrayToMap } from "@excalidraw/common";
+import { getNonDeletedElements } from "@excalidraw-yjs/element";
+import { bindOrUnbindBindingElements } from "@excalidraw-yjs/element";
+import { getCommonBoundingBox } from "@excalidraw-yjs/element";
+import { newElementWith } from "@excalidraw-yjs/element";
+import { deepCopyElement } from "@excalidraw-yjs/element";
+import { resizeMultipleElements } from "@excalidraw-yjs/element";
+import { isArrowElement, isElbowArrow } from "@excalidraw-yjs/element";
+import { updateFrameMembershipOfSelectedElements } from "@excalidraw-yjs/element";
+import { CODES, KEYS, arrayToMap } from "@excalidraw-yjs/common";
 
-import { CaptureUpdateAction } from "@excalidraw/element";
+import { CaptureUpdateAction } from "@excalidraw-yjs/element";
 
 import type {
   ExcalidrawArrowElement,
@@ -16,7 +16,7 @@ import type {
   ExcalidrawElement,
   NonDeleted,
   NonDeletedSceneElementsMap,
-} from "@excalidraw/element/types";
+} from "@excalidraw-yjs/element/types";
 
 import { getSelectedElements } from "../scene";
 

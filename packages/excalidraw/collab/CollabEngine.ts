@@ -1,6 +1,6 @@
 import * as Y from "yjs";
 
-import type { Scene } from "@excalidraw/element";
+import type { Scene } from "@excalidraw-yjs/element";
 
 /**
  * Native-Yjs collaboration engine (native-Yjs core, M3).

@@ -11,20 +11,20 @@ const getConfig = (outdir) => ({
   entryNames: "[name]",
   assetNames: "[dir]/[name]",
   alias: {
-    "@excalidraw/utils": path.resolve(__dirname, "../packages/utils/src"),
+    "@excalidraw-yjs/utils": path.resolve(__dirname, "../packages/utils/src"),
   },
   external: [
-    "@excalidraw/common",
-    "@excalidraw/element",
-    "@excalidraw/math",
-    "@excalidraw/fractional-indexing",
+    "@excalidraw-yjs/common",
+    "@excalidraw-yjs/element",
+    "@excalidraw-yjs/math",
+    "@excalidraw-yjs/fractional-indexing",
     // Public upstream package the order helpers depend on directly (re-pointed off
-    // the internal, unpublished `@excalidraw/fractional-indexing` so the published
+    // the internal, unpublished `@excalidraw-yjs/fractional-indexing` so the published
     // package installs without a consumer override). Kept external so it resolves
     // from the consumer's node_modules rather than being inlined into the bundle.
     "fractional-indexing",
     // The CRDT runtime MUST be externalized, never bundled. Native-Yjs core: the
-    // editor's element store IS a `Y.Doc` (`@excalidraw/element`'s `Scene` owns it)
+    // editor's element store IS a `Y.Doc` (`@excalidraw-yjs/element`'s `Scene` owns it)
     // and collaboration/persistence exchange Yjs updates on it. A consumer that
     // creates or receives its own `Y.Doc` (collab provider, persistence) and a
     // bundled copy of yjs would be two distinct `yjs` instances, and yjs's

@@ -1,6 +1,6 @@
-import { KEYS } from "@excalidraw/common";
+import { KEYS } from "@excalidraw-yjs/common";
 
-import type { Node } from "@excalidraw/common";
+import type { Node } from "@excalidraw-yjs/common";
 
 import { type FontDescriptor } from "./FontPickerList";
 

@@ -2,16 +2,16 @@ import {
   DEFAULT_EXPORT_PADDING,
   EDITOR_LS_KEYS,
   THEME,
-} from "@excalidraw/common";
+} from "@excalidraw-yjs/common";
 
-import { convertToExcalidrawElements } from "@excalidraw/element";
+import { convertToExcalidrawElements } from "@excalidraw-yjs/element";
 
-import { exportToCanvas } from "@excalidraw/utils";
+import { exportToCanvas } from "@excalidraw-yjs/utils";
 
 import type {
   NonDeletedExcalidrawElement,
   Theme,
-} from "@excalidraw/element/types";
+} from "@excalidraw-yjs/element/types";
 
 import { EditorLocalStorage } from "../../data/EditorLocalStorage";
 

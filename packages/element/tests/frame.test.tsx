@@ -1,18 +1,18 @@
 import {
   convertToExcalidrawElements,
   Excalidraw,
-} from "@excalidraw/excalidraw";
-import { arrayToMap } from "@excalidraw/common";
+} from "@excalidraw-yjs/excalidraw";
+import { arrayToMap } from "@excalidraw-yjs/common";
 
-import { API } from "@excalidraw/excalidraw/tests/helpers/api";
-import { Keyboard, Pointer, UI } from "@excalidraw/excalidraw/tests/helpers/ui";
-import { getTextEditor } from "@excalidraw/excalidraw/tests/queries/dom";
+import { API } from "@excalidraw-yjs/excalidraw/tests/helpers/api";
+import { Keyboard, Pointer, UI } from "@excalidraw-yjs/excalidraw/tests/helpers/ui";
+import { getTextEditor } from "@excalidraw-yjs/excalidraw/tests/queries/dom";
 import {
   getCloneByOrigId,
   render,
-} from "@excalidraw/excalidraw/tests/test-utils";
+} from "@excalidraw-yjs/excalidraw/tests/test-utils";
 
-import { getSelectedElements } from "@excalidraw/excalidraw/scene";
+import { getSelectedElements } from "@excalidraw-yjs/excalidraw/scene";
 
 import { elementOverlapsWithFrame } from "../src/frame";
 

@@ -13,33 +13,33 @@ import {
   getFontString,
   toBrandedType,
   applyDarkModeFilter,
-} from "@excalidraw/common";
+} from "@excalidraw-yjs/common";
 
-import { getCommonBounds, getElementAbsoluteCoords } from "@excalidraw/element";
+import { getCommonBounds, getElementAbsoluteCoords } from "@excalidraw-yjs/element";
 
 import {
   getInitializedImageElements,
   updateImageCache,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
-import { newElementWith } from "@excalidraw/element";
+import { newElementWith } from "@excalidraw-yjs/element";
 
-import { isFrameLikeElement } from "@excalidraw/element";
+import { isFrameLikeElement } from "@excalidraw-yjs/element";
 
 import {
   getElementsOverlappingFrame,
   getFrameLikeElements,
   getFrameLikeTitle,
   getRootElements,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
-import { syncInvalidIndices } from "@excalidraw/element";
+import { syncInvalidIndices } from "@excalidraw-yjs/element";
 
-import { type Mutable } from "@excalidraw/common/utility-types";
+import { type Mutable } from "@excalidraw-yjs/common/utility-types";
 
-import { newTextElement } from "@excalidraw/element";
+import { newTextElement } from "@excalidraw-yjs/element";
 
-import type { Bounds } from "@excalidraw/common";
+import type { Bounds } from "@excalidraw-yjs/common";
 
 import type {
   ExcalidrawElement,
@@ -47,7 +47,7 @@ import type {
   ExcalidrawTextElement,
   NonDeletedExcalidrawElement,
   NonDeletedSceneElementsMap,
-} from "@excalidraw/element/types";
+} from "@excalidraw-yjs/element/types";
 
 import { getDefaultAppState } from "../appState";
 import { base64ToString, decode, encode, stringToBase64 } from "../data/encode";

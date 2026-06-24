@@ -1,9 +1,9 @@
-import { arrayToMap } from "@excalidraw/common";
+import { arrayToMap } from "@excalidraw-yjs/common";
 
 import {
   validateOrderKey,
   generateNKeysBetween,
-} from "@excalidraw/fractional-indexing";
+} from "@excalidraw-yjs/fractional-indexing";
 
 import { mutateElement, newElementWith } from "./mutateElement";
 import { getBoundTextElement } from "./textElement";

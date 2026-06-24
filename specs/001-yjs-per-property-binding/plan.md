@@ -1,6 +1,6 @@
 # Implementation Plan: Per-Property Yjs Whiteboard Binding
 
-**Branch**: `feat/003-unify-collab-yjs` | **Date**: 2026-06-18 | **Spec**: [spec.md](./spec.md) **Repo**: `alkem-io/excalidraw-fork` (`@alkemio/excalidraw`, Excalidraw 0.18.x monorepo) **Parent epic**: workspace `003-unify-collab-yjs` — WS-B (B2). DRAFT PR alkem-io/excalidraw-fork#30. **Input**: this sub-spec's `spec.md` + the frozen epic data-model/contracts.
+**Branch**: `feat/003-unify-collab-yjs` | **Date**: 2026-06-18 | **Spec**: [spec.md](./spec.md) **Repo**: `alkem-io/excalidraw-fork` (`@excalidraw-yjs/excalidraw`, Excalidraw 0.18.x monorepo) **Parent epic**: workspace `003-unify-collab-yjs` — WS-B (B2). DRAFT PR alkem-io/excalidraw-fork#30. **Input**: this sub-spec's `spec.md` + the frozen epic data-model/contracts.
 
 ## Summary
 
@@ -8,7 +8,7 @@ Add a **new package to the Excalidraw monorepo** that binds the live Excalidraw 
 
 ## Technical Context
 
-**Language/Version**: TypeScript (monorepo's TS config), React 18, Excalidraw 0.18.x. **New runtime deps**: `yjs`, `y-protocols` (canonical JS). Reuses the in-repo `@excalidraw/fractional-indexing@3.3.0`. **No** `y-websocket`/socket here (transport is WS-D). **No** dependency on the `y-crdt` Go core or the v2 codec. **Storage**: N/A (the binding is a library; persistence is the server's concern). **Testing**: `vitest` (the repo's test runner) — component tests with **two in-process `Y.Doc`s**, plus contribution to the WS-F shared e2e harness. **No Go server needed.** **Target Platform**: browser (client-web consumes the published `@alkemio/excalidraw`). **Project Type**: monorepo package (the binding) within an existing React library. **Wire encoding**: **v1** (what `y-protocols` uses on the wire today). v2 is storage/ migration (WS-A/WS-E), not this binding. **Performance/Constraints**: diff O(changed), apply touches only affected elements (NFR-B-001); ≥95% coverage (NFR-B-003 / epic SC-008); no echo, no presence-in-doc. **Scale/Scope**: thousands of elements per board; one binding per mounted editor.
+**Language/Version**: TypeScript (monorepo's TS config), React 18, Excalidraw 0.18.x. **New runtime deps**: `yjs`, `y-protocols` (canonical JS). Reuses the in-repo `@excalidraw-yjs/fractional-indexing@3.3.0`. **No** `y-websocket`/socket here (transport is WS-D). **No** dependency on the `y-crdt` Go core or the v2 codec. **Storage**: N/A (the binding is a library; persistence is the server's concern). **Testing**: `vitest` (the repo's test runner) — component tests with **two in-process `Y.Doc`s**, plus contribution to the WS-F shared e2e harness. **No Go server needed.** **Target Platform**: browser (client-web consumes the published `@excalidraw-yjs/excalidraw`). **Project Type**: monorepo package (the binding) within an existing React library. **Wire encoding**: **v1** (what `y-protocols` uses on the wire today). v2 is storage/ migration (WS-A/WS-E), not this binding. **Performance/Constraints**: diff O(changed), apply touches only affected elements (NFR-B-001); ≥95% coverage (NFR-B-003 / epic SC-008); no echo, no presence-in-doc. **Scale/Scope**: thousands of elements per board; one binding per mounted editor.
 
 ## Dependencies note (explicit, per the brief)
 
@@ -48,17 +48,17 @@ specs/001-yjs-per-property-binding/
 
 ```text
 packages/
-├── excalidraw/            # existing — published as @alkemio/excalidraw
+├── excalidraw/            # existing — published as @excalidraw-yjs/excalidraw
 ├── element/               # existing — element types + fractionalIndex.ts (reused)
 ├── fractional-indexing/   # existing — reused for z-order
 └── yjs-binding/           # NEW — this work-stream
-    ├── package.json       # deps: yjs, y-protocols, @excalidraw/element, @excalidraw/fractional-indexing
+    ├── package.json       # deps: yjs, y-protocols, @excalidraw-yjs/element, @excalidraw-yjs/fractional-indexing
     ├── src/
     │   ├── index.ts           # WhiteboardBinding class — construct/destroy, wires the loops
     │   ├── schema.ts          # root-name constants, element-Y.Map ↔ element-object encode/decode, JSON-leaf rules (data-model §2/§4)
     │   ├── diff.ts            # onChange → per-property deltas; areElementsSame fast gate (§8 Diff)
     │   ├── apply.ts           # observe → updateScene; echo guard; index repair; editing guard (§8 Apply)
-    │   ├── order.ts           # thin wrappers over @excalidraw/fractional-indexing (generateKeyBetween, syncInvalidIndices, orderByFractionalIndex)
+    │   ├── order.ts           # thin wrappers over @excalidraw-yjs/fractional-indexing (generateKeyBetween, syncInvalidIndices, orderByFractionalIndex)
     │   ├── files.ts           # files Y.Map diff/observe (append/remove)
     │   ├── awareness.ts       # pointer/selection/idle → awareness; emoji/countdown/bounds → ephemeral dispatch (§7)
     │   ├── migrate.ts         # populateYDoc(sceneJSON) + exportSceneJSON(ydoc) — lossless round-trip (§6)
@@ -71,7 +71,7 @@ packages/
         └── roundtrip.test.ts      # JSON↔Y.Doc losslessness incl. points/bound/files/customData (US5)
 ```
 
-**Structure Decision**: a self-contained `packages/yjs-binding` keeps the binding out of the published editor core (`packages/excalidraw`) so the editor stays transport-agnostic and the binding can be versioned/imported independently by `client-web` (WS-D). It depends on `@excalidraw/element` (types + fractional indexing) but not vice-versa.
+**Structure Decision**: a self-contained `packages/yjs-binding` keeps the binding out of the published editor core (`packages/excalidraw`) so the editor stays transport-agnostic and the binding can be versioned/imported independently by `client-web` (WS-D). It depends on `@excalidraw-yjs/element` (types + fractional indexing) but not vice-versa.
 
 ## The seam with client-web (WS-D, not this spec)
 

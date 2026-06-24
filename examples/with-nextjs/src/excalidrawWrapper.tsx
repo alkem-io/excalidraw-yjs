@@ -1,8 +1,8 @@
 "use client";
-import * as excalidrawLib from "@excalidraw/excalidraw";
-import { Excalidraw } from "@excalidraw/excalidraw";
+import * as excalidrawLib from "@excalidraw-yjs/excalidraw";
+import { Excalidraw } from "@excalidraw-yjs/excalidraw";
 
-import "@excalidraw/excalidraw/index.css";
+import "@excalidraw-yjs/excalidraw/index.css";
 
 import App from "../../with-script-in-browser/components/ExampleApp";
 

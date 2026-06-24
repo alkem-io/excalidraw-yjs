@@ -72,7 +72,7 @@ Subtype-specific keys (present only on that subtype):
 - `index` is the element's own `FractionalIndex` branded string, stored as a plain scalar key on the element `Y.Map`.
 - **Order is derived from `index`, never from Y.Map iteration order** (a `Y.Map` has no meaningful order). On apply, sort elements by `index` (ties by `id`) via the fork's `orderByFractionalIndex`.
 - **Insert between neighbours**: `generateKeyBetween(prevIndex, nextIndex)`. Concurrent inserts at the same gap can pick **equal** keys; on apply, run `syncInvalidIndices` (fork-native) to deterministically repair collisions so all clients converge to identical order (US3-AC3). The repair itself is a local, idempotent normalization — it may write corrected `index` values back into the doc under the binding's origin (so it is treated as a local change, not echoed).
-- This **reuses** `@excalidraw/fractional-indexing@3.3.0` (`packages/fractional-indexing`, also surfaced via `packages/element/src/fractionalIndex.ts`). No bespoke order.
+- This **reuses** `@excalidraw-yjs/fractional-indexing@3.3.0` (`packages/fractional-indexing`, also surfaced via `packages/element/src/fractionalIndex.ts`). No bespoke order.
 
 ---
 

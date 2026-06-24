@@ -1,11 +1,11 @@
-import { KEYS, invariant, toBrandedType } from "@excalidraw/common";
+import { KEYS, invariant, toBrandedType } from "@excalidraw-yjs/common";
 
-import { type GlobalPoint, pointFrom, type LocalPoint } from "@excalidraw/math";
+import { type GlobalPoint, pointFrom, type LocalPoint } from "@excalidraw-yjs/math";
 
 import type {
   AppState,
   PendingExcalidrawElements,
-} from "@excalidraw/excalidraw/types";
+} from "@excalidraw-yjs/excalidraw/types";
 
 import { bindBindingElement } from "./binding";
 import { updateElbowArrowPoints } from "./elbowArrow";

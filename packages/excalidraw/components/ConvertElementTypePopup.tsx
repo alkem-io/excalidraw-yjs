@@ -5,9 +5,9 @@ import {
   getLinearElementSubType,
   mutateElement,
   updateElbowArrowPoints,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
-import { pointFrom, pointRotateRads, type LocalPoint } from "@excalidraw/math";
+import { pointFrom, pointRotateRads, type LocalPoint } from "@excalidraw-yjs/math";
 
 import {
   hasBoundTextElement,
@@ -16,21 +16,21 @@ import {
   isElbowArrow,
   isLinearElement,
   isUsingAdaptiveRadius,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
 import {
   getCommonBoundingBox,
   getElementAbsoluteCoords,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
 import {
   getBoundTextElement,
   getBoundTextMaxHeight,
   getBoundTextMaxWidth,
   redrawTextBoundingBox,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
-import { wrapText } from "@excalidraw/element";
+import { wrapText } from "@excalidraw-yjs/element";
 
 import {
   assertNever,
@@ -42,21 +42,21 @@ import {
   ROUNDNESS,
   sceneCoordsToViewportCoords,
   updateActiveTool,
-} from "@excalidraw/common";
+} from "@excalidraw-yjs/common";
 
-import { measureText } from "@excalidraw/element";
+import { measureText } from "@excalidraw-yjs/element";
 
-import { LinearElementEditor } from "@excalidraw/element";
+import { LinearElementEditor } from "@excalidraw-yjs/element";
 
 import {
   newArrowElement,
   newElement,
   newLinearElement,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
-import { ShapeCache } from "@excalidraw/element";
+import { ShapeCache } from "@excalidraw-yjs/element";
 
-import { updateBindings } from "@excalidraw/element";
+import { updateBindings } from "@excalidraw-yjs/element";
 
 import type {
   ConvertibleGenericTypes,
@@ -71,9 +71,9 @@ import type {
   ExcalidrawTextContainer,
   ExcalidrawTextElementWithContainer,
   FixedSegment,
-} from "@excalidraw/element/types";
+} from "@excalidraw-yjs/element/types";
 
-import type { Scene } from "@excalidraw/element";
+import type { Scene } from "@excalidraw-yjs/element";
 
 import { trackEvent } from "../analytics";
 import { atom } from "../editor-jotai";

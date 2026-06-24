@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "dependencies": {
-    "@excalidraw/excalidraw": "*",
+    "@excalidraw-yjs/excalidraw": "workspace:*",
     "browser-fs-access": "0.38.0",
     "react": "19.0.0",
     "react-dom": "19.0.0"
@@ -16,7 +16,7 @@
     "start": "vite",
     "build": "vite build",
     "preview": "vite preview --port 5002",
-    "build:preview": "yarn build && yarn preview",
-    "build:packages": "yarn --cwd ../../ build:packages"
+    "build:preview": "pnpm run build && pnpm run preview",
+    "build:packages": "pnpm -C ../../ run build:packages"
   }
 }
