@@ -4,9 +4,9 @@
 
 Excalidraw is a **monorepo** with a clear separation between the core library and the application:
 
-- **`packages/excalidraw/`** - Main React component library published to npm as `@excalidraw/excalidraw`
+- **`packages/excalidraw/`** - Main React component library published to npm as `@excalidraw-yjs/excalidraw`
 - **`excalidraw-app/`** - Full-featured web application (excalidraw.com) that uses the library
-- **`packages/`** - Core packages: `@excalidraw/common`, `@excalidraw/element`, `@excalidraw/math`, `@excalidraw/utils`
+- **`packages/`** - Core packages: `@excalidraw-yjs/common`, `@excalidraw-yjs/element`, `@excalidraw-yjs/math`, `@excalidraw-yjs/utils`
 - **`examples/`** - Integration examples (NextJS, browser script)
 
 ## Development Workflow
@@ -35,7 +35,7 @@ yarn fix             # Auto-fix formatting and linting issues
 
 ## Excalidraw - Alkemio Fork
 
-In this case, this is @alkemio/excalidraw, a fork of the original Excalidraw repository. Alkemio's custom version is as similar as possible to the original to avoid conflicts when updating from master.
+In this case, this is @excalidraw-yjs/excalidraw, a fork of the original Excalidraw repository. Alkemio's custom version is as similar as possible to the original to avoid conflicts when updating from master.
 
 ### List of differences with standard Excalidraw
 

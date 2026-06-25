@@ -1,17 +1,17 @@
 import { vi } from "vitest";
 
-import { ROUNDNESS, KEYS, arrayToMap, cloneJSON } from "@excalidraw/common";
+import { ROUNDNESS, KEYS, arrayToMap, cloneJSON } from "@excalidraw-yjs/common";
 
-import { pointFrom, type Radians } from "@excalidraw/math";
+import { pointFrom, type Radians } from "@excalidraw-yjs/math";
 
 import {
   getBoundTextElement,
   getBoundTextElementPosition,
-} from "@excalidraw/element";
-import { getElementAbsoluteCoords } from "@excalidraw/element";
-import { newLinearElement } from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
+import { getElementAbsoluteCoords } from "@excalidraw-yjs/element";
+import { newLinearElement } from "@excalidraw-yjs/element";
 
-import type { LocalPoint } from "@excalidraw/math";
+import type { LocalPoint } from "@excalidraw-yjs/math";
 
 import type {
   ExcalidrawElement,
@@ -19,7 +19,7 @@ import type {
   ExcalidrawLinearElement,
   ExcalidrawTextElementWithContainer,
   FileId,
-} from "@excalidraw/element/types";
+} from "@excalidraw-yjs/element/types";
 
 import { actionFlipHorizontal, actionFlipVertical } from "../actions";
 import { createPasteEvent } from "../clipboard";

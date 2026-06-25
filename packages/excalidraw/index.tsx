@@ -11,7 +11,7 @@ import {
   DEFAULT_IMAGE_OPTIONS,
   DEFAULT_UI_OPTIONS,
   isShallowEqual,
-} from "@excalidraw/common";
+} from "@excalidraw-yjs/common";
 
 import App, {
   ExcalidrawAPIContext,
@@ -316,10 +316,10 @@ export {
   hashElementsVersion,
   hashString,
   getNonDeletedElements,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
-export { getTextFromElements } from "@excalidraw/element";
-export { isInvisiblySmallElement } from "@excalidraw/element";
+export { getTextFromElements } from "@excalidraw-yjs/element";
+export { isInvisiblySmallElement } from "@excalidraw-yjs/element";
 
 export { defaultLang, useI18n, languages } from "./i18n";
 export {
@@ -344,7 +344,7 @@ export {
   exportToBlob,
   exportToSvg,
   exportToClipboard,
-} from "@excalidraw/utils/export";
+} from "@excalidraw-yjs/utils/export";
 
 export { serializeAsJSON, serializeLibraryAsJSON } from "./data/json";
 export {
@@ -353,7 +353,7 @@ export {
   loadLibraryFromBlob,
 } from "./data/blob";
 export { mergeLibraryItems, getLibraryItemsHash } from "./data/library";
-export { isLinearElement } from "@excalidraw/element";
+export { isLinearElement } from "@excalidraw-yjs/element";
 
 export {
   FONT_FAMILY,
@@ -367,15 +367,15 @@ export {
   viewportCoordsToSceneCoords,
   getFormFactor,
   throttleRAF,
-} from "@excalidraw/common";
+} from "@excalidraw-yjs/common";
 
 export {
   mutateElement,
   newElementWith,
   bumpVersion,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
-export { CaptureUpdateAction } from "@excalidraw/element";
+export { CaptureUpdateAction } from "@excalidraw-yjs/element";
 
 export { parseLibraryTokensFromUrl, useHandleLibrary } from "./data/library";
 
@@ -410,23 +410,23 @@ export {
   getCommonBounds,
   getVisibleSceneBounds,
   convertToExcalidrawElements,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
-export { elementsOverlappingBBox } from "@excalidraw/element";
+export { elementsOverlappingBBox } from "@excalidraw-yjs/element";
 
 export { DiagramToCodePlugin } from "./components/DiagramToCodePlugin/DiagramToCodePlugin";
 export { getDataURL } from "./data/blob";
-export { isElementLink } from "@excalidraw/element";
+export { isElementLink } from "@excalidraw-yjs/element";
 
 export { Fonts } from "./fonts/Fonts";
 
-export { setCustomTextMetricsProvider } from "@excalidraw/element";
+export { setCustomTextMetricsProvider } from "@excalidraw-yjs/element";
 
 // 006-collab-content-unification: re-export the native-Yjs snapshot schema so consumers
-// (client-web) get it from the single published @alkemio/excalidraw package rather than
-// a separately-published @excalidraw/element.
-export { encodeSnapshot, decodeSnapshot } from "@excalidraw/element";
-export type { WhiteboardSnapshot } from "@excalidraw/element";
+// (client-web) get it from the single published @excalidraw-yjs/excalidraw package rather than
+// a separately-published @excalidraw-yjs/element.
+export { encodeSnapshot, decodeSnapshot } from "@excalidraw-yjs/element";
+export type { WhiteboardSnapshot } from "@excalidraw-yjs/element";
 
 export { CommandPalette } from "./components/CommandPalette/CommandPalette";
 

@@ -12,18 +12,18 @@ import {
   EXPORT_DATA_TYPES,
   applyDarkModeFilter,
   isRTL,
-} from "@excalidraw/common";
-import { pointFrom, pointRotateRads, type Radians } from "@excalidraw/math";
+} from "@excalidraw-yjs/common";
+import { pointFrom, pointRotateRads, type Radians } from "@excalidraw-yjs/math";
 
 import {
   getTextFromElements,
   originalContainerCache,
   updateBoundElements,
   updateOriginalContainerCache,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
-import { LinearElementEditor } from "@excalidraw/element";
-import { bumpVersion } from "@excalidraw/element";
+import { LinearElementEditor } from "@excalidraw-yjs/element";
+import { bumpVersion } from "@excalidraw-yjs/element";
 import {
   getBoundTextElementId,
   getContainerElement,
@@ -34,25 +34,25 @@ import {
   computeContainerDimensionForBoundText,
   computeBoundTextPosition,
   getBoundTextElement,
-} from "@excalidraw/element";
-import { getTextWidth } from "@excalidraw/element";
-import { getLineHeightInPx } from "@excalidraw/element";
-import { getLineWidth } from "@excalidraw/element";
-import { normalizeText } from "@excalidraw/element";
-import { wrapText } from "@excalidraw/element";
-import { getWrappedTextLines } from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
+import { getTextWidth } from "@excalidraw-yjs/element";
+import { getLineHeightInPx } from "@excalidraw-yjs/element";
+import { getLineWidth } from "@excalidraw-yjs/element";
+import { normalizeText } from "@excalidraw-yjs/element";
+import { wrapText } from "@excalidraw-yjs/element";
+import { getWrappedTextLines } from "@excalidraw-yjs/element";
 import {
   isArrowElement,
   isBoundToContainer,
   isTextElement,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
 import type {
   ExcalidrawElement,
   ExcalidrawLinearElement,
   ExcalidrawTextElementWithContainer,
   ExcalidrawTextElement,
-} from "@excalidraw/element/types";
+} from "@excalidraw-yjs/element/types";
 
 import { actionSaveToActiveFile } from "../actions";
 

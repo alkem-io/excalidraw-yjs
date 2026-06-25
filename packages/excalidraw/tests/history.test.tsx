@@ -6,9 +6,9 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { vi } from "vitest";
-import { pointFrom } from "@excalidraw/math";
+import { pointFrom } from "@excalidraw-yjs/math";
 
-import { newElementWith } from "@excalidraw/element";
+import { newElementWith } from "@excalidraw-yjs/element";
 
 import {
   EXPORT_DATA_TYPES,
@@ -21,15 +21,15 @@ import {
   DEFAULT_ELEMENT_STROKE_COLOR_INDEX,
   reseed,
   randomId,
-} from "@excalidraw/common";
+} from "@excalidraw-yjs/common";
 
-import "@excalidraw/utils/test-utils";
+import "@excalidraw-yjs/utils/test-utils";
 
-import { AppStateDelta } from "@excalidraw/element";
+import { AppStateDelta } from "@excalidraw-yjs/element";
 
-import { CaptureUpdateAction } from "@excalidraw/element";
+import { CaptureUpdateAction } from "@excalidraw-yjs/element";
 
-import type { LocalPoint, Radians } from "@excalidraw/math";
+import type { LocalPoint, Radians } from "@excalidraw-yjs/math";
 
 import type {
   ExcalidrawElbowArrowElement,
@@ -41,7 +41,7 @@ import type {
   FixedPointBinding,
   FractionalIndex,
   SceneElementsMap,
-} from "@excalidraw/element/types";
+} from "@excalidraw-yjs/element/types";
 
 import "../global.d.ts";
 

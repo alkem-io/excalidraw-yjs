@@ -72,13 +72,13 @@ const getConfig = (outdir) => ({
   assetNames: "[dir]/[name]",
   chunkNames: "[dir]/[name]-[hash]",
   alias: {
-    "@excalidraw/utils": path.resolve(__dirname, "../packages/utils/src"),
+    "@excalidraw-yjs/utils": path.resolve(__dirname, "../packages/utils/src"),
   },
   external: [
-    "@excalidraw/common",
-    "@excalidraw/element",
-    "@excalidraw/math",
-    "@excalidraw/fractional-indexing",
+    "@excalidraw-yjs/common",
+    "@excalidraw-yjs/element",
+    "@excalidraw-yjs/math",
+    "@excalidraw-yjs/fractional-indexing",
   ],
   loader: {
     ".woff2": "file",

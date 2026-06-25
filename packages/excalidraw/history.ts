@@ -1,12 +1,12 @@
-import { Emitter } from "@excalidraw/common";
+import { Emitter } from "@excalidraw-yjs/common";
 
-import type { AppStateDelta } from "@excalidraw/element";
+import type { AppStateDelta } from "@excalidraw-yjs/element";
 
-import type { Scene } from "@excalidraw/element";
+import type { Scene } from "@excalidraw-yjs/element";
 
-import type { Store, StoreDelta } from "@excalidraw/element";
+import type { Store, StoreDelta } from "@excalidraw-yjs/element";
 
-import type { SceneElementsMap } from "@excalidraw/element/types";
+import type { SceneElementsMap } from "@excalidraw-yjs/element/types";
 
 import type { AppState } from "./types";
 

@@ -13,11 +13,11 @@
 
 ## Phase 1: Setup & schema
 
-- [x] T001 Scaffold `packages/yjs-binding/` package: `package.json` (deps `yjs`, `y-protocols`, `@excalidraw/element`, `@excalidraw/fractional-indexing`), `tsconfig.json`, build wiring matching the monorepo's other packages. (`packages/yjs-binding/package.json`)
+- [x] T001 Scaffold `packages/yjs-binding/` package: `package.json` (deps `yjs`, `y-protocols`, `@excalidraw-yjs/element`, `@excalidraw-yjs/fractional-indexing`), `tsconfig.json`, build wiring matching the monorepo's other packages. (`packages/yjs-binding/package.json`)
 - [x] T002 Define root-name constants and the origin sentinel: `ELEMENTS`, `FILES`, `APPSTATE` (synced allow-list `viewBackgroundColor`, `name` — OPEN-2 resolved), and a unique `BINDING_ORIGIN` object. (`packages/yjs-binding/src/origin.ts`, `src/schema.ts`)
 - [x] T003 [US1] Implement `elementToYMap(element)` / `yMapToElement(ymap)` encode/decode honoring the representation tiering (scalars as plain values; JSON-leaf for `points`, `pressures`, `groupIds`, `roundness`, `startBinding`/`endBinding`/`fixedSegments`, `scale`, `crop`, `customData`; **`boundElements` → nested `Y.Map<id,"arrow"|"text">` add/remove set per §4.1**) per data-model §2/§4. Derive keys from the live element object, not a hand-list. (`packages/yjs-binding/src/schema.ts`)
 - [x] T004 Add unit tests for `schema.ts`: every base + subtype field round-trips; JSON-leaf deep-equal; scalars `===`. (`packages/yjs-binding/tests/schema.test.ts`)
-- [x] T005 [P] [US3] Implement order helpers wrapping `@excalidraw/fractional-indexing`: `orderByIndex`, `keyBetween(prev,next)`, `repairIndices` (= `syncInvalidIndices`). No bespoke ordering. (`packages/yjs-binding/src/order.ts`) — data-model §3
+- [x] T005 [P] [US3] Implement order helpers wrapping `@excalidraw-yjs/fractional-indexing`: `orderByIndex`, `keyBetween(prev,next)`, `repairIndices` (= `syncInvalidIndices`). No bespoke ordering. (`packages/yjs-binding/src/order.ts`) — data-model §3
 
 **Checkpoint**: an element converts losslessly to/from its `Y.Map`; ordering primitives exist.
 

@@ -1,5 +1,5 @@
 {
-  "name": "@excalidraw/utils",
+  "name": "@excalidraw-yjs/utils",
   "version": "0.1.2",
   "type": "module",
   "types": "./dist/types/utils/src/index.d.ts",
@@ -69,6 +69,6 @@
   "repository": "https://github.com/excalidraw/excalidraw",
   "scripts": {
     "gen:types": "rimraf types && tsc",
-    "build:esm": "rimraf dist && node ../../scripts/buildUtils.js && yarn gen:types"
+    "build:esm": "rimraf dist && node ../../scripts/buildUtils.js && pnpm run gen:types"
   }
 }

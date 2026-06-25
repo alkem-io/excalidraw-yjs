@@ -1,14 +1,14 @@
-import { reseed } from "@excalidraw/common";
-import { bindBindingElement, isElbowArrow } from "@excalidraw/element";
+import { reseed } from "@excalidraw-yjs/common";
+import { bindBindingElement, isElbowArrow } from "@excalidraw-yjs/element";
 
-import { pointFrom } from "@excalidraw/math";
+import { pointFrom } from "@excalidraw-yjs/math";
 
-import { actionDeleteSelected } from "@excalidraw/excalidraw/actions/actionDeleteSelected";
-import { Excalidraw } from "@excalidraw/excalidraw";
+import { actionDeleteSelected } from "@excalidraw-yjs/excalidraw/actions/actionDeleteSelected";
+import { Excalidraw } from "@excalidraw-yjs/excalidraw";
 
-import { API } from "@excalidraw/excalidraw/tests/helpers/api";
-import { Pointer } from "@excalidraw/excalidraw/tests/helpers/ui";
-import { act, render } from "@excalidraw/excalidraw/tests/test-utils";
+import { API } from "@excalidraw-yjs/excalidraw/tests/helpers/api";
+import { Pointer } from "@excalidraw-yjs/excalidraw/tests/helpers/ui";
+import { act, render } from "@excalidraw-yjs/excalidraw/tests/test-utils";
 
 import type {
   ExcalidrawBindableElement,

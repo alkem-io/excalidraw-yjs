@@ -1,6 +1,6 @@
 # Feature Specification: Per-Property Yjs Whiteboard Binding
 
-**Feature Branch**: `feat/003-unify-collab-yjs` **Sub-spec dir**: `specs/001-yjs-per-property-binding/` **Created**: 2026-06-18 **Status**: Draft (design only — no implementation in this spec) **Repo**: `alkem-io/excalidraw-fork` (`@alkemio/excalidraw`, Excalidraw 0.18.x) **Parent epic**: workspace `003-unify-collab-yjs` — Work-Stream **WS-B (B2)** **DRAFT PR**: alkem-io/excalidraw-fork#30 (this is the binding half of WS-B; B1 upstream-merge is done)
+**Feature Branch**: `feat/003-unify-collab-yjs` **Sub-spec dir**: `specs/001-yjs-per-property-binding/` **Created**: 2026-06-18 **Status**: Draft (design only — no implementation in this spec) **Repo**: `alkem-io/excalidraw-fork` (`@excalidraw-yjs/excalidraw`, Excalidraw 0.18.x) **Parent epic**: workspace `003-unify-collab-yjs` — Work-Stream **WS-B (B2)** **DRAFT PR**: alkem-io/excalidraw-fork#30 (this is the binding half of WS-B; B1 upstream-merge is done)
 
 > **Sub-spec — scope guard.** This is the repo-local spec for the _per-property Yjs binding_ only: the **Excalidraw-scene ↔ `Y.Doc` mapping + awareness routing**. The CRDT core (`y-crdt`), the v2 codec, the WebSocket transport, the `collaboration-service` server, and the `client-web` wiring are **other work-streams** (WS-A/WS-C/WS-D) and are out of scope. The architecture below is **frozen at the epic level** (`agents-hq/specs/003-unify-collab-yjs/`): id-keyed scene `Y.Map`, per-property element `Y.Map`s, fractional `index`, tombstones, awareness-for-ephemeral. This spec details _how_, not _whether_.
 
@@ -15,7 +15,7 @@ The binding is a **new package in the Excalidraw monorepo** that maps the live E
 ### Inherited from the epic (frozen — do not re-litigate)
 
 - Whiteboard scene = **id-keyed top-level `Y.Map`** (element id → a per-element `Y.Map` of properties); per-property merge is the headline win (US1, FR-003).
-- Element **z-order via the fork's existing fractional `index`** (reuse `@excalidraw/fractional-indexing`; do not invent an ordering scheme).
+- Element **z-order via the fork's existing fractional `index`** (reuse `@excalidraw-yjs/fractional-indexing`; do not invent an ordering scheme).
 - Deletes via **tombstones** (`isDeleted=true`; element never removed from the doc).
 - Ephemeral state (cursor/emoji/countdown/idle/bounds) → **awareness, never the persisted scene `Y.Doc`** (FR-008). The scene doc must never carry presence.
 - The binding operates on a **`Y.Doc`** and is **transport-agnostic**.
@@ -127,7 +127,7 @@ An existing Excalidraw-JSON scene (as the legacy whiteboard service persists it)
 - **FR-B-002**: The binding MUST translate Excalidraw `onChange(elements, …)` into Yjs mutations that write **only the keys that actually changed**, batched in a **single `Y.Transaction` tagged with a binding-owned origin sentinel**.
 - **FR-B-003**: The binding MUST observe the scene `Y.Doc` and translate Yjs events back into a scene update via `updateScene({ elements, captureUpdate: NEVER })`, applying **only affected elements** and preserving local `appState` (selection, zoom, scroll).
 - **FR-B-004**: The binding MUST prevent echo: an observer firing for a transaction whose `origin` is the binding's own sentinel MUST be a no-op.
-- **FR-B-005**: Element **z-order** MUST be carried by the element's fractional `index` key, generated/repaired with the fork's `@excalidraw/fractional-indexing` (`generateKeyBetween`, `syncInvalidIndices`); the binding MUST NOT use Y.Array position for order.
+- **FR-B-005**: Element **z-order** MUST be carried by the element's fractional `index` key, generated/repaired with the fork's `@excalidraw-yjs/fractional-indexing` (`generateKeyBetween`, `syncInvalidIndices`); the binding MUST NOT use Y.Array position for order.
 - **FR-B-006**: Deletes MUST be **tombstones** — set `isDeleted=true` on the element `Y.Map`; the binding MUST NOT `Y.Map.delete(elementId)` from the scene map for a user delete. Tombstoned elements are filtered from the rendered scene but retained in the doc.
 - **FR-B-007**: Binary files MUST be stored in a separate top-level `Y.Map` (`files`), keyed by `fileId` → `BinaryFileData`, observed shallowly (append/remove, not deep). Files MUST NOT live inside element `Y.Map`s.
 - **FR-B-008**: Ephemeral state — cursor/pointer, selection highlight, idle, collaborator mode, **emoji reactions, countdown timer, visible-scene-bounds** — MUST be routed to **y-protocols awareness and/or the ephemeral message type**, and MUST NEVER be written to the scene `Y.Doc`.

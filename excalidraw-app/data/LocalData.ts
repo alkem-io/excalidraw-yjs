@@ -10,12 +10,12 @@
  *   (localStorage, indexedDB).
  */
 
-import { clearAppStateForLocalStorage } from "@excalidraw/excalidraw/appState";
+import { clearAppStateForLocalStorage } from "@excalidraw-yjs/excalidraw/appState";
 import {
   CANVAS_SEARCH_TAB,
   DEFAULT_SIDEBAR,
   debounce,
-} from "@excalidraw/common";
+} from "@excalidraw-yjs/common";
 import {
   createStore,
   entries,
@@ -26,17 +26,17 @@ import {
   get,
 } from "idb-keyval";
 
-import { getNonDeletedElements } from "@excalidraw/element";
+import { getNonDeletedElements } from "@excalidraw-yjs/element";
 
-import type { LibraryPersistedData } from "@excalidraw/excalidraw/data/library";
-import type { ImportedDataState } from "@excalidraw/excalidraw/data/types";
-import type { ExcalidrawElement, FileId } from "@excalidraw/element/types";
+import type { LibraryPersistedData } from "@excalidraw-yjs/excalidraw/data/library";
+import type { ImportedDataState } from "@excalidraw-yjs/excalidraw/data/types";
+import type { ExcalidrawElement, FileId } from "@excalidraw-yjs/element/types";
 import type {
   AppState,
   BinaryFileData,
   BinaryFiles,
-} from "@excalidraw/excalidraw/types";
-import type { MaybePromise } from "@excalidraw/common/utility-types";
+} from "@excalidraw-yjs/excalidraw/types";
+import type { MaybePromise } from "@excalidraw-yjs/common/utility-types";
 
 import { appJotaiStore, atom } from "../app-jotai";
 import { SAVE_TO_LOCAL_STORAGE_TIMEOUT, STORAGE_KEYS } from "../app_constants";

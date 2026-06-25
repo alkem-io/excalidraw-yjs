@@ -10,37 +10,40 @@ import {
   getVerticalOffset,
   applyDarkModeFilter,
   MIME_TYPES,
-} from "@excalidraw/common";
-import { normalizeLink, toValidURL } from "@excalidraw/common";
-import { hashString } from "@excalidraw/element";
-import { getUncroppedWidthAndHeight } from "@excalidraw/element";
+} from "@excalidraw-yjs/common";
+import { normalizeLink, toValidURL } from "@excalidraw-yjs/common";
+import { hashString } from "@excalidraw-yjs/element";
+import { getUncroppedWidthAndHeight } from "@excalidraw-yjs/element";
 import {
   createPlaceholderEmbeddableLabel,
   getEmbedLink,
-} from "@excalidraw/element";
-import { LinearElementEditor } from "@excalidraw/element";
-import { getBoundTextElement, getContainerElement } from "@excalidraw/element";
-import { getLineHeightInPx } from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
+import { LinearElementEditor } from "@excalidraw-yjs/element";
+import {
+  getBoundTextElement,
+  getContainerElement,
+} from "@excalidraw-yjs/element";
+import { getLineHeightInPx } from "@excalidraw-yjs/element";
 import {
   isArrowElement,
   isIframeLikeElement,
   isInitializedImageElement,
   isTextElement,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
-import { getContainingFrame } from "@excalidraw/element";
+import { getContainingFrame } from "@excalidraw-yjs/element";
 
-import { getCornerRadius, isPathALoop } from "@excalidraw/element";
+import { getCornerRadius, isPathALoop } from "@excalidraw-yjs/element";
 
-import { ShapeCache } from "@excalidraw/element";
+import { ShapeCache } from "@excalidraw-yjs/element";
 
-import { getElementAbsoluteCoords } from "@excalidraw/element";
+import { getElementAbsoluteCoords } from "@excalidraw-yjs/element";
 
 import type {
   ExcalidrawElement,
   ExcalidrawTextElementWithContainer,
   NonDeletedExcalidrawElement,
-} from "@excalidraw/element/types";
+} from "@excalidraw-yjs/element/types";
 
 import type { RenderableElementsMap, SVGRenderConfig } from "../scene/types";
 import type { AppState, BinaryFiles } from "../types";

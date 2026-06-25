@@ -1,16 +1,16 @@
-import { MIME_TYPES } from "@excalidraw/common";
-import { decompressData } from "@excalidraw/excalidraw/data/encode";
+import { MIME_TYPES } from "@excalidraw-yjs/common";
+import { decompressData } from "@excalidraw-yjs/excalidraw/data/encode";
 import {
   encryptData,
   decryptData,
-} from "@excalidraw/excalidraw/data/encryption";
-import { restoreElements } from "@excalidraw/excalidraw/data/restore";
+} from "@excalidraw-yjs/excalidraw/data/encryption";
+import { restoreElements } from "@excalidraw-yjs/excalidraw/data/restore";
 import {
   getSceneVersion,
   encodeSnapshot,
   decodeSnapshot,
   APPSTATE_ALLOW_LIST,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 import { initializeApp } from "firebase/app";
 import {
   getFirestore,
@@ -21,15 +21,15 @@ import {
 } from "firebase/firestore";
 import { getStorage, ref, uploadBytes } from "firebase/storage";
 
-import type { FileRecord } from "@excalidraw/element";
-import type { ExcalidrawElement, FileId } from "@excalidraw/element/types";
+import type { FileRecord } from "@excalidraw-yjs/element";
+import type { ExcalidrawElement, FileId } from "@excalidraw-yjs/element/types";
 import type {
   AppState,
   BinaryFileData,
   BinaryFileMetadata,
   BinaryFiles,
   DataURL,
-} from "@excalidraw/excalidraw/types";
+} from "@excalidraw-yjs/excalidraw/types";
 
 import { FILE_CACHE_MAX_AGE_SEC } from "../app_constants";
 

@@ -1,6 +1,9 @@
-import { CaptureUpdateAction, zoomToFitBounds } from "@excalidraw/excalidraw";
-import { ErrorDialog } from "@excalidraw/excalidraw/components/ErrorDialog";
-import { APP_NAME, cloneJSON, EVENT, randomId } from "@excalidraw/common";
+import {
+  CaptureUpdateAction,
+  zoomToFitBounds,
+} from "@excalidraw-yjs/excalidraw";
+import { ErrorDialog } from "@excalidraw-yjs/excalidraw/components/ErrorDialog";
+import { APP_NAME, cloneJSON, EVENT, randomId } from "@excalidraw-yjs/common";
 import {
   IDLE_THRESHOLD,
   ACTIVE_THRESHOLD,
@@ -11,39 +14,42 @@ import {
   preventUnload,
   resolvablePromise,
   throttleRAF,
-} from "@excalidraw/common";
-import { decryptData } from "@excalidraw/excalidraw/data/encryption";
-import { getVisibleSceneBounds } from "@excalidraw/element";
-import { newElementWith } from "@excalidraw/element";
-import { isImageElement, isInitializedImageElement } from "@excalidraw/element";
+} from "@excalidraw-yjs/common";
+import { decryptData } from "@excalidraw-yjs/excalidraw/data/encryption";
+import { getVisibleSceneBounds } from "@excalidraw-yjs/element";
+import { newElementWith } from "@excalidraw-yjs/element";
+import {
+  isImageElement,
+  isInitializedImageElement,
+} from "@excalidraw-yjs/element";
 // Native-Yjs core (M3): the scene's `Y.Doc` IS the wire. We drive it directly
 // via `yjs` (apply remote update bytes / encode full state) under
 // `REMOTE_ORIGIN`, exactly as the editor's Scene does internally — no
 // `reconcileElements`, no scene-version gating.
-import { REMOTE_ORIGIN } from "@excalidraw/element";
-import { AbortError } from "@excalidraw/excalidraw/errors";
-import { t } from "@excalidraw/excalidraw/i18n";
-import { withBatchedUpdates } from "@excalidraw/excalidraw/reactUtils";
+import { REMOTE_ORIGIN } from "@excalidraw-yjs/element";
+import { AbortError } from "@excalidraw-yjs/excalidraw/errors";
+import { t } from "@excalidraw-yjs/excalidraw/i18n";
+import { withBatchedUpdates } from "@excalidraw-yjs/excalidraw/reactUtils";
 
 import throttle from "lodash.throttle";
 import { PureComponent } from "react";
 import * as Y from "yjs";
 
-import type { ImportedDataState } from "@excalidraw/excalidraw/data/types";
+import type { ImportedDataState } from "@excalidraw-yjs/excalidraw/data/types";
 import type {
   ExcalidrawElement,
   FileId,
   InitializedExcalidrawImageElement,
   OrderedExcalidrawElement,
-} from "@excalidraw/element/types";
+} from "@excalidraw-yjs/element/types";
 import type {
   BinaryFileData,
   ExcalidrawImperativeAPI,
   SocketId,
   Collaborator,
   Gesture,
-} from "@excalidraw/excalidraw/types";
-import type { Mutable, ValueOf } from "@excalidraw/common/utility-types";
+} from "@excalidraw-yjs/excalidraw/types";
+import type { Mutable, ValueOf } from "@excalidraw-yjs/common/utility-types";
 
 import { appJotaiStore, atom } from "../app-jotai";
 import {

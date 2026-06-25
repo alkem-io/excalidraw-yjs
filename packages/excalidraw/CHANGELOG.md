@@ -17,7 +17,7 @@ Please add the latest change on the top under the correct section.
 
 ### Breaking changes
 
-- **Native-Yjs collaboration core:** `reconcileElements` is no longer exported from `@alkemio/excalidraw`. The editor's element store is now a `Y.Doc`, so the old scene-array broadcast + JSON `reconcileElements` merge were removed — Yjs converges per-property natively. Collaboration is now wired through the exported `CollabEngine` (+ `CollabTransport` / `CollabEngineOptions` types). Hosts that imported `reconcileElements` must migrate to `CollabEngine`.
+- **Native-Yjs collaboration core:** `reconcileElements` is no longer exported from `@excalidraw-yjs/excalidraw`. The editor's element store is now a `Y.Doc`, so the old scene-array broadcast + JSON `reconcileElements` merge were removed — Yjs converges per-property natively. Collaboration is now wired through the exported `CollabEngine` (+ `CollabTransport` / `CollabEngineOptions` types). Hosts that imported `reconcileElements` must migrate to `CollabEngine`.
 
 - Theme changes initiated by the default UI are now delegated to `<Excalidraw onThemeChange={(theme) => ...} />` when supplied. If `onThemeChange` is not supplied, light/dark theme toggling still falls back to updating the internal editor state.
 
@@ -135,12 +135,12 @@ Please add the latest change on the top under the correct section.
 
 #### Deprecated UMD bundle in favor of ES modules [#7441](https://github.com/excalidraw/excalidraw/pull/7441), [#9127](https://github.com/excalidraw/excalidraw/pull/9127)
 
-We've transitioned from `UMD` to `ESM` bundle format. Our new `dist` folder inside `@excalidraw/excalidraw` package now contains only bundled source files, making any dependencies tree-shakable. The package comes with the following structure:
+We've transitioned from `UMD` to `ESM` bundle format. Our new `dist` folder inside `@excalidraw-yjs/excalidraw` package now contains only bundled source files, making any dependencies tree-shakable. The package comes with the following structure:
 
 > **Note**: The structure is simplified for the sake of brevity, omitting lazy-loadable modules, including locales (previously treated as JSON assets) and source maps in the development bundle.
 
 ```
-@excalidraw/excalidraw/
+@excalidraw-yjs/excalidraw/
 ├── dist/
 │   ├── dev/
 │   │   ├── fonts/
@@ -176,13 +176,13 @@ Depending on the environment, this is how imports should look like with the `ESM
 
 ```ts
 // excalidraw library with public API
-import * as excalidrawLib from "@excalidraw/excalidraw";
+import * as excalidrawLib from "@excalidraw-yjs/excalidraw";
 // excalidraw react component
-import { Excalidraw } from "@excalidraw/excalidraw";
+import { Excalidraw } from "@excalidraw-yjs/excalidraw";
 // excalidraw styles, usually auto-processed by the build tool (i.e. vite, next, etc.)
-import "@excalidraw/excalidraw/index.css";
+import "@excalidraw-yjs/excalidraw/index.css";
 // excalidraw types (optional)
-import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
+import type { ExcalidrawImperativeAPI } from "@excalidraw-yjs/excalidraw/types";
 ```
 
 **Without bundler (Browser)**
@@ -193,7 +193,7 @@ import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 <!-- excalidraw styles -->
 <link
   rel="stylesheet"
-  href="https://esm.sh/@excalidraw/excalidraw@0.18.0/dist/dev/index.css"
+  href="https://esm.sh/@excalidraw-yjs/excalidraw@0.18.0/dist/dev/index.css"
 />
 <!-- import maps used for deduplicating react & react-dom versions -->
 <script type="importmap">
@@ -208,7 +208,7 @@ import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 <script type="module">
   import React from "https://esm.sh/react@19.0.0";
   import ReactDOM from "https://esm.sh/react-dom@19.0.0";
-  import * as ExcalidrawLib from "https://esm.sh/@excalidraw/excalidraw@0.18.0/dist/dev/index.js?external=react,react-dom";
+  import * as ExcalidrawLib from "https://esm.sh/@excalidraw-yjs/excalidraw@0.18.0/dist/dev/index.js?external=react,react-dom";
 </script>
 ```
 
@@ -235,7 +235,7 @@ optimizeDeps: {
 
 ##### Fonts
 
-All fonts are automatically loaded from the [esm.run](https://esm.run/) CDN. For self-hosting purposes, you'll have to copy the content of the folder `node_modules/@excalidraw/excalidraw/dist/prod/fonts` to the path where your assets should be served from (i.e. `public/` directory in your project). In that case, you should also set `window.EXCALIDRAW_ASSET_PATH` to the very same path, i.e. `/` in case it's in the root:
+All fonts are automatically loaded from the [esm.run](https://esm.run/) CDN. For self-hosting purposes, you'll have to copy the content of the folder `node_modules/@excalidraw-yjs/excalidraw/dist/prod/fonts` to the path where your assets should be served from (i.e. `public/` directory in your project). In that case, you should also set `window.EXCALIDRAW_ASSET_PATH` to the very same path, i.e. `/` in case it's in the root:
 
 ```js
 <script>window.EXCALIDRAW_ASSET_PATH = "/";</script>
@@ -266,7 +266,7 @@ updateScene({ elements, appState, commitToHistory: true }); // A
 updateScene({ elements, appState, commitToHistory: false }); // B
 
 // after
-import { CaptureUpdateAction } from "@excalidraw/excalidraw";
+import { CaptureUpdateAction } from "@excalidraw-yjs/excalidraw";
 updateScene({
   elements,
   appState,
@@ -831,7 +831,7 @@ The `updateScene` API has changed due to the added `Store` component, as part of
 
 - Enable consistent type imports eslint rule [#7992](https://github.com/excalidraw/excalidraw/pull/7992)
 
-- Export types for @excalidraw/utils [#7736](https://github.com/excalidraw/excalidraw/pull/7736)
+- Export types for @excalidraw-yjs/utils [#7736](https://github.com/excalidraw/excalidraw/pull/7736)
 
 - Create ESM build for utils package 🥳 [#7500](https://github.com/excalidraw/excalidraw/pull/7500)
 
@@ -897,7 +897,7 @@ define: {
 
 ### Breaking Changes
 
-- The `Ref` support has been removed in v0.17.0 so if you are using refs, please update the integration to use the [`excalidrawAPI`](http://localhost:3003/docs/@excalidraw/excalidraw/api/props/excalidraw-api) [#7251](https://github.com/excalidraw/excalidraw/pull/7251).
+- The `Ref` support has been removed in v0.17.0 so if you are using refs, please update the integration to use the [`excalidrawAPI`](http://localhost:3003/docs/@excalidraw-yjs/excalidraw/api/props/excalidraw-api) [#7251](https://github.com/excalidraw/excalidraw/pull/7251).
 
 - Additionally `ready` and `readyPromise` from the API have been discontinued. These APIs were found to be superfluous, and as part of the effort to streamline the APIs and maintain simplicity, they were removed in version v0.17.0 [#7251](https://github.com/excalidraw/excalidraw/pull/7251).
 
@@ -1201,7 +1201,7 @@ define: {
 
 - Don't show `canvasBackground` label when `UIOptions.canvasActions.changeViewBackgroundColor` is false [#6781](https://github.com/excalidraw/excalidraw/pull/6781)
 
-- Use subdirectory for @excalidraw/excalidraw size limit [#6787](https://github.com/excalidraw/excalidraw/pull/6787)
+- Use subdirectory for @excalidraw-yjs/excalidraw size limit [#6787](https://github.com/excalidraw/excalidraw/pull/6787)
 
 - Use actual dock state to not close docked library on insert [#6766](https://github.com/excalidraw/excalidraw/pull/6766)
 
@@ -1777,7 +1777,7 @@ For more details refer to the [docs](https://docs.excalidraw.com)
 
 - Support segment midpoints in line editor [#5641](https://github.com/excalidraw/excalidraw/pull/5641)
 
-- Added exportPadding to PNG (blob) export in @excalidraw/utils [#5626](https://github.com/excalidraw/excalidraw/pull/5626)
+- Added exportPadding to PNG (blob) export in @excalidraw-yjs/utils [#5626](https://github.com/excalidraw/excalidraw/pull/5626)
 
 - Introduce ExcalidrawElements and ExcalidrawAppState provider [#5463](https://github.com/excalidraw/excalidraw/pull/5463)
 
@@ -2110,7 +2110,7 @@ Check out the [release notes](https://github.com/excalidraw/excalidraw/releases/
   #### BREAKING CHANGE
   - `width/height` props have been removed. Instead now it takes `100%` of `width` and `height` of the container so you need to make sure the container in which you are rendering Excalidraw has non zero dimensions (It should have non zero width and height so Excalidraw can match the dimensions of containing block)
 - Calculate offsets when excalidraw container resizes using resize observer api [#3374](https://github.com/excalidraw/excalidraw/pull/3374).
-- Export types for the package so now it can be used with typescript [#3337](https://github.com/excalidraw/excalidraw/pull/3337). The types are available at `@excalidraw/excalidraw/types`.
+- Export types for the package so now it can be used with typescript [#3337](https://github.com/excalidraw/excalidraw/pull/3337). The types are available at `@excalidraw-yjs/excalidraw/types`.
 - Add `renderCustomStats` prop to render extra stats on host, and expose `setToastMessage` API via refs which can be used to show toast with custom message [#3360](https://github.com/excalidraw/excalidraw/pull/3360).
 - Support passing a CSRF token when importing libraries to prevent prompting before installation. The token is passed from [https://libraries.excalidraw.com](https://libraries.excalidraw.com/) using the `token` URL key [#3329](https://github.com/excalidraw/excalidraw/pull/3329).
 - #### BREAKING CHANGE
@@ -2266,7 +2266,7 @@ Check out the [release notes](https://github.com/excalidraw/excalidraw/releases/
 
 ### Features
 
-- Expose `window.EXCALIDRAW_ASSET_PATH` which host can use to load assets from a different URL. By default it will be loaded from `https://unpkg.com/@excalidraw/excalidraw{currentVersion}/dist/`[#3068](https://github.com/excalidraw/excalidraw/pull/3068).
+- Expose `window.EXCALIDRAW_ASSET_PATH` which host can use to load assets from a different URL. By default it will be loaded from `https://unpkg.com/@excalidraw-yjs/excalidraw{currentVersion}/dist/`[#3068](https://github.com/excalidraw/excalidraw/pull/3068).
 
   Also now the assets will have a hash in filename so cache bursting can easily happen with version bump.
 
@@ -2472,4 +2472,4 @@ Check out the [release notes](https://github.com/excalidraw/excalidraw/releases/
 
 ## 0.1.0
 
-First release of `@excalidraw/excalidraw`
+First release of `@excalidraw-yjs/excalidraw`

@@ -7,7 +7,7 @@ import {
   pointFrom,
   pointRotateRads,
   type Radians,
-} from "@excalidraw/math";
+} from "@excalidraw-yjs/math";
 
 import {
   BOUND_TEXT_PADDING,
@@ -24,7 +24,7 @@ import {
   invariant,
   applyDarkModeFilter,
   isSafari,
-} from "@excalidraw/common";
+} from "@excalidraw-yjs/common";
 
 import type {
   AppState,
@@ -34,13 +34,13 @@ import type {
   ElementsPendingErasure,
   PendingExcalidrawElements,
   NormalizedZoomValue,
-} from "@excalidraw/excalidraw/types";
+} from "@excalidraw-yjs/excalidraw/types";
 
 import type {
   StaticCanvasRenderConfig,
   RenderableElementsMap,
   InteractiveCanvasRenderConfig,
-} from "@excalidraw/excalidraw/scene/types";
+} from "@excalidraw-yjs/excalidraw/scene/types";
 
 import { getElementAbsoluteCoords, getElementBounds } from "./bounds";
 import { getUncroppedImageElement } from "./cropElement";
