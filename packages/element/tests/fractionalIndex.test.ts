@@ -1,27 +1,27 @@
 /* eslint-disable no-lone-blocks */
-import { arrayToMap } from "@excalidraw/common";
+import { arrayToMap } from "@excalidraw-yjs/common";
 
 import {
   InvalidFractionalIndexError,
   syncInvalidIndices,
   syncMovedIndices,
   validateFractionalIndices,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
-import { deepCopyElement } from "@excalidraw/element";
+import { deepCopyElement } from "@excalidraw-yjs/element";
 
-import { API } from "@excalidraw/excalidraw/tests/helpers/api";
+import { API } from "@excalidraw-yjs/excalidraw/tests/helpers/api";
 
 import {
   generateKeyBetween,
   validateOrderKey,
-} from "@excalidraw/fractional-indexing";
+} from "@excalidraw-yjs/fractional-indexing";
 
 import type {
   ElementsMap,
   ExcalidrawElement,
   FractionalIndex,
-} from "@excalidraw/element/types";
+} from "@excalidraw-yjs/element/types";
 
 describe("fractional index format validation", () => {
   it("should reject malformed base62 order keys", () => {

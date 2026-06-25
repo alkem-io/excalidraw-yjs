@@ -1,6 +1,6 @@
 import { useRef, useLayoutEffect, useCallback, useEffect } from "react";
 
-import { convertToExcalidrawElements } from "@excalidraw/element";
+import { convertToExcalidrawElements } from "@excalidraw-yjs/element";
 
 import { t } from "../../../i18n";
 

@@ -1,10 +1,10 @@
 import React from "react";
 
-import { THEME } from "@excalidraw/common";
+import { THEME } from "@excalidraw-yjs/common";
 
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui";
 
-import type { ValueOf } from "@excalidraw/common/utility-types";
+import type { ValueOf } from "@excalidraw-yjs/common/utility-types";
 
 import { useExcalidrawAppState } from "../App";
 

@@ -157,7 +157,7 @@ const askToCommit = (tag, nextVersion) => {
         if (answer.toLowerCase() === "y") {
           execSync(`git add -u`);
           execSync(
-            `git commit -m "chore: release @excalidraw/excalidraw@${nextVersion} 🎉"`,
+            `git commit -m "chore: release @excalidraw-yjs/excalidraw@${nextVersion} 🎉"`,
           );
         } else {
           console.warn(

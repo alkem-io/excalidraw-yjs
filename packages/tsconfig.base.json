@@ -11,21 +11,21 @@
     "jsx": "react-jsx",
     "emitDeclarationOnly": true,
     "paths": {
-      "@excalidraw/common": ["./common/src/index.ts"],
-      "@excalidraw/common/*": ["./common/src/*"],
-      "@excalidraw/element": ["./element/src/index.ts"],
-      "@excalidraw/element/*": ["./element/src/*"],
-      "@excalidraw/excalidraw": ["./excalidraw/index.tsx"],
-      "@excalidraw/excalidraw/*": ["./excalidraw/*"],
-      "@excalidraw/math": ["./math/src/index.ts"],
-      "@excalidraw/math/*": ["./math/src/*"],
-      "@excalidraw/utils": ["./utils/src/index.ts"],
-      "@excalidraw/utils/*": ["./utils/src/*"],
-      "@excalidraw/fractional-indexing": ["./fractional-indexing/src/index.ts"],
-      "@excalidraw/fractional-indexing/*": ["./fractional-indexing/src/*"],
-      "@alkemio/excalidraw": ["./excalidraw/index.tsx"],
-      "@alkemio/excalidraw/element/*": ["./element/src/*"],
-      "@alkemio/excalidraw/*": ["./excalidraw/*"]
+      "@excalidraw-yjs/common": ["./common/src/index.ts"],
+      "@excalidraw-yjs/common/*": ["./common/src/*"],
+      "@excalidraw-yjs/element": ["./element/src/index.ts"],
+      "@excalidraw-yjs/element/*": ["./element/src/*"],
+      "@excalidraw-yjs/excalidraw": ["./excalidraw/index.tsx"],
+      "@excalidraw-yjs/excalidraw/*": ["./excalidraw/*"],
+      "@excalidraw-yjs/math": ["./math/src/index.ts"],
+      "@excalidraw-yjs/math/*": ["./math/src/*"],
+      "@excalidraw-yjs/utils": ["./utils/src/index.ts"],
+      "@excalidraw-yjs/utils/*": ["./utils/src/*"],
+      "@excalidraw-yjs/fractional-indexing": ["./fractional-indexing/src/index.ts"],
+      "@excalidraw-yjs/fractional-indexing/*": ["./fractional-indexing/src/*"],
+      "@excalidraw-yjs/excalidraw": ["./excalidraw/index.tsx"],
+      "@excalidraw-yjs/excalidraw/element/*": ["./element/src/*"],
+      "@excalidraw-yjs/excalidraw/*": ["./excalidraw/*"]
     }
   }
 }

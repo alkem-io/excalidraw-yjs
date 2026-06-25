@@ -650,5 +650,5 @@ export const decodeSnapshot = (bytes: Uint8Array): WhiteboardSnapshot => {
 // `yjs` barrel (index.ts) already re-exports it via `export * from "./origin"`.
 // Re-exporting the same name from this module too made it an ambiguous star
 // export in the barrel (`export *` from both ./origin and ./schema), which
-// silently drops `LOCAL_ORIGIN` from `@alkemio/excalidraw`'s `yjs` entrypoint.
+// silently drops `LOCAL_ORIGIN` from `@excalidraw-yjs/excalidraw`'s `yjs` entrypoint.
 // `schema.ts` still imports it (line ~3) for its own internal use.

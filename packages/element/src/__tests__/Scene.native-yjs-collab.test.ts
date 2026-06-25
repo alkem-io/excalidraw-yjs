@@ -1,6 +1,6 @@
 import * as Y from "yjs";
 
-import type { Mutable } from "@excalidraw/common/utility-types";
+import type { Mutable } from "@excalidraw-yjs/common/utility-types";
 
 import { newElement } from "../newElement";
 import { Scene } from "../Scene";

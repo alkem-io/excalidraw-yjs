@@ -15,7 +15,7 @@ import {
   vectorSubtract,
   vectorDot,
   vectorNormalize,
-} from "@excalidraw/math";
+} from "@excalidraw-yjs/math";
 
 import {
   COLOR_PALETTE,
@@ -109,7 +109,7 @@ import {
   setDesktopUIMode,
   isSelectionLikeTool,
   oneOf,
-} from "@excalidraw/common";
+} from "@excalidraw-yjs/common";
 
 import {
   getObservedAppState,
@@ -261,9 +261,9 @@ import {
   getActiveTextElement,
   isEligibleFrameChildType,
   getBindingStrategyForDraggingBindingElementEndpoints,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
-import type { GlobalPoint, LocalPoint, Radians } from "@excalidraw/math";
+import type { GlobalPoint, LocalPoint, Radians } from "@excalidraw-yjs/math";
 
 import type {
   ExcalidrawElement,
@@ -289,9 +289,9 @@ import type {
   ExcalidrawElbowArrowElement,
   SceneElementsMap,
   ExcalidrawBindableElement,
-} from "@excalidraw/element/types";
+} from "@excalidraw-yjs/element/types";
 
-import type { Mutable, ValueOf } from "@excalidraw/common/utility-types";
+import type { Mutable, ValueOf } from "@excalidraw-yjs/common/utility-types";
 
 import {
   actionAddToLibrary,

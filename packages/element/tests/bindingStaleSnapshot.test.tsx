@@ -1,20 +1,20 @@
-import { reseed } from "@excalidraw/common";
+import { reseed } from "@excalidraw-yjs/common";
 import {
   isArrowElement,
   isBindableElement,
   LinearElementEditor,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
-import { pointFrom } from "@excalidraw/math";
+import { pointFrom } from "@excalidraw-yjs/math";
 
-import { actionFinalize } from "@excalidraw/excalidraw/actions/actionFinalize";
-import { Excalidraw } from "@excalidraw/excalidraw";
+import { actionFinalize } from "@excalidraw-yjs/excalidraw/actions/actionFinalize";
+import { Excalidraw } from "@excalidraw-yjs/excalidraw";
 
-import { API } from "@excalidraw/excalidraw/tests/helpers/api";
-import { UI, Pointer } from "@excalidraw/excalidraw/tests/helpers/ui";
-import { act, render } from "@excalidraw/excalidraw/tests/test-utils";
+import { API } from "@excalidraw-yjs/excalidraw/tests/helpers/api";
+import { UI, Pointer } from "@excalidraw-yjs/excalidraw/tests/helpers/ui";
+import { act, render } from "@excalidraw-yjs/excalidraw/tests/test-utils";
 
-import { defaultLang, setLanguage } from "@excalidraw/excalidraw/i18n";
+import { defaultLang, setLanguage } from "@excalidraw-yjs/excalidraw/i18n";
 
 import type {
   ExcalidrawArrowElement,

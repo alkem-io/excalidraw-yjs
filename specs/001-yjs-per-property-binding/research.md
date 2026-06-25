@@ -1,6 +1,6 @@
 # Research: Per-Property Yjs Whiteboard Binding
 
-**Date**: 2026-06-18 **Repo**: `alkem-io/excalidraw-fork` (Excalidraw monorepo, 0.18.x line, `@alkemio/excalidraw`) **Epic**: workspace `003-unify-collab-yjs` — WS-B (B2) **References**: merged fork source (this repo), `whiteboard-collaboration-service`, `client-web`, the OSS `y-excalidraw` binding (RahulBadenkal/y-excalidraw), and the `y-crdt` fork's v2-codec spec (`y-crdt/specs/001-v2-encoding-and-sync-protocol/`).
+**Date**: 2026-06-18 **Repo**: `alkem-io/excalidraw-fork` (Excalidraw monorepo, 0.18.x line, `@excalidraw-yjs/excalidraw`) **Epic**: workspace `003-unify-collab-yjs` — WS-B (B2) **References**: merged fork source (this repo), `whiteboard-collaboration-service`, `client-web`, the OSS `y-excalidraw` binding (RahulBadenkal/y-excalidraw), and the `y-crdt` fork's v2-codec spec (`y-crdt/specs/001-v2-encoding-and-sync-protocol/`).
 
 This document grounds the binding design in the _actual_ code of the merged fork and the system it replaces. Every claim below is traceable to a file path or an external source.
 
@@ -73,7 +73,7 @@ Subtypes add fields:
 
 ### Fractional index (z-order) — REUSE, do not invent
 
-`packages/element/src/fractionalIndex.ts`, backed by the vendored `@excalidraw/fractional-indexing@3.3.0` (`packages/fractional-indexing`).
+`packages/element/src/fractionalIndex.ts`, backed by the vendored `@excalidraw-yjs/fractional-indexing@3.3.0` (`packages/fractional-indexing`).
 
 - `index: FractionalIndex` is a **branded string** (`string & { _brand: "franctionalIndex" }`).
 - Order-preserving base-62 keys; `generateKeyBetween(a, b)` and `generateNKeysBetween(a, b, n)` produce keys strictly between two bounds.
@@ -139,7 +139,7 @@ Source read from GitHub `RahulBadenkal/y-excalidraw` (`src/index.ts`, `src/diff.
 | onChange→Y | cached snapshot + delta ops, wrapped in `transact(ops, origin=this)` | same diff+transaction pattern, but emit **per-property** key writes | **ADOPT (pattern), adapt to per-prop** |
 | Y→scene | `observeDeep` + `txn.origin===this` guard; rebuild full element list; one `updateScene` | same guard + observe; rebuild affected elements; `updateScene({captureUpdate:NEVER})` | **ADOPT (pattern)** |
 | Echo prevention | `if (txn.origin === this) return` (identity sentinel) | identical sentinel origin object | **ADOPT exactly** |
-| Z-order | fractional index in a separate `pos` field | fractional index as the element's own `index` key (reuse fork's `@excalidraw/fractional-indexing`) | **ADOPT, but use native `index`** |
+| Z-order | fractional index in a separate `pos` field | fractional index as the element's own `index` key (reuse fork's `@excalidraw-yjs/fractional-indexing`) | **ADOPT, but use native `index`** |
 | Files | separate append-only `Y.Map<fileId, BinaryFileData>`, shallow `observe` | identical: separate top-level `files` `Y.Map` | **ADOPT** |
 | Awareness | y-protocols awareness for pointer/selection/user | y-protocols awareness for cursor/selection/idle/mode + the `2` ephemeral type for emoji/countdown/bounds | **ADOPT + extend** |
 | version/versionNonce | used only as a cheap "changed?" signal, not for reconciliation | same — `version` is a change signal; Yjs owns causality; `versionNonce` becomes irrelevant to merge | **ADOPT (pattern)** |

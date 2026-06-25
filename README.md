@@ -25,7 +25,7 @@ Checkout both projects Alkemio `client-web` and `excalidraw-fork` in the same fo
 {
   ...
   "dependencies": {
-    "@alkemio/excalidraw": "../excalidraw-fork/packages/excalidraw",
+    "@excalidraw-yjs/excalidraw": "../excalidraw-fork/packages/excalidraw",
     ...
   }
   ...
@@ -109,7 +109,7 @@ Create a Pull Request to develop in excalidraw-fork repository
   - Auto generate release notes.
   - Publish the release.
 - The [action](https://github.com/alkem-io/excalidraw-fork/actions/workflows/release-alkemio.yml) should run automatically
-- The package should appear in [npmjs](https://www.npmjs.com/package/@alkemio/excalidraw) shortly
+- The package should appear in [npmjs](https://www.npmjs.com/package/@excalidraw-yjs/excalidraw) shortly
 - Create a PR on the client using the new package, change package.json to the new version and don't forget to run `pnpm i`.
 
 ##### GitHub and NPM configuration for the automatic publishing
@@ -244,8 +244,8 @@ Removed for clarity of this document. Available in previous commits.
 <p align="center">
   <a href="https://github.com/excalidraw/excalidraw/blob/master/LICENSE">
     <img alt="Excalidraw is released under the MIT license." src="https://img.shields.io/badge/license-MIT-blue.svg"  /></a>
-  <a href="https://www.npmjs.com/package/@excalidraw/excalidraw">
-    <img alt="npm downloads/month" src="https://img.shields.io/npm/dm/@excalidraw/excalidraw"  /></a>
+  <a href="https://www.npmjs.com/package/@excalidraw-yjs/excalidraw">
+    <img alt="npm downloads/month" src="https://img.shields.io/npm/dm/@excalidraw-yjs/excalidraw"  /></a>
   <a href="https://docs.excalidraw.com/docs/introduction/contributing">
     <img alt="PRs welcome!" src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat"  /></a>
   <a href="https://discord.gg/UexuTaE">
@@ -302,14 +302,14 @@ We'll be adding these features as drop-in plugins for the npm package in the fut
 
 ## Quick start
 
-**Note:** following instructions are for installing the Excalidraw [npm package](https://www.npmjs.com/package/@excalidraw/excalidraw) when integrating Excalidraw into your own app. To run the repository locally for development, please refer to our [Development Guide](https://docs.excalidraw.com/docs/introduction/development).
+**Note:** following instructions are for installing the Excalidraw [npm package](https://www.npmjs.com/package/@excalidraw-yjs/excalidraw) when integrating Excalidraw into your own app. To run the repository locally for development, please refer to our [Development Guide](https://docs.excalidraw.com/docs/introduction/development).
 
 Use `npm` or `yarn` to install the package.
 
 ```bash
-npm install react react-dom @excalidraw/excalidraw
+npm install react react-dom @excalidraw-yjs/excalidraw
 # or
-yarn add react react-dom @excalidraw/excalidraw
+yarn add react react-dom @excalidraw-yjs/excalidraw
 ```
 
 Check out our [documentation](https://docs.excalidraw.com/docs/@excalidraw/excalidraw/installation) for more details!
@@ -323,7 +323,7 @@ Check out our [documentation](https://docs.excalidraw.com/docs/@excalidraw/excal
 ## Integrations
 
 - [VScode extension](https://marketplace.visualstudio.com/items?itemName=pomdtr.excalidraw-editor)
-- [npm package](https://www.npmjs.com/package/@excalidraw/excalidraw)
+- [npm package](https://www.npmjs.com/package/@excalidraw-yjs/excalidraw)
 
 ## Who's integrating Excalidraw
 

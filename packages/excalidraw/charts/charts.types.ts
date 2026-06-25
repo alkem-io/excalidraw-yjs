@@ -1,4 +1,4 @@
-import type { NonDeletedExcalidrawElement } from "@excalidraw/element/types";
+import type { NonDeletedExcalidrawElement } from "@excalidraw-yjs/element/types";
 
 export type ChartElements = readonly NonDeletedExcalidrawElement[];
 

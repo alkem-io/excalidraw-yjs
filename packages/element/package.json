@@ -1,5 +1,5 @@
 {
-  "name": "@excalidraw/element",
+  "name": "@excalidraw-yjs/element",
   "version": "0.18.0",
   "type": "module",
   "types": "./dist/types/element/src/index.d.ts",
@@ -60,12 +60,12 @@
   "repository": "https://github.com/excalidraw/excalidraw",
   "scripts": {
     "gen:types": "rimraf types && tsc",
-    "build:esm": "rimraf dist && node ../../scripts/buildBase.js && yarn gen:types"
+    "build:esm": "rimraf dist && node ../../scripts/buildBase.js && pnpm run gen:types"
   },
   "dependencies": {
-    "@excalidraw/common": "0.18.0",
-    "@excalidraw/math": "0.18.0",
-    "@excalidraw/fractional-indexing": "3.3.0",
+    "@excalidraw-yjs/common": "workspace:*",
+    "@excalidraw-yjs/math": "workspace:*",
+    "@excalidraw-yjs/fractional-indexing": "workspace:*",
     "yjs": "^13.6.27"
   }
 }

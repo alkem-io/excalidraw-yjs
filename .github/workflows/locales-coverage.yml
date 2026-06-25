@@ -14,14 +14,23 @@ jobs:
         with:
           token: ${{ secrets.PUSH_TRANSLATIONS_COVERAGE_PAT }}
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.17.1
+
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20.x
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Create report file
         run: |
-          yarn locales-coverage
+          pnpm run locales-coverage
           FILE_CHANGED=$(git diff packages/excalidraw/locales/percentages.json)
           if [ ! -z "${FILE_CHANGED}" ]; then
             git config --global user.name 'Excalidraw Bot'
@@ -33,7 +42,7 @@ jobs:
       - name: Construct comment body
         id: getCommentBody
         run: |
-          body=$(npm run locales-coverage:description | grep '^[^>]')
+          body=$(pnpm run locales-coverage:description | grep '^[^>]')
           body="${body//'%'/'%25'}"
           body="${body//$'\n'/'%0A'}"
           body="${body//$'\r'/'%0D'}"

@@ -1,6 +1,6 @@
-import { Scene, newElement } from "@excalidraw/element";
+import { Scene, newElement } from "@excalidraw-yjs/element";
 
-import type { ExcalidrawElement } from "@excalidraw/element/types";
+import type { ExcalidrawElement } from "@excalidraw-yjs/element/types";
 
 import { CollabEngine } from "./CollabEngine";
 

@@ -3,11 +3,14 @@ import {
   getExportSource,
   MIME_TYPES,
   VERSIONS,
-} from "@excalidraw/common";
+} from "@excalidraw-yjs/common";
 
-import type { ExcalidrawElement, NonDeleted } from "@excalidraw/element/types";
+import type {
+  ExcalidrawElement,
+  NonDeleted,
+} from "@excalidraw-yjs/element/types";
 
-import type { MaybePromise } from "@excalidraw/common/utility-types";
+import type { MaybePromise } from "@excalidraw-yjs/common/utility-types";
 
 import { cleanAppStateForExport, clearAppStateForDatabase } from "../appState";
 

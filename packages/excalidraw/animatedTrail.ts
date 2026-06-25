@@ -3,11 +3,11 @@ import {
   SVG_NS,
   getSvgPathFromStroke,
   sceneCoordsToViewportCoords,
-} from "@excalidraw/common";
-
-import type { LaserPointerOptions } from "@excalidraw/laser-pointer";
+} from "@excalidraw-yjs/common";
 
 import { AnimationController } from "./renderer/animation";
+
+import type { LaserPointerOptions } from "@excalidraw/laser-pointer";
 
 import type App from "./components/App";
 import type { AppState } from "./types";
