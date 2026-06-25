@@ -749,12 +749,13 @@ describe("image element", () => {
     API.setElements([image]);
     UI.resize(image, "ne", [-20, -30]);
 
-    expect(image.x).toBeCloseTo(0);
-    expect(image.y).toBeCloseTo(-30);
-    expect(image.width).toBeCloseTo(130);
-    expect(image.height).toBeCloseTo(130);
-    expect(image.angle).toBeCloseTo(0);
-    expect(image.scale).toEqual([1, 1]);
+    const live = h.elements.find((e) => e.id === image.id)!;
+    expect(live.x).toBeCloseTo(0);
+    expect(live.y).toBeCloseTo(-30);
+    expect(live.width).toBeCloseTo(130);
+    expect(live.height).toBeCloseTo(130);
+    expect(live.angle).toBeCloseTo(0);
+    expect((live as typeof image).scale).toEqual([1, 1]);
   });
 
   it("flips while resizing", async () => {
@@ -762,30 +763,32 @@ describe("image element", () => {
     API.setElements([image]);
     UI.resize(image, "sw", [150, -150]);
 
-    expect(image.x).toBeCloseTo(100);
-    expect(image.y).toBeCloseTo(-50);
-    expect(image.width).toBeCloseTo(50);
-    expect(image.height).toBeCloseTo(50);
-    expect(image.angle).toBeCloseTo(0);
-    expect(image.scale).toEqual([-1, -1]);
+    const live = h.elements.find((e) => e.id === image.id)!;
+    expect(live.x).toBeCloseTo(100);
+    expect(live.y).toBeCloseTo(-50);
+    expect(live.width).toBeCloseTo(50);
+    expect(live.height).toBeCloseTo(50);
+    expect(live.angle).toBeCloseTo(0);
+    expect((live as typeof image).scale).toEqual([-1, -1]);
   });
 
   it("resizes with locked/unlocked aspect ratio", async () => {
     const image = API.createElement({ type: "image", width: 100, height: 100 });
     API.setElements([image]);
+    const live = () => h.elements.find((e) => e.id === image.id)!;
     UI.resize(image, "ne", [30, -20]);
 
-    expect(image.x).toBeCloseTo(0);
-    expect(image.y).toBeCloseTo(-30);
-    expect(image.width).toBeCloseTo(130);
-    expect(image.height).toBeCloseTo(130);
+    expect(live().x).toBeCloseTo(0);
+    expect(live().y).toBeCloseTo(-30);
+    expect(live().width).toBeCloseTo(130);
+    expect(live().height).toBeCloseTo(130);
 
-    UI.resize(image, "ne", [-30, 50], { shift: true });
+    UI.resize(live(), "ne", [-30, 50], { shift: true });
 
-    expect(image.x).toBeCloseTo(0);
-    expect(image.y).toBeCloseTo(20);
-    expect(image.width).toBeCloseTo(100);
-    expect(image.height).toBeCloseTo(80);
+    expect(live().x).toBeCloseTo(0);
+    expect(live().y).toBeCloseTo(20);
+    expect(live().width).toBeCloseTo(100);
+    expect(live().height).toBeCloseTo(80);
   });
 
   it("resizes from center", async () => {
@@ -793,12 +796,13 @@ describe("image element", () => {
     API.setElements([image]);
     UI.resize(image, "nw", [25, 15], { alt: true });
 
-    expect(image.x).toBeCloseTo(15);
-    expect(image.y).toBeCloseTo(15);
-    expect(image.width).toBeCloseTo(70);
-    expect(image.height).toBeCloseTo(70);
-    expect(image.angle).toBeCloseTo(0);
-    expect(image.scale).toEqual([1, 1]);
+    const live = h.elements.find((e) => e.id === image.id)!;
+    expect(live.x).toBeCloseTo(15);
+    expect(live.y).toBeCloseTo(15);
+    expect(live.width).toBeCloseTo(70);
+    expect(live.height).toBeCloseTo(70);
+    expect(live.angle).toBeCloseTo(0);
+    expect((live as typeof image).scale).toEqual([1, 1]);
   });
 
   // it("resizes with bound arrow", async () => {
@@ -1205,19 +1209,22 @@ describe("multiple selection", () => {
 
     UI.resize([topImage, bottomImage], "se", move);
 
-    expect(topImage.x).toBeCloseTo(0);
-    expect(topImage.y).toBeCloseTo(0);
-    expect(topImage.width).toBeCloseTo(200 * scale);
-    expect(topImage.height).toBeCloseTo(100 * scale);
-    expect(topImage.angle).toEqual(0);
-    expect(topImage.scale).toEqual([1, 1]);
+    const liveTop = h.elements.find((e) => e.id === topImage.id)!;
+    const liveBottom = h.elements.find((e) => e.id === bottomImage.id)!;
 
-    expect(bottomImage.x).toBeCloseTo(30 * scale);
-    expect(bottomImage.y).toBeCloseTo(150 * scale);
-    expect(bottomImage.width).toBeCloseTo(120 * scale);
-    expect(bottomImage.height).toBeCloseTo(80 * scale);
-    expect(bottomImage.angle).toEqual(0);
-    expect(bottomImage.scale).toEqual([1, 1]);
+    expect(liveTop.x).toBeCloseTo(0);
+    expect(liveTop.y).toBeCloseTo(0);
+    expect(liveTop.width).toBeCloseTo(200 * scale);
+    expect(liveTop.height).toBeCloseTo(100 * scale);
+    expect(liveTop.angle).toEqual(0);
+    expect((liveTop as typeof topImage).scale).toEqual([1, 1]);
+
+    expect(liveBottom.x).toBeCloseTo(30 * scale);
+    expect(liveBottom.y).toBeCloseTo(150 * scale);
+    expect(liveBottom.width).toBeCloseTo(120 * scale);
+    expect(liveBottom.height).toBeCloseTo(80 * scale);
+    expect(liveBottom.angle).toEqual(0);
+    expect((liveBottom as typeof bottomImage).scale).toEqual([1, 1]);
   });
 
   it("resizes from center", () => {
@@ -1303,19 +1310,33 @@ describe("multiple selection", () => {
     const scaleX = move[0] / selectionWidth + 1;
     const scaleY = -scaleX;
     const lineOrigBounds = getBoundsFromPoints(line);
-    const elementsMap = arrayToMap(h.elements);
     UI.resize([line, image, rectangle, boundArrow], "se", move, {
       shift: true,
     });
-    const lineNewBounds = getBoundsFromPoints(line);
+
+    const liveLine = h.elements.find((e) => e.id === line.id)! as typeof line;
+    const liveImage = h.elements.find(
+      (e) => e.id === image.id,
+    )! as typeof image;
+    const liveRectangle = h.elements.find((e) => e.id === rectangle.id)!;
+    const liveRectLabel = h.elements.find((e) => e.id === rectLabel.id)!;
+    const liveBoundArrow = h.elements.find(
+      (e) => e.id === boundArrow.id,
+    )! as typeof boundArrow;
+    const liveArrowLabel = h.elements.find(
+      (e) => e.id === arrowLabel.id,
+    )! as typeof arrowLabel;
+
+    const lineNewBounds = getBoundsFromPoints(liveLine);
+    const elementsMap = arrayToMap(h.elements);
     const arrowLabelPos = LinearElementEditor.getBoundTextElementPosition(
-      boundArrow,
-      arrowLabel,
+      liveBoundArrow,
+      liveArrowLabel,
       elementsMap,
     );
 
-    expect(line.x).toBeCloseTo(60 * scaleX);
-    expect(line.y).toBeCloseTo(0);
+    expect(liveLine.x).toBeCloseTo(60 * scaleX);
+    expect(liveLine.y).toBeCloseTo(0);
     expect(lineNewBounds[0]).toBeCloseTo(
       (lineOrigBounds[2] - lineOrigBounds[0]) * scaleX,
     );
@@ -1324,42 +1345,44 @@ describe("multiple selection", () => {
       (lineOrigBounds[3] - lineOrigBounds[1]) * scaleY,
     );
     expect(lineNewBounds[2]).toBeCloseTo(0);
-    expect(line.angle).toEqual(0);
+    expect(liveLine.angle).toEqual(0);
 
-    expect(image.x).toBeCloseTo((60 + 100) * scaleX);
-    expect(image.y).toBeCloseTo(100 * scaleY);
-    expect(image.width).toBeCloseTo(100 * -scaleX);
-    expect(image.height).toBeCloseTo(100 * scaleY);
-    expect(image.angle).toBeCloseTo((Math.PI * 5) / 6);
-    expect(image.scale).toEqual([-1, 1]);
+    expect(liveImage.x).toBeCloseTo((60 + 100) * scaleX);
+    expect(liveImage.y).toBeCloseTo(100 * scaleY);
+    expect(liveImage.width).toBeCloseTo(100 * -scaleX);
+    expect(liveImage.height).toBeCloseTo(100 * scaleY);
+    expect(liveImage.angle).toBeCloseTo((Math.PI * 5) / 6);
+    expect(liveImage.scale).toEqual([-1, 1]);
 
-    expect(rectangle.x).toBeCloseTo((180 + 160) * scaleX);
-    expect(rectangle.y).toBeCloseTo(60 * scaleY);
-    expect(rectangle.width).toBeCloseTo(160 * -scaleX);
-    expect(rectangle.height).toBeCloseTo(80 * scaleY);
-    expect(rectangle.angle).toEqual((Math.PI * 11) / 6);
+    expect(liveRectangle.x).toBeCloseTo((180 + 160) * scaleX);
+    expect(liveRectangle.y).toBeCloseTo(60 * scaleY);
+    expect(liveRectangle.width).toBeCloseTo(160 * -scaleX);
+    expect(liveRectangle.height).toBeCloseTo(80 * scaleY);
+    expect(liveRectangle.angle).toEqual((Math.PI * 11) / 6);
 
-    expect(rectLabel.x + rectLabel.width / 2).toBeCloseTo(
-      rectangle.x + rectangle.width / 2,
+    expect(liveRectLabel.x + liveRectLabel.width / 2).toBeCloseTo(
+      liveRectangle.x + liveRectangle.width / 2,
     );
-    expect(rectLabel.y + rectLabel.height / 2).toBeCloseTo(
-      rectangle.y + rectangle.height / 2,
+    expect(liveRectLabel.y + liveRectLabel.height / 2).toBeCloseTo(
+      liveRectangle.y + liveRectangle.height / 2,
     );
-    expect(rectLabel.angle).toBeCloseTo(rectangle.angle);
-    expect(rectLabel.fontSize).toBeCloseTo(20 * scaleY);
+    expect(liveRectLabel.angle).toBeCloseTo(liveRectangle.angle);
+    expect((liveRectLabel as typeof rectLabel).fontSize).toBeCloseTo(
+      20 * scaleY,
+    );
 
-    expect(boundArrow.x).toBeCloseTo(380 * scaleX);
-    expect(boundArrow.y).toBeCloseTo(240 * scaleY);
-    expect(boundArrow.points[1][0]).toBeCloseTo(63.40354208105561);
-    expect(boundArrow.points[1][1]).toBeCloseTo(-84.53805610807356);
+    expect(liveBoundArrow.x).toBeCloseTo(380 * scaleX);
+    expect(liveBoundArrow.y).toBeCloseTo(240 * scaleY);
+    expect(liveBoundArrow.points[1][0]).toBeCloseTo(63.40354208105561);
+    expect(liveBoundArrow.points[1][1]).toBeCloseTo(-84.53805610807356);
 
-    expect(arrowLabelPos.x + arrowLabel.width / 2).toBeCloseTo(
-      boundArrow.x + boundArrow.points[1][0] / 2,
+    expect(arrowLabelPos.x + liveArrowLabel.width / 2).toBeCloseTo(
+      liveBoundArrow.x + liveBoundArrow.points[1][0] / 2,
     );
-    expect(arrowLabelPos.y + arrowLabel.height / 2).toBeCloseTo(
-      boundArrow.y + boundArrow.points[1][1] / 2,
+    expect(arrowLabelPos.y + liveArrowLabel.height / 2).toBeCloseTo(
+      liveBoundArrow.y + liveBoundArrow.points[1][1] / 2,
     );
-    expect(arrowLabel.angle).toEqual(0);
-    expect(arrowLabel.fontSize).toBeCloseTo(20 * scaleY);
+    expect(liveArrowLabel.angle).toEqual(0);
+    expect(liveArrowLabel.fontSize).toBeCloseTo(20 * scaleY);
   });
 });

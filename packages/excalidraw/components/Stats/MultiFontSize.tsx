@@ -81,13 +81,14 @@ const handleFontSizeChange: DragInputCallbackType<
     nextFontSize = Math.max(Math.round(nextValue), MIN_FONT_SIZE);
 
     for (const textElement of latestTextElements) {
-      scene.mutateElement(textElement, {
+      // fresh-snapshot: re-read post-mutation
+      const nextTextElement = scene.mutateElement(textElement, {
         fontSize: nextFontSize,
       });
 
       redrawTextBoundingBox(
-        textElement,
-        scene.getContainerElement(textElement),
+        nextTextElement,
+        scene.getContainerElement(nextTextElement),
         scene,
       );
     }
@@ -109,13 +110,14 @@ const handleFontSizeChange: DragInputCallbackType<
       if (shouldChangeByStepSize) {
         nextFontSize = getStepSizedValue(nextFontSize, STEP_SIZE);
       }
-      scene.mutateElement(latestElement, {
+      // fresh-snapshot: re-read post-mutation
+      const nextElement = scene.mutateElement(latestElement, {
         fontSize: nextFontSize,
       });
 
       redrawTextBoundingBox(
-        latestElement,
-        scene.getContainerElement(latestElement),
+        nextElement,
+        scene.getContainerElement(nextElement),
         scene,
       );
     }

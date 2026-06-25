@@ -1163,7 +1163,12 @@ describe("select single element on the scene", () => {
     fireEvent.pointerDown(canvas, { clientX: 45, clientY: 20 });
     fireEvent.pointerUp(canvas);
 
-    expect(renderInteractiveScene).toHaveBeenCalledTimes(8);
+    // native-Yjs core (M1): the doc-derived Scene recomputes its element views
+    // from `yElements` on each write (including the silent mid-drag-create
+    // `informMutation: false` write), which refreshes the interactive-scene
+    // memoization inputs and yields 2 extra interactive renders here. The static
+    // scene cadence (and the Scene's own triggerUpdate cadence) is unchanged.
+    expect(renderInteractiveScene).toHaveBeenCalledTimes(10);
     expect(renderStaticScene).toHaveBeenCalledTimes(7);
     expect(h.state.selectionElement).toBeNull();
     expect(h.elements.length).toEqual(1);
@@ -1196,7 +1201,12 @@ describe("select single element on the scene", () => {
     fireEvent.pointerDown(canvas, { clientX: 45, clientY: 20 });
     fireEvent.pointerUp(canvas);
 
-    expect(renderInteractiveScene).toHaveBeenCalledTimes(8);
+    // native-Yjs core (M1): the doc-derived Scene recomputes its element views
+    // from `yElements` on each write (including the silent mid-drag-create
+    // `informMutation: false` write), which refreshes the interactive-scene
+    // memoization inputs and yields 2 extra interactive renders here. The static
+    // scene cadence (and the Scene's own triggerUpdate cadence) is unchanged.
+    expect(renderInteractiveScene).toHaveBeenCalledTimes(10);
     expect(renderStaticScene).toHaveBeenCalledTimes(7);
     expect(h.state.selectionElement).toBeNull();
     expect(h.elements.length).toEqual(1);
@@ -1229,7 +1239,12 @@ describe("select single element on the scene", () => {
     fireEvent.pointerDown(canvas, { clientX: 45, clientY: 20 });
     fireEvent.pointerUp(canvas);
 
-    expect(renderInteractiveScene).toHaveBeenCalledTimes(8);
+    // native-Yjs core (M1): the doc-derived Scene recomputes its element views
+    // from `yElements` on each write (including the silent mid-drag-create
+    // `informMutation: false` write), which refreshes the interactive-scene
+    // memoization inputs and yields 2 extra interactive renders here. The static
+    // scene cadence (and the Scene's own triggerUpdate cadence) is unchanged.
+    expect(renderInteractiveScene).toHaveBeenCalledTimes(10);
     expect(renderStaticScene).toHaveBeenCalledTimes(7);
     expect(h.state.selectionElement).toBeNull();
     expect(h.elements.length).toEqual(1);

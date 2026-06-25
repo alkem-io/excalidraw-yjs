@@ -4,7 +4,10 @@ import { ROUNDNESS, KEYS, arrayToMap, cloneJSON } from "@excalidraw/common";
 
 import { pointFrom, type Radians } from "@excalidraw/math";
 
-import { getBoundTextElementPosition } from "@excalidraw/element";
+import {
+  getBoundTextElement,
+  getBoundTextElementPosition,
+} from "@excalidraw/element";
 import { getElementAbsoluteCoords } from "@excalidraw/element";
 import { newLinearElement } from "@excalidraw/element";
 
@@ -887,13 +890,33 @@ describe("mutliple elements", () => {
     API.executeAction(actionFlipHorizontal);
     API.executeAction(actionFlipVertical);
 
-    const arrowText = h.elements[1] as ExcalidrawTextElementWithContainer;
+    // Derived elements are fresh immutable snapshots minted on every recompute,
+    // so a captured reference goes stale after the flip actions above. Read the
+    // bound-text elements live from the scene by id at assertion time. Resolve
+    // the ids from the arrow/rectangle CONTAINER relationship rather than fixed
+    // scene-array slots, so a reorder in materialization can't bind the test to
+    // the wrong text element.
+    const arrowTextId = getBoundTextElement(
+      arrow.get(),
+      arrayToMap(h.elements),
+    )!.id;
+    const rectTextId = getBoundTextElement(
+      rectangle.get(),
+      arrayToMap(h.elements),
+    )!.id;
+    const arrowText = () =>
+      h.elements.find(
+        (e) => e.id === arrowTextId,
+      ) as ExcalidrawTextElementWithContainer;
+    const rectText = () =>
+      h.elements.find(
+        (e) => e.id === rectTextId,
+      ) as ExcalidrawTextElementWithContainer;
     const arrowTextPos = getBoundTextElementPosition(
       arrow.get(),
-      arrowText,
+      arrowText(),
       arrayToMap(h.elements),
     )!;
-    const rectText = h.elements[3] as ExcalidrawTextElementWithContainer;
 
     expect(arrow.x).toBeCloseTo(180);
     expect(arrow.y).toBeCloseTo(200);
@@ -901,20 +924,20 @@ describe("mutliple elements", () => {
     expect(arrow.points[1][1]).toBeCloseTo(-80);
 
     expect(arrowTextPos.x - (arrow.x - arrow.width)).toBeCloseTo(
-      arrow.x - (arrowTextPos.x + arrowText.width),
+      arrow.x - (arrowTextPos.x + arrowText().width),
     );
     expect(arrowTextPos.y - (arrow.y - arrow.height)).toBeCloseTo(
-      arrow.y - (arrowTextPos.y + arrowText.height),
+      arrow.y - (arrowTextPos.y + arrowText().height),
     );
 
     expect(rectangle.x).toBeCloseTo(80);
     expect(rectangle.y).toBeCloseTo(0);
 
-    expect(rectText.x - rectangle.x).toBeCloseTo(
-      rectangle.x + rectangle.width - (rectText.x + rectText.width),
+    expect(rectText().x - rectangle.x).toBeCloseTo(
+      rectangle.x + rectangle.width - (rectText().x + rectText().width),
     );
-    expect(rectText.y - rectangle.y).toBeCloseTo(
-      rectangle.y + rectangle.height - (rectText.y + rectText.height),
+    expect(rectText().y - rectangle.y).toBeCloseTo(
+      rectangle.y + rectangle.height - (rectText().y + rectText().height),
     );
   });
 });

@@ -1002,7 +1002,6 @@ exports[`contextMenu element > right-clicking on a group should select whole gro
   "angle": 0,
   "backgroundColor": "red",
   "boundElements": null,
-  "customData": undefined,
   "fillStyle": "solid",
   "frameId": null,
   "groupIds": [
@@ -1036,7 +1035,6 @@ exports[`contextMenu element > right-clicking on a group should select whole gro
   "angle": 0,
   "backgroundColor": "red",
   "boundElements": null,
-  "customData": undefined,
   "fillStyle": "solid",
   "frameId": null,
   "groupIds": [
@@ -1062,6 +1060,13 @@ exports[`contextMenu element > right-clicking on a group should select whole gro
   "width": 100,
   "x": 0,
   "y": 0,
+}
+`;
+
+exports[`contextMenu element > right-clicking on a group should select whole group > [end of test] element history depth 1`] = `
+{
+  "elementRedoDepth": 0,
+  "elementUndoDepth": 1,
 }
 `;
 
@@ -1197,7 +1202,6 @@ exports[`contextMenu element > selecting 'Add to library' in context menu adds e
   "angle": 0,
   "backgroundColor": "transparent",
   "boundElements": null,
-  "customData": undefined,
   "fillStyle": "solid",
   "frameId": null,
   "groupIds": [],
@@ -1217,10 +1221,17 @@ exports[`contextMenu element > selecting 'Add to library' in context menu adds e
   "type": "rectangle",
   "updated": 1,
   "version": 3,
-  "versionNonce": 401146281,
+  "versionNonce": 2019559783,
   "width": 10,
   "x": -20,
   "y": -10,
+}
+`;
+
+exports[`contextMenu element > selecting 'Add to library' in context menu adds element to library > [end of test] element history depth 1`] = `
+{
+  "elementRedoDepth": 0,
+  "elementUndoDepth": 1,
 }
 `;
 
@@ -1245,44 +1256,7 @@ exports[`contextMenu element > selecting 'Add to library' in context menu adds e
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {
-        "id0": {
-          "deleted": {
-            "angle": 0,
-            "backgroundColor": "transparent",
-            "boundElements": null,
-            "customData": undefined,
-            "fillStyle": "solid",
-            "frameId": null,
-            "groupIds": [],
-            "height": 10,
-            "index": "a0",
-            "isDeleted": false,
-            "link": null,
-            "locked": false,
-            "opacity": 100,
-            "roughness": 1,
-            "roundness": null,
-            "strokeColor": "#1e1e1e",
-            "strokeStyle": "solid",
-            "strokeWidth": 2,
-            "type": "rectangle",
-            "version": 3,
-            "width": 10,
-            "x": -20,
-            "y": -10,
-          },
-          "inserted": {
-            "isDeleted": true,
-            "version": 2,
-          },
-        },
-      },
-      "updated": {},
-    },
-    "id": "id2",
+    "hasElementChange": true,
   },
 ]
 `;
@@ -1409,12 +1383,11 @@ exports[`contextMenu element > selecting 'Bring forward' in context menu brings 
   "angle": 0,
   "backgroundColor": "transparent",
   "boundElements": null,
-  "customData": undefined,
   "fillStyle": "solid",
   "frameId": null,
   "groupIds": [],
   "height": 20,
-  "id": "id3",
+  "id": "id2",
   "index": "a1",
   "isDeleted": false,
   "link": null,
@@ -1422,14 +1395,14 @@ exports[`contextMenu element > selecting 'Bring forward' in context menu brings 
   "opacity": 100,
   "roughness": 1,
   "roundness": null,
-  "seed": 1014066025,
+  "seed": 238820263,
   "strokeColor": "#1e1e1e",
   "strokeStyle": "solid",
   "strokeWidth": 2,
   "type": "rectangle",
   "updated": 1,
   "version": 3,
-  "versionNonce": 1604849351,
+  "versionNonce": 23633383,
   "width": 20,
   "x": 20,
   "y": 30,
@@ -1441,7 +1414,6 @@ exports[`contextMenu element > selecting 'Bring forward' in context menu brings 
   "angle": 0,
   "backgroundColor": "transparent",
   "boundElements": null,
-  "customData": undefined,
   "fillStyle": "solid",
   "frameId": null,
   "groupIds": [],
@@ -1461,10 +1433,17 @@ exports[`contextMenu element > selecting 'Bring forward' in context menu brings 
   "type": "rectangle",
   "updated": 1,
   "version": 4,
-  "versionNonce": 493213705,
+  "versionNonce": 81784553,
   "width": 20,
   "x": -10,
   "y": 0,
+}
+`;
+
+exports[`contextMenu element > selecting 'Bring forward' in context menu brings element forward > [end of test] element history depth 1`] = `
+{
+  "elementRedoDepth": 0,
+  "elementUndoDepth": 3,
 }
 `;
 
@@ -1489,51 +1468,14 @@ exports[`contextMenu element > selecting 'Bring forward' in context menu brings 
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {
-        "id0": {
-          "deleted": {
-            "angle": 0,
-            "backgroundColor": "transparent",
-            "boundElements": null,
-            "customData": undefined,
-            "fillStyle": "solid",
-            "frameId": null,
-            "groupIds": [],
-            "height": 20,
-            "index": "a0",
-            "isDeleted": false,
-            "link": null,
-            "locked": false,
-            "opacity": 100,
-            "roughness": 1,
-            "roundness": null,
-            "strokeColor": "#1e1e1e",
-            "strokeStyle": "solid",
-            "strokeWidth": 2,
-            "type": "rectangle",
-            "version": 3,
-            "width": 20,
-            "x": -10,
-            "y": 0,
-          },
-          "inserted": {
-            "isDeleted": true,
-            "version": 2,
-          },
-        },
-      },
-      "updated": {},
-    },
-    "id": "id2",
+    "hasElementChange": true,
   },
   {
     "appState": AppStateDelta {
       "delta": Delta {
         "deleted": {
           "selectedElementIds": {
-            "id3": true,
+            "id2": true,
           },
         },
         "inserted": {
@@ -1543,44 +1485,7 @@ exports[`contextMenu element > selecting 'Bring forward' in context menu brings 
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {
-        "id3": {
-          "deleted": {
-            "angle": 0,
-            "backgroundColor": "transparent",
-            "boundElements": null,
-            "customData": undefined,
-            "fillStyle": "solid",
-            "frameId": null,
-            "groupIds": [],
-            "height": 20,
-            "index": "a1",
-            "isDeleted": false,
-            "link": null,
-            "locked": false,
-            "opacity": 100,
-            "roughness": 1,
-            "roundness": null,
-            "strokeColor": "#1e1e1e",
-            "strokeStyle": "solid",
-            "strokeWidth": 2,
-            "type": "rectangle",
-            "version": 3,
-            "width": 20,
-            "x": 20,
-            "y": 30,
-          },
-          "inserted": {
-            "isDeleted": true,
-            "version": 2,
-          },
-        },
-      },
-      "updated": {},
-    },
-    "id": "id5",
+    "hasElementChange": true,
   },
   {
     "appState": AppStateDelta {
@@ -1592,28 +1497,12 @@ exports[`contextMenu element > selecting 'Bring forward' in context menu brings 
         },
         "inserted": {
           "selectedElementIds": {
-            "id3": true,
+            "id2": true,
           },
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {},
-      "updated": {
-        "id0": {
-          "deleted": {
-            "index": "a2",
-            "version": 4,
-          },
-          "inserted": {
-            "index": "a0",
-            "version": 3,
-          },
-        },
-      },
-    },
-    "id": "id7",
+    "hasElementChange": true,
   },
 ]
 `;
@@ -1740,12 +1629,11 @@ exports[`contextMenu element > selecting 'Bring to front' in context menu brings
   "angle": 0,
   "backgroundColor": "transparent",
   "boundElements": null,
-  "customData": undefined,
   "fillStyle": "solid",
   "frameId": null,
   "groupIds": [],
   "height": 20,
-  "id": "id3",
+  "id": "id2",
   "index": "a1",
   "isDeleted": false,
   "link": null,
@@ -1753,14 +1641,14 @@ exports[`contextMenu element > selecting 'Bring to front' in context menu brings
   "opacity": 100,
   "roughness": 1,
   "roundness": null,
-  "seed": 1014066025,
+  "seed": 238820263,
   "strokeColor": "#1e1e1e",
   "strokeStyle": "solid",
   "strokeWidth": 2,
   "type": "rectangle",
   "updated": 1,
   "version": 3,
-  "versionNonce": 1604849351,
+  "versionNonce": 23633383,
   "width": 20,
   "x": 20,
   "y": 30,
@@ -1772,7 +1660,6 @@ exports[`contextMenu element > selecting 'Bring to front' in context menu brings
   "angle": 0,
   "backgroundColor": "transparent",
   "boundElements": null,
-  "customData": undefined,
   "fillStyle": "solid",
   "frameId": null,
   "groupIds": [],
@@ -1792,10 +1679,17 @@ exports[`contextMenu element > selecting 'Bring to front' in context menu brings
   "type": "rectangle",
   "updated": 1,
   "version": 4,
-  "versionNonce": 493213705,
+  "versionNonce": 81784553,
   "width": 20,
   "x": -10,
   "y": 0,
+}
+`;
+
+exports[`contextMenu element > selecting 'Bring to front' in context menu brings element to front > [end of test] element history depth 1`] = `
+{
+  "elementRedoDepth": 0,
+  "elementUndoDepth": 3,
 }
 `;
 
@@ -1820,51 +1714,14 @@ exports[`contextMenu element > selecting 'Bring to front' in context menu brings
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {
-        "id0": {
-          "deleted": {
-            "angle": 0,
-            "backgroundColor": "transparent",
-            "boundElements": null,
-            "customData": undefined,
-            "fillStyle": "solid",
-            "frameId": null,
-            "groupIds": [],
-            "height": 20,
-            "index": "a0",
-            "isDeleted": false,
-            "link": null,
-            "locked": false,
-            "opacity": 100,
-            "roughness": 1,
-            "roundness": null,
-            "strokeColor": "#1e1e1e",
-            "strokeStyle": "solid",
-            "strokeWidth": 2,
-            "type": "rectangle",
-            "version": 3,
-            "width": 20,
-            "x": -10,
-            "y": 0,
-          },
-          "inserted": {
-            "isDeleted": true,
-            "version": 2,
-          },
-        },
-      },
-      "updated": {},
-    },
-    "id": "id2",
+    "hasElementChange": true,
   },
   {
     "appState": AppStateDelta {
       "delta": Delta {
         "deleted": {
           "selectedElementIds": {
-            "id3": true,
+            "id2": true,
           },
         },
         "inserted": {
@@ -1874,44 +1731,7 @@ exports[`contextMenu element > selecting 'Bring to front' in context menu brings
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {
-        "id3": {
-          "deleted": {
-            "angle": 0,
-            "backgroundColor": "transparent",
-            "boundElements": null,
-            "customData": undefined,
-            "fillStyle": "solid",
-            "frameId": null,
-            "groupIds": [],
-            "height": 20,
-            "index": "a1",
-            "isDeleted": false,
-            "link": null,
-            "locked": false,
-            "opacity": 100,
-            "roughness": 1,
-            "roundness": null,
-            "strokeColor": "#1e1e1e",
-            "strokeStyle": "solid",
-            "strokeWidth": 2,
-            "type": "rectangle",
-            "version": 3,
-            "width": 20,
-            "x": 20,
-            "y": 30,
-          },
-          "inserted": {
-            "isDeleted": true,
-            "version": 2,
-          },
-        },
-      },
-      "updated": {},
-    },
-    "id": "id5",
+    "hasElementChange": true,
   },
   {
     "appState": AppStateDelta {
@@ -1923,28 +1743,12 @@ exports[`contextMenu element > selecting 'Bring to front' in context menu brings
         },
         "inserted": {
           "selectedElementIds": {
-            "id3": true,
+            "id2": true,
           },
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {},
-      "updated": {
-        "id0": {
-          "deleted": {
-            "index": "a2",
-            "version": 4,
-          },
-          "inserted": {
-            "index": "a0",
-            "version": 3,
-          },
-        },
-      },
-    },
-    "id": "id7",
+    "hasElementChange": true,
   },
 ]
 `;
@@ -2073,7 +1877,6 @@ exports[`contextMenu element > selecting 'Copy styles' in context menu copies st
   "angle": 0,
   "backgroundColor": "transparent",
   "boundElements": null,
-  "customData": undefined,
   "fillStyle": "solid",
   "frameId": null,
   "groupIds": [],
@@ -2093,10 +1896,17 @@ exports[`contextMenu element > selecting 'Copy styles' in context menu copies st
   "type": "rectangle",
   "updated": 1,
   "version": 3,
-  "versionNonce": 401146281,
+  "versionNonce": 2019559783,
   "width": 10,
   "x": -20,
   "y": -10,
+}
+`;
+
+exports[`contextMenu element > selecting 'Copy styles' in context menu copies styles > [end of test] element history depth 1`] = `
+{
+  "elementRedoDepth": 0,
+  "elementUndoDepth": 1,
 }
 `;
 
@@ -2121,44 +1931,7 @@ exports[`contextMenu element > selecting 'Copy styles' in context menu copies st
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {
-        "id0": {
-          "deleted": {
-            "angle": 0,
-            "backgroundColor": "transparent",
-            "boundElements": null,
-            "customData": undefined,
-            "fillStyle": "solid",
-            "frameId": null,
-            "groupIds": [],
-            "height": 10,
-            "index": "a0",
-            "isDeleted": false,
-            "link": null,
-            "locked": false,
-            "opacity": 100,
-            "roughness": 1,
-            "roundness": null,
-            "strokeColor": "#1e1e1e",
-            "strokeStyle": "solid",
-            "strokeWidth": 2,
-            "type": "rectangle",
-            "version": 3,
-            "width": 10,
-            "x": -20,
-            "y": -10,
-          },
-          "inserted": {
-            "isDeleted": true,
-            "version": 2,
-          },
-        },
-      },
-      "updated": {},
-    },
-    "id": "id2",
+    "hasElementChange": true,
   },
 ]
 `;
@@ -2283,7 +2056,6 @@ exports[`contextMenu element > selecting 'Delete' in context menu deletes elemen
   "angle": 0,
   "backgroundColor": "transparent",
   "boundElements": null,
-  "customData": undefined,
   "fillStyle": "solid",
   "frameId": null,
   "groupIds": [],
@@ -2303,10 +2075,17 @@ exports[`contextMenu element > selecting 'Delete' in context menu deletes elemen
   "type": "rectangle",
   "updated": 1,
   "version": 4,
-  "versionNonce": 1116226695,
+  "versionNonce": 1014066025,
   "width": 10,
   "x": -20,
   "y": -10,
+}
+`;
+
+exports[`contextMenu element > selecting 'Delete' in context menu deletes element > [end of test] element history depth 1`] = `
+{
+  "elementRedoDepth": 0,
+  "elementUndoDepth": 2,
 }
 `;
 
@@ -2331,44 +2110,7 @@ exports[`contextMenu element > selecting 'Delete' in context menu deletes elemen
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {
-        "id0": {
-          "deleted": {
-            "angle": 0,
-            "backgroundColor": "transparent",
-            "boundElements": null,
-            "customData": undefined,
-            "fillStyle": "solid",
-            "frameId": null,
-            "groupIds": [],
-            "height": 10,
-            "index": "a0",
-            "isDeleted": false,
-            "link": null,
-            "locked": false,
-            "opacity": 100,
-            "roughness": 1,
-            "roundness": null,
-            "strokeColor": "#1e1e1e",
-            "strokeStyle": "solid",
-            "strokeWidth": 2,
-            "type": "rectangle",
-            "version": 3,
-            "width": 10,
-            "x": -20,
-            "y": -10,
-          },
-          "inserted": {
-            "isDeleted": true,
-            "version": 2,
-          },
-        },
-      },
-      "updated": {},
-    },
-    "id": "id2",
+    "hasElementChange": true,
   },
   {
     "appState": AppStateDelta {
@@ -2383,23 +2125,7 @@ exports[`contextMenu element > selecting 'Delete' in context menu deletes elemen
         },
       },
     },
-    "elements": {
-      "added": {
-        "id0": {
-          "deleted": {
-            "isDeleted": true,
-            "version": 4,
-          },
-          "inserted": {
-            "isDeleted": false,
-            "version": 3,
-          },
-        },
-      },
-      "removed": {},
-      "updated": {},
-    },
-    "id": "id4",
+    "hasElementChange": true,
   },
 ]
 `;
@@ -2493,7 +2219,7 @@ exports[`contextMenu element > selecting 'Duplicate' in context menu duplicates 
   "scrolledOutside": false,
   "searchMatches": null,
   "selectedElementIds": {
-    "id3": true,
+    "id2": true,
   },
   "selectedElementsAreBeingDragged": false,
   "selectedGroupIds": {},
@@ -2526,7 +2252,6 @@ exports[`contextMenu element > selecting 'Duplicate' in context menu duplicates 
   "angle": 0,
   "backgroundColor": "transparent",
   "boundElements": null,
-  "customData": undefined,
   "fillStyle": "solid",
   "frameId": null,
   "groupIds": [],
@@ -2546,7 +2271,7 @@ exports[`contextMenu element > selecting 'Duplicate' in context menu duplicates 
   "type": "rectangle",
   "updated": 1,
   "version": 3,
-  "versionNonce": 401146281,
+  "versionNonce": 2019559783,
   "width": 10,
   "x": -20,
   "y": -10,
@@ -2558,12 +2283,11 @@ exports[`contextMenu element > selecting 'Duplicate' in context menu duplicates 
   "angle": 0,
   "backgroundColor": "transparent",
   "boundElements": null,
-  "customData": undefined,
   "fillStyle": "solid",
   "frameId": null,
   "groupIds": [],
   "height": 10,
-  "id": "id3",
+  "id": "id2",
   "index": "a1",
   "isDeleted": false,
   "link": null,
@@ -2571,17 +2295,24 @@ exports[`contextMenu element > selecting 'Duplicate' in context menu duplicates 
   "opacity": 100,
   "roughness": 1,
   "roundness": null,
-  "seed": 1014066025,
+  "seed": 238820263,
   "strokeColor": "#1e1e1e",
   "strokeStyle": "solid",
   "strokeWidth": 2,
   "type": "rectangle",
   "updated": 1,
   "version": 5,
-  "versionNonce": 400692809,
+  "versionNonce": 1604849351,
   "width": 10,
   "x": -10,
   "y": 0,
+}
+`;
+
+exports[`contextMenu element > selecting 'Duplicate' in context menu duplicates element > [end of test] element history depth 1`] = `
+{
+  "elementRedoDepth": 0,
+  "elementUndoDepth": 2,
 }
 `;
 
@@ -2606,51 +2337,14 @@ exports[`contextMenu element > selecting 'Duplicate' in context menu duplicates 
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {
-        "id0": {
-          "deleted": {
-            "angle": 0,
-            "backgroundColor": "transparent",
-            "boundElements": null,
-            "customData": undefined,
-            "fillStyle": "solid",
-            "frameId": null,
-            "groupIds": [],
-            "height": 10,
-            "index": "a0",
-            "isDeleted": false,
-            "link": null,
-            "locked": false,
-            "opacity": 100,
-            "roughness": 1,
-            "roundness": null,
-            "strokeColor": "#1e1e1e",
-            "strokeStyle": "solid",
-            "strokeWidth": 2,
-            "type": "rectangle",
-            "version": 3,
-            "width": 10,
-            "x": -20,
-            "y": -10,
-          },
-          "inserted": {
-            "isDeleted": true,
-            "version": 2,
-          },
-        },
-      },
-      "updated": {},
-    },
-    "id": "id2",
+    "hasElementChange": true,
   },
   {
     "appState": AppStateDelta {
       "delta": Delta {
         "deleted": {
           "selectedElementIds": {
-            "id3": true,
+            "id2": true,
           },
         },
         "inserted": {
@@ -2660,44 +2354,7 @@ exports[`contextMenu element > selecting 'Duplicate' in context menu duplicates 
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {
-        "id3": {
-          "deleted": {
-            "angle": 0,
-            "backgroundColor": "transparent",
-            "boundElements": null,
-            "customData": undefined,
-            "fillStyle": "solid",
-            "frameId": null,
-            "groupIds": [],
-            "height": 10,
-            "index": "a1",
-            "isDeleted": false,
-            "link": null,
-            "locked": false,
-            "opacity": 100,
-            "roughness": 1,
-            "roundness": null,
-            "strokeColor": "#1e1e1e",
-            "strokeStyle": "solid",
-            "strokeWidth": 2,
-            "type": "rectangle",
-            "version": 5,
-            "width": 10,
-            "x": -10,
-            "y": 0,
-          },
-          "inserted": {
-            "isDeleted": true,
-            "version": 4,
-          },
-        },
-      },
-      "updated": {},
-    },
-    "id": "id5",
+    "hasElementChange": true,
   },
 ]
 `;
@@ -2785,7 +2442,7 @@ exports[`contextMenu element > selecting 'Group selection' in context menu group
     "type": "selection",
   },
   "previousSelectedElementIds": {
-    "id3": true,
+    "id2": true,
   },
   "resizingElement": null,
   "scrollX": 0,
@@ -2794,11 +2451,11 @@ exports[`contextMenu element > selecting 'Group selection' in context menu group
   "searchMatches": null,
   "selectedElementIds": {
     "id0": true,
-    "id3": true,
+    "id2": true,
   },
   "selectedElementsAreBeingDragged": false,
   "selectedGroupIds": {
-    "id9": true,
+    "id6": true,
   },
   "selectedLinearElement": null,
   "selectionElement": null,
@@ -2829,11 +2486,10 @@ exports[`contextMenu element > selecting 'Group selection' in context menu group
   "angle": 0,
   "backgroundColor": "transparent",
   "boundElements": null,
-  "customData": undefined,
   "fillStyle": "solid",
   "frameId": null,
   "groupIds": [
-    "id9",
+    "id6",
   ],
   "height": 20,
   "id": "id0",
@@ -2851,7 +2507,7 @@ exports[`contextMenu element > selecting 'Group selection' in context menu group
   "type": "rectangle",
   "updated": 1,
   "version": 4,
-  "versionNonce": 915032327,
+  "versionNonce": 747212839,
   "width": 20,
   "x": -10,
   "y": 0,
@@ -2863,14 +2519,13 @@ exports[`contextMenu element > selecting 'Group selection' in context menu group
   "angle": 0,
   "backgroundColor": "transparent",
   "boundElements": null,
-  "customData": undefined,
   "fillStyle": "solid",
   "frameId": null,
   "groupIds": [
-    "id9",
+    "id6",
   ],
   "height": 20,
-  "id": "id3",
+  "id": "id2",
   "index": "a1",
   "isDeleted": false,
   "link": null,
@@ -2878,17 +2533,24 @@ exports[`contextMenu element > selecting 'Group selection' in context menu group
   "opacity": 100,
   "roughness": 1,
   "roundness": null,
-  "seed": 1014066025,
+  "seed": 238820263,
   "strokeColor": "#1e1e1e",
   "strokeStyle": "solid",
   "strokeWidth": 2,
   "type": "rectangle",
   "updated": 1,
   "version": 4,
-  "versionNonce": 81784553,
+  "versionNonce": 1723083209,
   "width": 20,
   "x": 20,
   "y": 30,
+}
+`;
+
+exports[`contextMenu element > selecting 'Group selection' in context menu groups selected elements > [end of test] element history depth 1`] = `
+{
+  "elementRedoDepth": 0,
+  "elementUndoDepth": 3,
 }
 `;
 
@@ -2913,51 +2575,14 @@ exports[`contextMenu element > selecting 'Group selection' in context menu group
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {
-        "id0": {
-          "deleted": {
-            "angle": 0,
-            "backgroundColor": "transparent",
-            "boundElements": null,
-            "customData": undefined,
-            "fillStyle": "solid",
-            "frameId": null,
-            "groupIds": [],
-            "height": 20,
-            "index": "a0",
-            "isDeleted": false,
-            "link": null,
-            "locked": false,
-            "opacity": 100,
-            "roughness": 1,
-            "roundness": null,
-            "strokeColor": "#1e1e1e",
-            "strokeStyle": "solid",
-            "strokeWidth": 2,
-            "type": "rectangle",
-            "version": 3,
-            "width": 20,
-            "x": -10,
-            "y": 0,
-          },
-          "inserted": {
-            "isDeleted": true,
-            "version": 2,
-          },
-        },
-      },
-      "updated": {},
-    },
-    "id": "id2",
+    "hasElementChange": true,
   },
   {
     "appState": AppStateDelta {
       "delta": Delta {
         "deleted": {
           "selectedElementIds": {
-            "id3": true,
+            "id2": true,
           },
         },
         "inserted": {
@@ -2967,44 +2592,7 @@ exports[`contextMenu element > selecting 'Group selection' in context menu group
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {
-        "id3": {
-          "deleted": {
-            "angle": 0,
-            "backgroundColor": "transparent",
-            "boundElements": null,
-            "customData": undefined,
-            "fillStyle": "solid",
-            "frameId": null,
-            "groupIds": [],
-            "height": 20,
-            "index": "a1",
-            "isDeleted": false,
-            "link": null,
-            "locked": false,
-            "opacity": 100,
-            "roughness": 1,
-            "roundness": null,
-            "strokeColor": "#1e1e1e",
-            "strokeStyle": "solid",
-            "strokeWidth": 2,
-            "type": "rectangle",
-            "version": 3,
-            "width": 20,
-            "x": 20,
-            "y": 30,
-          },
-          "inserted": {
-            "isDeleted": true,
-            "version": 2,
-          },
-        },
-      },
-      "updated": {},
-    },
-    "id": "id5",
+    "hasElementChange": true,
   },
   {
     "appState": AppStateDelta {
@@ -3019,19 +2607,14 @@ exports[`contextMenu element > selecting 'Group selection' in context menu group
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {},
-      "updated": {},
-    },
-    "id": "id8",
+    "hasElementChange": false,
   },
   {
     "appState": AppStateDelta {
       "delta": Delta {
         "deleted": {
           "selectedGroupIds": {
-            "id9": true,
+            "id6": true,
           },
         },
         "inserted": {
@@ -3039,37 +2622,7 @@ exports[`contextMenu element > selecting 'Group selection' in context menu group
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {},
-      "updated": {
-        "id0": {
-          "deleted": {
-            "groupIds": [
-              "id9",
-            ],
-            "version": 4,
-          },
-          "inserted": {
-            "groupIds": [],
-            "version": 3,
-          },
-        },
-        "id3": {
-          "deleted": {
-            "groupIds": [
-              "id9",
-            ],
-            "version": 4,
-          },
-          "inserted": {
-            "groupIds": [],
-            "version": 3,
-          },
-        },
-      },
-    },
-    "id": "id11",
+    "hasElementChange": true,
   },
 ]
 `;
@@ -3198,7 +2751,6 @@ exports[`contextMenu element > selecting 'Paste styles' in context menu pastes s
   "angle": 0,
   "backgroundColor": "#a5d8ff",
   "boundElements": null,
-  "customData": undefined,
   "fillStyle": "cross-hatch",
   "frameId": null,
   "groupIds": [],
@@ -3218,7 +2770,7 @@ exports[`contextMenu element > selecting 'Paste styles' in context menu pastes s
   "type": "rectangle",
   "updated": 1,
   "version": 4,
-  "versionNonce": 1402203177,
+  "versionNonce": 1349943049,
   "width": 20,
   "x": -10,
   "y": 0,
@@ -3230,12 +2782,11 @@ exports[`contextMenu element > selecting 'Paste styles' in context menu pastes s
   "angle": 0,
   "backgroundColor": "#a5d8ff",
   "boundElements": null,
-  "customData": undefined,
   "fillStyle": "cross-hatch",
   "frameId": null,
   "groupIds": [],
   "height": 20,
-  "id": "id3",
+  "id": "id2",
   "index": "a1",
   "isDeleted": false,
   "link": null,
@@ -3243,17 +2794,24 @@ exports[`contextMenu element > selecting 'Paste styles' in context menu pastes s
   "opacity": 60,
   "roughness": 2,
   "roundness": null,
-  "seed": 1898319239,
+  "seed": 406373543,
   "strokeColor": "#e03131",
   "strokeStyle": "dotted",
   "strokeWidth": 2,
   "type": "rectangle",
   "updated": 1,
   "version": 9,
-  "versionNonce": 941653321,
+  "versionNonce": 1402203177,
   "width": 20,
   "x": 20,
   "y": 30,
+}
+`;
+
+exports[`contextMenu element > selecting 'Paste styles' in context menu pastes styles > [end of test] element history depth 1`] = `
+{
+  "elementRedoDepth": 0,
+  "elementUndoDepth": 9,
 }
 `;
 
@@ -3278,51 +2836,14 @@ exports[`contextMenu element > selecting 'Paste styles' in context menu pastes s
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {
-        "id0": {
-          "deleted": {
-            "angle": 0,
-            "backgroundColor": "transparent",
-            "boundElements": null,
-            "customData": undefined,
-            "fillStyle": "solid",
-            "frameId": null,
-            "groupIds": [],
-            "height": 20,
-            "index": "a0",
-            "isDeleted": false,
-            "link": null,
-            "locked": false,
-            "opacity": 100,
-            "roughness": 1,
-            "roundness": null,
-            "strokeColor": "#1e1e1e",
-            "strokeStyle": "solid",
-            "strokeWidth": 2,
-            "type": "rectangle",
-            "version": 3,
-            "width": 20,
-            "x": -10,
-            "y": 0,
-          },
-          "inserted": {
-            "isDeleted": true,
-            "version": 2,
-          },
-        },
-      },
-      "updated": {},
-    },
-    "id": "id2",
+    "hasElementChange": true,
   },
   {
     "appState": AppStateDelta {
       "delta": Delta {
         "deleted": {
           "selectedElementIds": {
-            "id3": true,
+            "id2": true,
           },
         },
         "inserted": {
@@ -3332,44 +2853,7 @@ exports[`contextMenu element > selecting 'Paste styles' in context menu pastes s
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {
-        "id3": {
-          "deleted": {
-            "angle": 0,
-            "backgroundColor": "transparent",
-            "boundElements": null,
-            "customData": undefined,
-            "fillStyle": "solid",
-            "frameId": null,
-            "groupIds": [],
-            "height": 20,
-            "index": "a1",
-            "isDeleted": false,
-            "link": null,
-            "locked": false,
-            "opacity": 100,
-            "roughness": 1,
-            "roundness": null,
-            "strokeColor": "#1e1e1e",
-            "strokeStyle": "solid",
-            "strokeWidth": 2,
-            "type": "rectangle",
-            "version": 3,
-            "width": 20,
-            "x": 20,
-            "y": 30,
-          },
-          "inserted": {
-            "isDeleted": true,
-            "version": 2,
-          },
-        },
-      },
-      "updated": {},
-    },
-    "id": "id5",
+    "hasElementChange": true,
   },
   {
     "appState": AppStateDelta {
@@ -3378,23 +2862,7 @@ exports[`contextMenu element > selecting 'Paste styles' in context menu pastes s
         "inserted": {},
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {},
-      "updated": {
-        "id3": {
-          "deleted": {
-            "strokeColor": "#e03131",
-            "version": 4,
-          },
-          "inserted": {
-            "strokeColor": "#1e1e1e",
-            "version": 3,
-          },
-        },
-      },
-    },
-    "id": "id7",
+    "hasElementChange": true,
   },
   {
     "appState": AppStateDelta {
@@ -3403,23 +2871,7 @@ exports[`contextMenu element > selecting 'Paste styles' in context menu pastes s
         "inserted": {},
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {},
-      "updated": {
-        "id3": {
-          "deleted": {
-            "backgroundColor": "#a5d8ff",
-            "version": 5,
-          },
-          "inserted": {
-            "backgroundColor": "transparent",
-            "version": 4,
-          },
-        },
-      },
-    },
-    "id": "id9",
+    "hasElementChange": true,
   },
   {
     "appState": AppStateDelta {
@@ -3428,23 +2880,7 @@ exports[`contextMenu element > selecting 'Paste styles' in context menu pastes s
         "inserted": {},
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {},
-      "updated": {
-        "id3": {
-          "deleted": {
-            "fillStyle": "cross-hatch",
-            "version": 6,
-          },
-          "inserted": {
-            "fillStyle": "solid",
-            "version": 5,
-          },
-        },
-      },
-    },
-    "id": "id11",
+    "hasElementChange": true,
   },
   {
     "appState": AppStateDelta {
@@ -3453,23 +2889,7 @@ exports[`contextMenu element > selecting 'Paste styles' in context menu pastes s
         "inserted": {},
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {},
-      "updated": {
-        "id3": {
-          "deleted": {
-            "strokeStyle": "dotted",
-            "version": 7,
-          },
-          "inserted": {
-            "strokeStyle": "solid",
-            "version": 6,
-          },
-        },
-      },
-    },
-    "id": "id13",
+    "hasElementChange": true,
   },
   {
     "appState": AppStateDelta {
@@ -3478,23 +2898,7 @@ exports[`contextMenu element > selecting 'Paste styles' in context menu pastes s
         "inserted": {},
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {},
-      "updated": {
-        "id3": {
-          "deleted": {
-            "roughness": 2,
-            "version": 8,
-          },
-          "inserted": {
-            "roughness": 1,
-            "version": 7,
-          },
-        },
-      },
-    },
-    "id": "id15",
+    "hasElementChange": true,
   },
   {
     "appState": AppStateDelta {
@@ -3503,23 +2907,7 @@ exports[`contextMenu element > selecting 'Paste styles' in context menu pastes s
         "inserted": {},
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {},
-      "updated": {
-        "id3": {
-          "deleted": {
-            "opacity": 60,
-            "version": 9,
-          },
-          "inserted": {
-            "opacity": 100,
-            "version": 8,
-          },
-        },
-      },
-    },
-    "id": "id17",
+    "hasElementChange": true,
   },
   {
     "appState": AppStateDelta {
@@ -3531,38 +2919,12 @@ exports[`contextMenu element > selecting 'Paste styles' in context menu pastes s
         },
         "inserted": {
           "selectedElementIds": {
-            "id3": true,
+            "id2": true,
           },
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {},
-      "updated": {
-        "id0": {
-          "deleted": {
-            "backgroundColor": "#a5d8ff",
-            "fillStyle": "cross-hatch",
-            "opacity": 60,
-            "roughness": 2,
-            "strokeColor": "#e03131",
-            "strokeStyle": "dotted",
-            "version": 4,
-          },
-          "inserted": {
-            "backgroundColor": "transparent",
-            "fillStyle": "solid",
-            "opacity": 100,
-            "roughness": 1,
-            "strokeColor": "#1e1e1e",
-            "strokeStyle": "solid",
-            "version": 3,
-          },
-        },
-      },
-    },
-    "id": "id19",
+    "hasElementChange": true,
   },
 ]
 `;
@@ -3656,7 +3018,7 @@ exports[`contextMenu element > selecting 'Send backward' in context menu sends e
   "scrolledOutside": false,
   "searchMatches": null,
   "selectedElementIds": {
-    "id3": true,
+    "id2": true,
   },
   "selectedElementsAreBeingDragged": false,
   "selectedGroupIds": {},
@@ -3689,12 +3051,11 @@ exports[`contextMenu element > selecting 'Send backward' in context menu sends e
   "angle": 0,
   "backgroundColor": "transparent",
   "boundElements": null,
-  "customData": undefined,
   "fillStyle": "solid",
   "frameId": null,
   "groupIds": [],
   "height": 20,
-  "id": "id3",
+  "id": "id2",
   "index": "Zz",
   "isDeleted": false,
   "link": null,
@@ -3702,14 +3063,14 @@ exports[`contextMenu element > selecting 'Send backward' in context menu sends e
   "opacity": 100,
   "roughness": 1,
   "roundness": null,
-  "seed": 238820263,
+  "seed": 400692809,
   "strokeColor": "#1e1e1e",
   "strokeStyle": "solid",
   "strokeWidth": 2,
   "type": "rectangle",
   "updated": 1,
   "version": 4,
-  "versionNonce": 915032327,
+  "versionNonce": 747212839,
   "width": 20,
   "x": 20,
   "y": 30,
@@ -3721,7 +3082,6 @@ exports[`contextMenu element > selecting 'Send backward' in context menu sends e
   "angle": 0,
   "backgroundColor": "transparent",
   "boundElements": null,
-  "customData": undefined,
   "fillStyle": "solid",
   "frameId": null,
   "groupIds": [],
@@ -3741,10 +3101,17 @@ exports[`contextMenu element > selecting 'Send backward' in context menu sends e
   "type": "rectangle",
   "updated": 1,
   "version": 3,
-  "versionNonce": 2019559783,
+  "versionNonce": 1150084233,
   "width": 20,
   "x": -10,
   "y": 0,
+}
+`;
+
+exports[`contextMenu element > selecting 'Send backward' in context menu sends element backward > [end of test] element history depth 1`] = `
+{
+  "elementRedoDepth": 0,
+  "elementUndoDepth": 3,
 }
 `;
 
@@ -3769,51 +3136,14 @@ exports[`contextMenu element > selecting 'Send backward' in context menu sends e
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {
-        "id0": {
-          "deleted": {
-            "angle": 0,
-            "backgroundColor": "transparent",
-            "boundElements": null,
-            "customData": undefined,
-            "fillStyle": "solid",
-            "frameId": null,
-            "groupIds": [],
-            "height": 20,
-            "index": "a0",
-            "isDeleted": false,
-            "link": null,
-            "locked": false,
-            "opacity": 100,
-            "roughness": 1,
-            "roundness": null,
-            "strokeColor": "#1e1e1e",
-            "strokeStyle": "solid",
-            "strokeWidth": 2,
-            "type": "rectangle",
-            "version": 3,
-            "width": 20,
-            "x": -10,
-            "y": 0,
-          },
-          "inserted": {
-            "isDeleted": true,
-            "version": 2,
-          },
-        },
-      },
-      "updated": {},
-    },
-    "id": "id2",
+    "hasElementChange": true,
   },
   {
     "appState": AppStateDelta {
       "delta": Delta {
         "deleted": {
           "selectedElementIds": {
-            "id3": true,
+            "id2": true,
           },
         },
         "inserted": {
@@ -3823,44 +3153,7 @@ exports[`contextMenu element > selecting 'Send backward' in context menu sends e
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {
-        "id3": {
-          "deleted": {
-            "angle": 0,
-            "backgroundColor": "transparent",
-            "boundElements": null,
-            "customData": undefined,
-            "fillStyle": "solid",
-            "frameId": null,
-            "groupIds": [],
-            "height": 20,
-            "index": "a1",
-            "isDeleted": false,
-            "link": null,
-            "locked": false,
-            "opacity": 100,
-            "roughness": 1,
-            "roundness": null,
-            "strokeColor": "#1e1e1e",
-            "strokeStyle": "solid",
-            "strokeWidth": 2,
-            "type": "rectangle",
-            "version": 3,
-            "width": 20,
-            "x": 20,
-            "y": 30,
-          },
-          "inserted": {
-            "isDeleted": true,
-            "version": 2,
-          },
-        },
-      },
-      "updated": {},
-    },
-    "id": "id5",
+    "hasElementChange": true,
   },
   {
     "appState": AppStateDelta {
@@ -3869,23 +3162,7 @@ exports[`contextMenu element > selecting 'Send backward' in context menu sends e
         "inserted": {},
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {},
-      "updated": {
-        "id3": {
-          "deleted": {
-            "index": "Zz",
-            "version": 4,
-          },
-          "inserted": {
-            "index": "a1",
-            "version": 3,
-          },
-        },
-      },
-    },
-    "id": "id7",
+    "hasElementChange": true,
   },
 ]
 `;
@@ -3979,7 +3256,7 @@ exports[`contextMenu element > selecting 'Send to back' in context menu sends el
   "scrolledOutside": false,
   "searchMatches": null,
   "selectedElementIds": {
-    "id3": true,
+    "id2": true,
   },
   "selectedElementsAreBeingDragged": false,
   "selectedGroupIds": {},
@@ -4012,12 +3289,11 @@ exports[`contextMenu element > selecting 'Send to back' in context menu sends el
   "angle": 0,
   "backgroundColor": "transparent",
   "boundElements": null,
-  "customData": undefined,
   "fillStyle": "solid",
   "frameId": null,
   "groupIds": [],
   "height": 20,
-  "id": "id3",
+  "id": "id2",
   "index": "Zz",
   "isDeleted": false,
   "link": null,
@@ -4025,14 +3301,14 @@ exports[`contextMenu element > selecting 'Send to back' in context menu sends el
   "opacity": 100,
   "roughness": 1,
   "roundness": null,
-  "seed": 1014066025,
+  "seed": 238820263,
   "strokeColor": "#1e1e1e",
   "strokeStyle": "solid",
   "strokeWidth": 2,
   "type": "rectangle",
   "updated": 1,
   "version": 4,
-  "versionNonce": 493213705,
+  "versionNonce": 81784553,
   "width": 20,
   "x": 20,
   "y": 30,
@@ -4044,7 +3320,6 @@ exports[`contextMenu element > selecting 'Send to back' in context menu sends el
   "angle": 0,
   "backgroundColor": "transparent",
   "boundElements": null,
-  "customData": undefined,
   "fillStyle": "solid",
   "frameId": null,
   "groupIds": [],
@@ -4064,10 +3339,17 @@ exports[`contextMenu element > selecting 'Send to back' in context menu sends el
   "type": "rectangle",
   "updated": 1,
   "version": 3,
-  "versionNonce": 2019559783,
+  "versionNonce": 1150084233,
   "width": 20,
   "x": -10,
   "y": 0,
+}
+`;
+
+exports[`contextMenu element > selecting 'Send to back' in context menu sends element to back > [end of test] element history depth 1`] = `
+{
+  "elementRedoDepth": 0,
+  "elementUndoDepth": 3,
 }
 `;
 
@@ -4092,51 +3374,14 @@ exports[`contextMenu element > selecting 'Send to back' in context menu sends el
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {
-        "id0": {
-          "deleted": {
-            "angle": 0,
-            "backgroundColor": "transparent",
-            "boundElements": null,
-            "customData": undefined,
-            "fillStyle": "solid",
-            "frameId": null,
-            "groupIds": [],
-            "height": 20,
-            "index": "a0",
-            "isDeleted": false,
-            "link": null,
-            "locked": false,
-            "opacity": 100,
-            "roughness": 1,
-            "roundness": null,
-            "strokeColor": "#1e1e1e",
-            "strokeStyle": "solid",
-            "strokeWidth": 2,
-            "type": "rectangle",
-            "version": 3,
-            "width": 20,
-            "x": -10,
-            "y": 0,
-          },
-          "inserted": {
-            "isDeleted": true,
-            "version": 2,
-          },
-        },
-      },
-      "updated": {},
-    },
-    "id": "id2",
+    "hasElementChange": true,
   },
   {
     "appState": AppStateDelta {
       "delta": Delta {
         "deleted": {
           "selectedElementIds": {
-            "id3": true,
+            "id2": true,
           },
         },
         "inserted": {
@@ -4146,44 +3391,7 @@ exports[`contextMenu element > selecting 'Send to back' in context menu sends el
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {
-        "id3": {
-          "deleted": {
-            "angle": 0,
-            "backgroundColor": "transparent",
-            "boundElements": null,
-            "customData": undefined,
-            "fillStyle": "solid",
-            "frameId": null,
-            "groupIds": [],
-            "height": 20,
-            "index": "a1",
-            "isDeleted": false,
-            "link": null,
-            "locked": false,
-            "opacity": 100,
-            "roughness": 1,
-            "roundness": null,
-            "strokeColor": "#1e1e1e",
-            "strokeStyle": "solid",
-            "strokeWidth": 2,
-            "type": "rectangle",
-            "version": 3,
-            "width": 20,
-            "x": 20,
-            "y": 30,
-          },
-          "inserted": {
-            "isDeleted": true,
-            "version": 2,
-          },
-        },
-      },
-      "updated": {},
-    },
-    "id": "id5",
+    "hasElementChange": true,
   },
   {
     "appState": AppStateDelta {
@@ -4192,23 +3400,7 @@ exports[`contextMenu element > selecting 'Send to back' in context menu sends el
         "inserted": {},
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {},
-      "updated": {
-        "id3": {
-          "deleted": {
-            "index": "Zz",
-            "version": 4,
-          },
-          "inserted": {
-            "index": "a1",
-            "version": 3,
-          },
-        },
-      },
-    },
-    "id": "id7",
+    "hasElementChange": true,
   },
 ]
 `;
@@ -4296,7 +3488,7 @@ exports[`contextMenu element > selecting 'Ungroup selection' in context menu ung
     "type": "selection",
   },
   "previousSelectedElementIds": {
-    "id3": true,
+    "id2": true,
   },
   "resizingElement": null,
   "scrollX": 0,
@@ -4305,7 +3497,7 @@ exports[`contextMenu element > selecting 'Ungroup selection' in context menu ung
   "searchMatches": null,
   "selectedElementIds": {
     "id0": true,
-    "id3": true,
+    "id2": true,
   },
   "selectedElementsAreBeingDragged": false,
   "selectedGroupIds": {},
@@ -4338,7 +3530,6 @@ exports[`contextMenu element > selecting 'Ungroup selection' in context menu ung
   "angle": 0,
   "backgroundColor": "transparent",
   "boundElements": null,
-  "customData": undefined,
   "fillStyle": "solid",
   "frameId": null,
   "groupIds": [],
@@ -4358,7 +3549,7 @@ exports[`contextMenu element > selecting 'Ungroup selection' in context menu ung
   "type": "rectangle",
   "updated": 1,
   "version": 5,
-  "versionNonce": 1006504105,
+  "versionNonce": 1315507081,
   "width": 20,
   "x": -10,
   "y": 0,
@@ -4370,12 +3561,11 @@ exports[`contextMenu element > selecting 'Ungroup selection' in context menu ung
   "angle": 0,
   "backgroundColor": "transparent",
   "boundElements": null,
-  "customData": undefined,
   "fillStyle": "solid",
   "frameId": null,
   "groupIds": [],
   "height": 20,
-  "id": "id3",
+  "id": "id2",
   "index": "a1",
   "isDeleted": false,
   "link": null,
@@ -4383,17 +3573,24 @@ exports[`contextMenu element > selecting 'Ungroup selection' in context menu ung
   "opacity": 100,
   "roughness": 1,
   "roundness": null,
-  "seed": 400692809,
+  "seed": 1604849351,
   "strokeColor": "#1e1e1e",
   "strokeStyle": "solid",
   "strokeWidth": 2,
   "type": "rectangle",
   "updated": 1,
   "version": 5,
-  "versionNonce": 289600103,
+  "versionNonce": 1898319239,
   "width": 20,
   "x": 20,
   "y": 30,
+}
+`;
+
+exports[`contextMenu element > selecting 'Ungroup selection' in context menu ungroups selected group > [end of test] element history depth 1`] = `
+{
+  "elementRedoDepth": 0,
+  "elementUndoDepth": 4,
 }
 `;
 
@@ -4418,51 +3615,14 @@ exports[`contextMenu element > selecting 'Ungroup selection' in context menu ung
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {
-        "id0": {
-          "deleted": {
-            "angle": 0,
-            "backgroundColor": "transparent",
-            "boundElements": null,
-            "customData": undefined,
-            "fillStyle": "solid",
-            "frameId": null,
-            "groupIds": [],
-            "height": 20,
-            "index": "a0",
-            "isDeleted": false,
-            "link": null,
-            "locked": false,
-            "opacity": 100,
-            "roughness": 1,
-            "roundness": null,
-            "strokeColor": "#1e1e1e",
-            "strokeStyle": "solid",
-            "strokeWidth": 2,
-            "type": "rectangle",
-            "version": 3,
-            "width": 20,
-            "x": -10,
-            "y": 0,
-          },
-          "inserted": {
-            "isDeleted": true,
-            "version": 2,
-          },
-        },
-      },
-      "updated": {},
-    },
-    "id": "id2",
+    "hasElementChange": true,
   },
   {
     "appState": AppStateDelta {
       "delta": Delta {
         "deleted": {
           "selectedElementIds": {
-            "id3": true,
+            "id2": true,
           },
         },
         "inserted": {
@@ -4472,44 +3632,7 @@ exports[`contextMenu element > selecting 'Ungroup selection' in context menu ung
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {
-        "id3": {
-          "deleted": {
-            "angle": 0,
-            "backgroundColor": "transparent",
-            "boundElements": null,
-            "customData": undefined,
-            "fillStyle": "solid",
-            "frameId": null,
-            "groupIds": [],
-            "height": 20,
-            "index": "a1",
-            "isDeleted": false,
-            "link": null,
-            "locked": false,
-            "opacity": 100,
-            "roughness": 1,
-            "roundness": null,
-            "strokeColor": "#1e1e1e",
-            "strokeStyle": "solid",
-            "strokeWidth": 2,
-            "type": "rectangle",
-            "version": 3,
-            "width": 20,
-            "x": 20,
-            "y": 30,
-          },
-          "inserted": {
-            "isDeleted": true,
-            "version": 2,
-          },
-        },
-      },
-      "updated": {},
-    },
-    "id": "id5",
+    "hasElementChange": true,
   },
   {
     "appState": AppStateDelta {
@@ -4524,19 +3647,14 @@ exports[`contextMenu element > selecting 'Ungroup selection' in context menu ung
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {},
-      "updated": {},
-    },
-    "id": "id8",
+    "hasElementChange": false,
   },
   {
     "appState": AppStateDelta {
       "delta": Delta {
         "deleted": {
           "selectedGroupIds": {
-            "id9": true,
+            "id6": true,
           },
         },
         "inserted": {
@@ -4544,37 +3662,7 @@ exports[`contextMenu element > selecting 'Ungroup selection' in context menu ung
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {},
-      "updated": {
-        "id0": {
-          "deleted": {
-            "groupIds": [
-              "id9",
-            ],
-            "version": 4,
-          },
-          "inserted": {
-            "groupIds": [],
-            "version": 3,
-          },
-        },
-        "id3": {
-          "deleted": {
-            "groupIds": [
-              "id9",
-            ],
-            "version": 4,
-          },
-          "inserted": {
-            "groupIds": [],
-            "version": 3,
-          },
-        },
-      },
-    },
-    "id": "id11",
+    "hasElementChange": true,
   },
   {
     "appState": AppStateDelta {
@@ -4584,42 +3672,12 @@ exports[`contextMenu element > selecting 'Ungroup selection' in context menu ung
         },
         "inserted": {
           "selectedGroupIds": {
-            "id9": true,
+            "id6": true,
           },
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {},
-      "updated": {
-        "id0": {
-          "deleted": {
-            "groupIds": [],
-            "version": 5,
-          },
-          "inserted": {
-            "groupIds": [
-              "id9",
-            ],
-            "version": 4,
-          },
-        },
-        "id3": {
-          "deleted": {
-            "groupIds": [],
-            "version": 5,
-          },
-          "inserted": {
-            "groupIds": [
-              "id9",
-            ],
-            "version": 4,
-          },
-        },
-      },
-    },
-    "id": "id13",
+    "hasElementChange": true,
   },
 ]
 `;
@@ -5590,7 +4648,7 @@ exports[`contextMenu element > shows 'Group selection' in context menu for multi
   "searchMatches": null,
   "selectedElementIds": {
     "id0": true,
-    "id3": true,
+    "id2": true,
   },
   "selectedElementsAreBeingDragged": false,
   "selectedGroupIds": {},
@@ -5623,7 +4681,6 @@ exports[`contextMenu element > shows 'Group selection' in context menu for multi
   "angle": 0,
   "backgroundColor": "transparent",
   "boundElements": null,
-  "customData": undefined,
   "fillStyle": "solid",
   "frameId": null,
   "groupIds": [],
@@ -5643,7 +4700,7 @@ exports[`contextMenu element > shows 'Group selection' in context menu for multi
   "type": "rectangle",
   "updated": 1,
   "version": 3,
-  "versionNonce": 1150084233,
+  "versionNonce": 1116226695,
   "width": 10,
   "x": -10,
   "y": 0,
@@ -5655,12 +4712,11 @@ exports[`contextMenu element > shows 'Group selection' in context menu for multi
   "angle": 0,
   "backgroundColor": "transparent",
   "boundElements": null,
-  "customData": undefined,
   "fillStyle": "solid",
   "frameId": null,
   "groupIds": [],
   "height": 10,
-  "id": "id3",
+  "id": "id2",
   "index": "a1",
   "isDeleted": false,
   "link": null,
@@ -5668,17 +4724,24 @@ exports[`contextMenu element > shows 'Group selection' in context menu for multi
   "opacity": 100,
   "roughness": 1,
   "roundness": null,
-  "seed": 400692809,
+  "seed": 1604849351,
   "strokeColor": "#1e1e1e",
   "strokeStyle": "solid",
   "strokeWidth": 2,
   "type": "rectangle",
   "updated": 1,
   "version": 3,
-  "versionNonce": 23633383,
+  "versionNonce": 915032327,
   "width": 10,
   "x": 12,
   "y": 0,
+}
+`;
+
+exports[`contextMenu element > shows 'Group selection' in context menu for multiple selected elements > [end of test] element history depth 1`] = `
+{
+  "elementRedoDepth": 0,
+  "elementUndoDepth": 2,
 }
 `;
 
@@ -5703,51 +4766,14 @@ exports[`contextMenu element > shows 'Group selection' in context menu for multi
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {
-        "id0": {
-          "deleted": {
-            "angle": 0,
-            "backgroundColor": "transparent",
-            "boundElements": null,
-            "customData": undefined,
-            "fillStyle": "solid",
-            "frameId": null,
-            "groupIds": [],
-            "height": 10,
-            "index": "a0",
-            "isDeleted": false,
-            "link": null,
-            "locked": false,
-            "opacity": 100,
-            "roughness": 1,
-            "roundness": null,
-            "strokeColor": "#1e1e1e",
-            "strokeStyle": "solid",
-            "strokeWidth": 2,
-            "type": "rectangle",
-            "version": 3,
-            "width": 10,
-            "x": -10,
-            "y": 0,
-          },
-          "inserted": {
-            "isDeleted": true,
-            "version": 2,
-          },
-        },
-      },
-      "updated": {},
-    },
-    "id": "id2",
+    "hasElementChange": true,
   },
   {
     "appState": AppStateDelta {
       "delta": Delta {
         "deleted": {
           "selectedElementIds": {
-            "id3": true,
+            "id2": true,
           },
         },
         "inserted": {
@@ -5757,44 +4783,7 @@ exports[`contextMenu element > shows 'Group selection' in context menu for multi
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {
-        "id3": {
-          "deleted": {
-            "angle": 0,
-            "backgroundColor": "transparent",
-            "boundElements": null,
-            "customData": undefined,
-            "fillStyle": "solid",
-            "frameId": null,
-            "groupIds": [],
-            "height": 10,
-            "index": "a1",
-            "isDeleted": false,
-            "link": null,
-            "locked": false,
-            "opacity": 100,
-            "roughness": 1,
-            "roundness": null,
-            "strokeColor": "#1e1e1e",
-            "strokeStyle": "solid",
-            "strokeWidth": 2,
-            "type": "rectangle",
-            "version": 3,
-            "width": 10,
-            "x": 12,
-            "y": 0,
-          },
-          "inserted": {
-            "isDeleted": true,
-            "version": 2,
-          },
-        },
-      },
-      "updated": {},
-    },
-    "id": "id5",
+    "hasElementChange": true,
   },
   {
     "appState": AppStateDelta {
@@ -5806,24 +4795,19 @@ exports[`contextMenu element > shows 'Group selection' in context menu for multi
         },
         "inserted": {
           "selectedElementIds": {
-            "id3": true,
+            "id2": true,
           },
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {},
-      "updated": {},
-    },
-    "id": "id8",
+    "hasElementChange": false,
   },
   {
     "appState": AppStateDelta {
       "delta": Delta {
         "deleted": {
           "selectedElementIds": {
-            "id3": true,
+            "id2": true,
           },
         },
         "inserted": {
@@ -5831,12 +4815,7 @@ exports[`contextMenu element > shows 'Group selection' in context menu for multi
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {},
-      "updated": {},
-    },
-    "id": "id11",
+    "hasElementChange": false,
   },
 ]
 `;
@@ -6807,11 +5786,11 @@ exports[`contextMenu element > shows 'Ungroup selection' in context menu for gro
   "searchMatches": null,
   "selectedElementIds": {
     "id0": true,
-    "id3": true,
+    "id2": true,
   },
   "selectedElementsAreBeingDragged": false,
   "selectedGroupIds": {
-    "id12": true,
+    "id8": true,
   },
   "selectedLinearElement": null,
   "selectionElement": null,
@@ -6842,11 +5821,10 @@ exports[`contextMenu element > shows 'Ungroup selection' in context menu for gro
   "angle": 0,
   "backgroundColor": "transparent",
   "boundElements": null,
-  "customData": undefined,
   "fillStyle": "solid",
   "frameId": null,
   "groupIds": [
-    "id12",
+    "id8",
   ],
   "height": 10,
   "id": "id0",
@@ -6864,7 +5842,7 @@ exports[`contextMenu element > shows 'Ungroup selection' in context menu for gro
   "type": "rectangle",
   "updated": 1,
   "version": 4,
-  "versionNonce": 1723083209,
+  "versionNonce": 1006504105,
   "width": 10,
   "x": -10,
   "y": 0,
@@ -6876,14 +5854,13 @@ exports[`contextMenu element > shows 'Ungroup selection' in context menu for gro
   "angle": 0,
   "backgroundColor": "transparent",
   "boundElements": null,
-  "customData": undefined,
   "fillStyle": "solid",
   "frameId": null,
   "groupIds": [
-    "id12",
+    "id8",
   ],
   "height": 10,
-  "id": "id3",
+  "id": "id2",
   "index": "a1",
   "isDeleted": false,
   "link": null,
@@ -6891,17 +5868,24 @@ exports[`contextMenu element > shows 'Ungroup selection' in context menu for gro
   "opacity": 100,
   "roughness": 1,
   "roundness": null,
-  "seed": 400692809,
+  "seed": 1604849351,
   "strokeColor": "#1e1e1e",
   "strokeStyle": "solid",
   "strokeWidth": 2,
   "type": "rectangle",
   "updated": 1,
   "version": 4,
-  "versionNonce": 760410951,
+  "versionNonce": 289600103,
   "width": 10,
   "x": 12,
   "y": 0,
+}
+`;
+
+exports[`contextMenu element > shows 'Ungroup selection' in context menu for group inside selected elements > [end of test] element history depth 1`] = `
+{
+  "elementRedoDepth": 0,
+  "elementUndoDepth": 3,
 }
 `;
 
@@ -6926,51 +5910,14 @@ exports[`contextMenu element > shows 'Ungroup selection' in context menu for gro
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {
-        "id0": {
-          "deleted": {
-            "angle": 0,
-            "backgroundColor": "transparent",
-            "boundElements": null,
-            "customData": undefined,
-            "fillStyle": "solid",
-            "frameId": null,
-            "groupIds": [],
-            "height": 10,
-            "index": "a0",
-            "isDeleted": false,
-            "link": null,
-            "locked": false,
-            "opacity": 100,
-            "roughness": 1,
-            "roundness": null,
-            "strokeColor": "#1e1e1e",
-            "strokeStyle": "solid",
-            "strokeWidth": 2,
-            "type": "rectangle",
-            "version": 3,
-            "width": 10,
-            "x": -10,
-            "y": 0,
-          },
-          "inserted": {
-            "isDeleted": true,
-            "version": 2,
-          },
-        },
-      },
-      "updated": {},
-    },
-    "id": "id2",
+    "hasElementChange": true,
   },
   {
     "appState": AppStateDelta {
       "delta": Delta {
         "deleted": {
           "selectedElementIds": {
-            "id3": true,
+            "id2": true,
           },
         },
         "inserted": {
@@ -6980,44 +5927,7 @@ exports[`contextMenu element > shows 'Ungroup selection' in context menu for gro
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {
-        "id3": {
-          "deleted": {
-            "angle": 0,
-            "backgroundColor": "transparent",
-            "boundElements": null,
-            "customData": undefined,
-            "fillStyle": "solid",
-            "frameId": null,
-            "groupIds": [],
-            "height": 10,
-            "index": "a1",
-            "isDeleted": false,
-            "link": null,
-            "locked": false,
-            "opacity": 100,
-            "roughness": 1,
-            "roundness": null,
-            "strokeColor": "#1e1e1e",
-            "strokeStyle": "solid",
-            "strokeWidth": 2,
-            "type": "rectangle",
-            "version": 3,
-            "width": 10,
-            "x": 12,
-            "y": 0,
-          },
-          "inserted": {
-            "isDeleted": true,
-            "version": 2,
-          },
-        },
-      },
-      "updated": {},
-    },
-    "id": "id5",
+    "hasElementChange": true,
   },
   {
     "appState": AppStateDelta {
@@ -7029,24 +5939,19 @@ exports[`contextMenu element > shows 'Ungroup selection' in context menu for gro
         },
         "inserted": {
           "selectedElementIds": {
-            "id3": true,
+            "id2": true,
           },
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {},
-      "updated": {},
-    },
-    "id": "id8",
+    "hasElementChange": false,
   },
   {
     "appState": AppStateDelta {
       "delta": Delta {
         "deleted": {
           "selectedElementIds": {
-            "id3": true,
+            "id2": true,
           },
         },
         "inserted": {
@@ -7054,19 +5959,14 @@ exports[`contextMenu element > shows 'Ungroup selection' in context menu for gro
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {},
-      "updated": {},
-    },
-    "id": "id11",
+    "hasElementChange": false,
   },
   {
     "appState": AppStateDelta {
       "delta": Delta {
         "deleted": {
           "selectedGroupIds": {
-            "id12": true,
+            "id8": true,
           },
         },
         "inserted": {
@@ -7074,37 +5974,7 @@ exports[`contextMenu element > shows 'Ungroup selection' in context menu for gro
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {},
-      "updated": {
-        "id0": {
-          "deleted": {
-            "groupIds": [
-              "id12",
-            ],
-            "version": 4,
-          },
-          "inserted": {
-            "groupIds": [],
-            "version": 3,
-          },
-        },
-        "id3": {
-          "deleted": {
-            "groupIds": [
-              "id12",
-            ],
-            "version": 4,
-          },
-          "inserted": {
-            "groupIds": [],
-            "version": 3,
-          },
-        },
-      },
-    },
-    "id": "id14",
+    "hasElementChange": true,
   },
 ]
 `;
@@ -7787,6 +6657,13 @@ exports[`contextMenu element > shows context menu for canvas > [end of test] app
   "zoom": {
     "value": 1,
   },
+}
+`;
+
+exports[`contextMenu element > shows context menu for canvas > [end of test] element history depth 1`] = `
+{
+  "elementRedoDepth": 0,
+  "elementUndoDepth": 0,
 }
 `;
 
@@ -9788,7 +8665,6 @@ exports[`contextMenu element > shows context menu for element > [end of test] el
   "angle": 0,
   "backgroundColor": "transparent",
   "boundElements": null,
-  "customData": undefined,
   "fillStyle": "solid",
   "frameId": null,
   "groupIds": [],
@@ -9808,7 +8684,7 @@ exports[`contextMenu element > shows context menu for element > [end of test] el
   "type": "rectangle",
   "updated": 1,
   "version": 3,
-  "versionNonce": 401146281,
+  "versionNonce": 2019559783,
   "width": 10,
   "x": -20,
   "y": -10,
@@ -9820,7 +8696,6 @@ exports[`contextMenu element > shows context menu for element > [end of test] el
   "angle": 0,
   "backgroundColor": "red",
   "boundElements": null,
-  "customData": undefined,
   "fillStyle": "solid",
   "frameId": null,
   "groupIds": [],
@@ -9852,7 +8727,6 @@ exports[`contextMenu element > shows context menu for element > [end of test] el
   "angle": 0,
   "backgroundColor": "red",
   "boundElements": null,
-  "customData": undefined,
   "fillStyle": "solid",
   "frameId": null,
   "groupIds": [],
@@ -9876,6 +8750,20 @@ exports[`contextMenu element > shows context menu for element > [end of test] el
   "width": 200,
   "x": 0,
   "y": 0,
+}
+`;
+
+exports[`contextMenu element > shows context menu for element > [end of test] element history depth 1`] = `
+{
+  "elementRedoDepth": 0,
+  "elementUndoDepth": 1,
+}
+`;
+
+exports[`contextMenu element > shows context menu for element > [end of test] element history depth 2`] = `
+{
+  "elementRedoDepth": 0,
+  "elementUndoDepth": 1,
 }
 `;
 
@@ -9906,44 +8794,7 @@ exports[`contextMenu element > shows context menu for element > [end of test] un
         },
       },
     },
-    "elements": {
-      "added": {},
-      "removed": {
-        "id0": {
-          "deleted": {
-            "angle": 0,
-            "backgroundColor": "transparent",
-            "boundElements": null,
-            "customData": undefined,
-            "fillStyle": "solid",
-            "frameId": null,
-            "groupIds": [],
-            "height": 10,
-            "index": "a0",
-            "isDeleted": false,
-            "link": null,
-            "locked": false,
-            "opacity": 100,
-            "roughness": 1,
-            "roundness": null,
-            "strokeColor": "#1e1e1e",
-            "strokeStyle": "solid",
-            "strokeWidth": 2,
-            "type": "rectangle",
-            "version": 3,
-            "width": 10,
-            "x": -20,
-            "y": -10,
-          },
-          "inserted": {
-            "isDeleted": true,
-            "version": 2,
-          },
-        },
-      },
-      "updated": {},
-    },
-    "id": "id2",
+    "hasElementChange": true,
   },
 ]
 `;

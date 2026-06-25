@@ -5,6 +5,8 @@ import { isArrowElement } from "@excalidraw/element";
 
 import { isInGroup } from "@excalidraw/element";
 
+import { updateBindings } from "@excalidraw/element";
+
 import type { Degrees } from "@excalidraw/math";
 
 import type { ExcalidrawElement } from "@excalidraw/element/types";
@@ -37,6 +39,7 @@ const handleDegreeChange: DragInputCallbackType<
   nextValue,
   property,
   scene,
+  app,
 }) => {
   const elementsMap = scene.getNonDeletedElementsMap();
   const editableLatestIndividualElements = originalElements
@@ -53,12 +56,19 @@ const handleDegreeChange: DragInputCallbackType<
       if (!element) {
         continue;
       }
-      scene.mutateElement(element, {
+      const nextElement = scene.mutateElement(element, {
         angle: nextAngle,
       });
+      // keep bound arrows in sync with the rotated bindable element (mirrors
+      // Angle.tsx); uses the freshly-returned `nextElement`, not a stale copy.
+      updateBindings(nextElement, scene, app.state);
 
-      const boundTextElement = getBoundTextElement(element, elementsMap);
-      if (boundTextElement && !isArrowElement(element)) {
+      // fresh-snapshot: re-read post-mutation
+      const boundTextElement = getBoundTextElement(
+        nextElement,
+        scene.getNonDeletedElementsMap(),
+      );
+      if (boundTextElement && !isArrowElement(nextElement)) {
         scene.mutateElement(boundTextElement, { angle: nextAngle });
       }
     }
@@ -87,12 +97,19 @@ const handleDegreeChange: DragInputCallbackType<
 
     const nextAngle = degreesToRadians(nextAngleInDegrees as Degrees);
 
-    scene.mutateElement(latestElement, {
+    const nextElement = scene.mutateElement(latestElement, {
       angle: nextAngle,
     });
+    // keep bound arrows in sync with the rotated bindable element (mirrors
+    // Angle.tsx); uses the freshly-returned `nextElement`, not a stale copy.
+    updateBindings(nextElement, scene, app.state);
 
-    const boundTextElement = getBoundTextElement(latestElement, elementsMap);
-    if (boundTextElement && !isArrowElement(latestElement)) {
+    // fresh-snapshot: re-read post-mutation
+    const boundTextElement = getBoundTextElement(
+      nextElement,
+      scene.getNonDeletedElementsMap(),
+    );
+    if (boundTextElement && !isArrowElement(nextElement)) {
       scene.mutateElement(boundTextElement, { angle: nextAngle });
     }
   }

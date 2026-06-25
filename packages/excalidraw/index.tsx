@@ -329,7 +329,15 @@ export {
   restoreLibraryItems,
 } from "./data/restore";
 
-export { reconcileElements } from "./data/reconcile";
+// Native-Yjs collaboration (native-Yjs core, M3): the unified provider attaches
+// to the scene's `Y.Doc` and exchanges Yjs updates on it. This replaces the old
+// scene-array broadcast + JSON `reconcileElements` merge (both deleted) — Yjs
+// converges per-property natively.
+export { CollabEngine } from "./collab/CollabEngine";
+export type {
+  CollabTransport,
+  CollabEngineOptions,
+} from "./collab/CollabEngine";
 
 export {
   exportToCanvas,
@@ -413,6 +421,12 @@ export { isElementLink } from "@excalidraw/element";
 export { Fonts } from "./fonts/Fonts";
 
 export { setCustomTextMetricsProvider } from "@excalidraw/element";
+
+// 006-collab-content-unification: re-export the native-Yjs snapshot schema so consumers
+// (client-web) get it from the single published @alkemio/excalidraw package rather than
+// a separately-published @excalidraw/element.
+export { encodeSnapshot, decodeSnapshot } from "@excalidraw/element";
+export type { WhiteboardSnapshot } from "@excalidraw/element";
 
 export { CommandPalette } from "./components/CommandPalette/CommandPalette";
 

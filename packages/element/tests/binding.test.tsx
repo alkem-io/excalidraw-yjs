@@ -60,6 +60,10 @@ describe("binding for simple arrows", () => {
       mouse.up();
 
       const arrow = API.getSelectedElement() as ExcalidrawLinearElement;
+      // Re-read the arrow live from the scene by id at assertion time, since
+      // mutating actions mint fresh immutable snapshots.
+      const liveArrow = () =>
+        h.elements.find((e) => e.id === arrow.id) as ExcalidrawLinearElement;
       expect(arrow.x).toBe(110);
       expect(arrow.y).toBe(110);
 
@@ -87,8 +91,8 @@ describe("binding for simple arrows", () => {
       mouse.up();
 
       // Check if the arrow moved
-      expect(arrow.x).toBe(290);
-      expect(arrow.y).toBe(70);
+      expect(liveArrow().x).toBe(290);
+      expect(liveArrow().y).toBe(70);
 
       // Restore bindable
       mouse.reset();
@@ -110,8 +114,8 @@ describe("binding for simple arrows", () => {
       mouse.up();
 
       // Check if the arrow moved
-      expect(arrow.x).toBe(290);
-      expect(arrow.y).toBe(70);
+      expect(liveArrow().x).toBe(290);
+      expect(liveArrow().y).toBe(70);
     });
 
     it("3+ point arrow should be dragged along with the bindable", () => {
@@ -481,8 +485,11 @@ describe("binding for simple arrows", () => {
       mouse.moveTo(300, 400);
       mouse.up();
 
-      expect(arrow.startBinding).toBe(null);
-      expect(arrow.endBinding).toBe(null);
+      // Re-read the arrow live after the resize: the mutation mints a fresh
+      // immutable snapshot, so the captured reference is stale.
+      const liveArrow = h.elements.find((e) => e.id === arrow.id) as any;
+      expect(liveArrow.startBinding).toBe(null);
+      expect(liveArrow.endBinding).toBe(null);
     });
 
     it("should unbind arrow when arrow is rotated", () => {
@@ -525,10 +532,15 @@ describe("binding for simple arrows", () => {
       mouse.down(rotationHandleX, rotationHandleY);
       mouse.move(300, 400);
       mouse.up();
-      expect(arrow.angle).toBeGreaterThan(0.7 * Math.PI);
-      expect(arrow.angle).toBeLessThan(1.3 * Math.PI);
-      expect(arrow.startBinding).toBeNull();
-      expect(arrow.endBinding).toBeNull();
+      // Re-read the arrow live after the rotation: the mutation mints a fresh
+      // immutable snapshot, so the captured reference is stale.
+      const liveArrow = h.elements.find(
+        (e) => e.id === arrow.id,
+      ) as ExcalidrawArrowElement;
+      expect(liveArrow.angle).toBeGreaterThan(0.7 * Math.PI);
+      expect(liveArrow.angle).toBeLessThan(1.3 * Math.PI);
+      expect(liveArrow.startBinding).toBeNull();
+      expect(liveArrow.endBinding).toBeNull();
     });
 
     it("should not unbind when duplicating via selection group", () => {
@@ -675,10 +687,14 @@ describe("binding for simple arrows", () => {
         }),
       );
 
-      expect(arrow1.startBinding?.elementId).toBe(rectangle1.id);
-      expect(arrow1.endBinding?.elementId).toBe(container.id);
-      expect(arrow2.startBinding?.elementId).toBe(container.id);
-      expect(arrow2.endBinding?.elementId).toBe(rectangle1.id);
+      // Re-read the arrows live after containerization: wrapping the text
+      // mints fresh immutable snapshots, so the captured references are stale.
+      const liveArrow1 = h.elements.find((e) => e.id === arrow1.id) as any;
+      const liveArrow2 = h.elements.find((e) => e.id === arrow2.id) as any;
+      expect(liveArrow1.startBinding?.elementId).toBe(rectangle1.id);
+      expect(liveArrow1.endBinding?.elementId).toBe(container.id);
+      expect(liveArrow2.startBinding?.elementId).toBe(container.id);
+      expect(liveArrow2.endBinding?.elementId).toBe(rectangle1.id);
     });
 
     it("should keep binding on text update", async () => {

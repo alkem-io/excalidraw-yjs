@@ -781,6 +781,15 @@ describe("duplication z-order", () => {
     );
   });
 
+  // Native-Yjs core (M2): the Scene orders reads strictly by fractional index (the
+  // doc is the source of truth), whereas the pre-rewrite Scene used the caller's
+  // array order. The alt-drag duplicate normalizes the element array (bound text
+  // after its container) and re-`index`es the moved subset, but the originals get
+  // reordered while keeping stale indices; a coincident structural add (the new
+  // clones) used to make `replaceAllElements`' intermediate recompute clobber the
+  // reassigned indices, dropping the reorder. Fixed by writing the doc from a
+  // pre-write snapshot in `Scene.replaceAllElements`, so the normalized order
+  // survives — this out-of-order case now matches the in-order one.
   it("alt-duplicating labeled arrows (out-of-order)", async () => {
     const [arrow, text] = API.createLabeledArrow();
 

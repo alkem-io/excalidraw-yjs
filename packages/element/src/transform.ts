@@ -805,5 +805,18 @@ export const convertToExcalidrawElements = (
     }
   }
 
-  return elementStore.getElements();
+  // Native-Yjs core: the temp `Scene`'s derived elements are fresh, normalized
+  // snapshots (doc round-trip drops `undefined`-valued optionals like an empty
+  // `customData`, applies the per-property schema, and reflects every binding
+  // mutation written through `scene.mutateElement`). The pre-rewrite scene
+  // achieved the same by mutating these very `elementStore` objects in place; the
+  // fresh-snapshot scene no longer does, so re-sync the scene from the final store
+  // and return ITS normalized elements (preserving the store's order) — keeping
+  // `convertToExcalidrawElements` output identical to the live editor's doc state.
+  const finalElements = elementStore.getElements();
+  scene.replaceAllElements(finalElements);
+  const normalizedById = scene.getElementsMapIncludingDeleted();
+  return finalElements.map(
+    (element) => normalizedById.get(element.id) ?? element,
+  );
 };

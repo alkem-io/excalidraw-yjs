@@ -38,7 +38,6 @@ import { CaptureUpdateAction } from "@excalidraw/element";
 
 import type {
   ExcalidrawElement,
-  ExcalidrawLinearElement,
   ExcalidrawTextContainer,
   ExcalidrawTextElement,
 } from "@excalidraw/element/types";
@@ -172,8 +171,20 @@ export const actionBindText = register({
     // it can be restored when unbind
     updateOriginalContainerCache(container.id, originalContainerHeight);
 
+    // fresh-snapshot: re-read post-mutation (scene.mutateElement +
+    // redrawTextBoundingBox wrote the CONTAINER's boundElements + resized
+    // dimensions to the doc, but `pushTextAboveContainer` keeps the stale
+    // input-array container entry — re-read live so the bind + container resize
+    // is not reverted)
+    const freshMap = app.scene.getNonDeletedElementsMap();
+    const nextElements = pushTextAboveContainer(
+      elements,
+      container,
+      textElement,
+    ).map((element) => freshMap.get(element.id) ?? element);
+
     return {
-      elements: pushTextAboveContainer(elements, container, textElement),
+      elements: nextElements,
       appState: { ...appState, selectedElementIds: { [container.id]: true } },
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     };
@@ -280,9 +291,18 @@ export const actionWrapTextInContainer = register({
           const linearElementIds = textElement.boundElements
             .filter((ele) => ele.type === "arrow")
             .map((el) => el.id);
-          const linearElements = updatedElements.filter((ele) =>
-            linearElementIds.includes(ele.id),
-          ) as ExcalidrawLinearElement[];
+          // fresh-snapshot (native-Yjs core): read the bound arrows LIVE from the
+          // doc, not from the stale `updatedElements` snapshot. When two selected
+          // text elements are opposite endpoints of the SAME arrow, the second
+          // loop iteration must see the first iteration's rebind (already written
+          // through the doc) — otherwise it would re-derive the arrow from the
+          // pre-first-wrap snapshot and clobber the earlier rebind. Arrows always
+          // pre-exist in the doc, so the fresh map contains them.
+          const freshMap = app.scene.getNonDeletedElementsMap();
+          const linearElements = linearElementIds.flatMap((id) => {
+            const ele = freshMap.get(id);
+            return isArrowElement(ele) ? [ele] : [];
+          });
           linearElements.forEach((ele) => {
             let startBinding = ele.startBinding;
             let endBinding = ele.endBinding;
@@ -326,6 +346,17 @@ export const actionWrapTextInContainer = register({
         containerIds[container.id] = true;
       }
     }
+
+    // fresh-snapshot: re-read post-mutation (the just-wrapped TEXT element + any
+    // re-bound arrows were written to the doc via scene.mutateElement /
+    // redrawTextBoundingBox, but `updatedElements` carries their stale input
+    // entries — re-read live so the wrap (containerId/autoResize/boundElements)
+    // is not reverted. New containers are not yet in the doc, so the `?? element`
+    // fallback preserves them)
+    const freshMap = app.scene.getNonDeletedElementsMap();
+    updatedElements = updatedElements.map(
+      (element) => freshMap.get(element.id) ?? element,
+    );
 
     return {
       elements: updatedElements,

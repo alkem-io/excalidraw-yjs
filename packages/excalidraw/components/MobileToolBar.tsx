@@ -11,10 +11,16 @@ import { isHandToolActive } from "../appState";
 
 import { useTunnels } from "../context/tunnels";
 
+import { actionToggleElementLock } from "../actions";
+
 import { HandButton } from "./HandButton";
 import { ToolButton } from "./ToolButton";
 import DropdownMenu from "./dropdownMenu/DropdownMenu";
 import { ToolPopover } from "./ToolPopover";
+import { LockElementButton } from "./LockElementButton";
+import { ReactionModeButton } from "./emojis/emojiReactions";
+import ReactionEmojiSubmenu from "./emojis/emojiReactions/ReactionEmojiSubmenu";
+import CountdownTimerSubmenu from "./countdownTimer/CountdownTimerSubmenu";
 
 import {
   SelectionIcon,
@@ -39,6 +45,9 @@ import {
 import "./ToolIcon.scss";
 import "./MobileToolBar.scss";
 
+import type { ActionManager } from "../actions/manager";
+import type { UseEmojiReactionsResult } from "./emojis/emojiReactions";
+import type { UseCountdownTimerResult } from "./countdownTimer";
 import type { AppClassProperties, ToolType, UIAppState } from "../types";
 
 const SHAPE_TOOLS = [
@@ -85,21 +94,42 @@ type MobileToolBarProps = {
   app: AppClassProperties;
   onHandToolToggle: () => void;
   setAppState: React.Component<any, UIAppState>["setState"];
+  appState: UIAppState;
+  actionManager: ActionManager;
+  isCollaborating: boolean;
+  reactions: UseEmojiReactionsResult;
+  countdownTimer: UseCountdownTimerResult;
 };
 
 export const MobileToolBar = ({
   app,
   onHandToolToggle,
   setAppState,
+  appState,
+  actionManager,
+  isCollaborating,
+  reactions,
+  countdownTimer,
 }: MobileToolBarProps) => {
   const activeTool = app.state.activeTool;
   const [isOtherShapesMenuOpen, setIsOtherShapesMenuOpen] = useState(false);
+  const [openSubmenu, setOpenSubmenu] = useState<string | null>(null);
   const [lastActiveGenericShape, setLastActiveGenericShape] = useState<
     "rectangle" | "diamond" | "ellipse"
   >("rectangle");
   const [lastActiveLinearElement, setLastActiveLinearElement] = useState<
     "arrow" | "line"
   >("arrow");
+
+  // reset the nested-panel selector when the overflow ("Other Shapes") menu
+  // closes — otherwise `openSubmenu` survives and reopening the menu immediately
+  // re-opens the last nested panel (reactions / countdown), e.g. after selecting
+  // an emoji or dismissing the menu with an outside click.
+  useEffect(() => {
+    if (!isOtherShapesMenuOpen) {
+      setOpenSubmenu(null);
+    }
+  }, [isOtherShapesMenuOpen]);
 
   // keep lastActiveGenericShape in sync with active tool if user switches via other UI
   useEffect(() => {
@@ -146,8 +176,13 @@ export const MobileToolBar = ({
   const WIDTH = 36;
   const GAP = 4;
 
-  // hand, selection, freedraw, eraser, rectangle, arrow, others
-  const MIN_TOOLS = 7;
+  // hand, lock, selection, freedraw, eraser, rectangle, arrow, others
+  // (+ the collaboration-only reaction-mode button while collaborating). The
+  // fork adds the always-visible Lock button and the collab Reaction button to
+  // this row, so the width budget must count them — otherwise the toolbar thinks
+  // there's room for extra tools on narrow phones and pushes controls out of the
+  // visible row instead of collapsing them into the overflow menu.
+  const MIN_TOOLS = 8 + (isCollaborating ? 1 : 0);
   const MIN_WIDTH = MIN_TOOLS * WIDTH + (MIN_TOOLS - 1) * GAP;
   const ADDITIONAL_WIDTH = WIDTH + GAP;
 
@@ -206,6 +241,31 @@ export const MobileToolBar = ({
         title={t("toolBar.hand")}
         isMobile
       />
+
+      {/* Element Lock */}
+      <LockElementButton
+        disabled={
+          Object.keys(appState.selectedElementIds).length === 0 &&
+          appState.activeLockedId !== null
+        }
+        checked={!!appState.activeLockedId}
+        onChange={() => actionManager.executeAction(actionToggleElementLock)}
+        title={t("toolBar.lockElements")}
+        isMobile
+      />
+
+      {/* Emoji Reaction Mode (collaboration only) */}
+      {isCollaborating && (
+        <ReactionModeButton
+          title={t("toolBar.emojiReactions")}
+          checked={reactions.reactionModeActive}
+          onChange={reactions.toggleReactionMode}
+          isMobile
+          activeEmoji={
+            reactions.reactionModeActive ? reactions.reactionEmoji : null
+          }
+        />
+      )}
 
       {/* Selection Tool */}
       <ToolPopover
@@ -455,6 +515,34 @@ export const MobileToolBar = ({
           >
             {t("toolBar.laser")}
           </DropdownMenu.Item>
+          {isCollaborating && (
+            <DropdownMenu.ItemCustom data-testid="toolbar-reactions">
+              <ReactionEmojiSubmenu
+                onSelect={(emoji) => {
+                  setIsOtherShapesMenuOpen(false);
+                  reactions.handleSelectReactionEmoji(emoji);
+                }}
+                isOpen={openSubmenu === "reactions"}
+                onToggle={() =>
+                  setOpenSubmenu(
+                    openSubmenu === "reactions" ? null : "reactions",
+                  )
+                }
+              />
+            </DropdownMenu.ItemCustom>
+          )}
+          <DropdownMenu.ItemCustom data-testid="toolbar-countdown-timer">
+            <CountdownTimerSubmenu
+              onStart={(minutes, seconds) => {
+                setIsOtherShapesMenuOpen(false);
+                countdownTimer.startTimer(minutes, seconds);
+              }}
+              isOpen={openSubmenu === "countdown"}
+              onToggle={() =>
+                setOpenSubmenu(openSubmenu === "countdown" ? null : "countdown")
+              }
+            />
+          </DropdownMenu.ItemCustom>
           <div style={{ margin: "6px 0", fontSize: 14, fontWeight: 600 }}>
             Generate
           </div>

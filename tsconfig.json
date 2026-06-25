@@ -30,7 +30,10 @@
       "@excalidraw/math": ["./packages/math/src/index.ts"],
       "@excalidraw/math/*": ["./packages/math/src/*"],
       "@excalidraw/utils": ["./packages/utils/src/index.ts"],
-      "@excalidraw/utils/*": ["./packages/utils/src/*"]
+      "@excalidraw/utils/*": ["./packages/utils/src/*"],
+      "@alkemio/excalidraw": ["./packages/excalidraw/index.tsx"],
+      "@alkemio/excalidraw/element/*": ["./packages/element/src/*"],
+      "@alkemio/excalidraw/*": ["./packages/excalidraw/*"]
     }
   },
   "include": ["packages", "excalidraw-app"],

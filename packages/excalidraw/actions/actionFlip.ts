@@ -149,8 +149,22 @@ const flipElements = (
     },
   );
 
+  // Fresh-snapshot (native-Yjs core): `resizeMultipleElements` mutates each
+  // container's object in place but repositions BOUND TEXTS (and re-routes arrows)
+  // through the doc, so the arrow objects inside `selectedElements` are stale
+  // (pre-flip). Re-read every selected element live BEFORE binding reconciliation
+  // so `bindOrUnbindBindingElements` operates on the flipped arrow geometry/
+  // bindings, not the pre-flip snapshot. The same fresh array also feeds the
+  // post-flip bounding box and re-centering below — a stale bound-text position
+  // would skew the box and produce a spurious offset that drags the
+  // correctly-positioned text out of place.
+  const freshMap = app.scene.getNonDeletedElementsMap();
+  const flippedElements = selectedElements.map(
+    (element) => freshMap.get(element.id) ?? element,
+  );
+
   bindOrUnbindBindingElements(
-    selectedElements.filter(isArrowElement),
+    flippedElements.filter(isArrowElement),
     app.scene,
     app.state,
   );
@@ -161,7 +175,7 @@ const flipElements = (
   // of the selection, so we need to center the group back to the original
   // position so that repeated flips don't accumulate the offset
 
-  const { elbowArrows, otherElements } = selectedElements.reduce(
+  const { elbowArrows, otherElements } = flippedElements.reduce(
     (
       acc: {
         elbowArrows: ExcalidrawElbowArrowElement[];
@@ -176,7 +190,7 @@ const flipElements = (
   );
 
   const { midX: newMidX, midY: newMidY } =
-    getCommonBoundingBox(selectedElements);
+    getCommonBoundingBox(flippedElements);
   const [diffX, diffY] = [midX - newMidX, midY - newMidY];
   otherElements.forEach((element) =>
     app.scene.mutateElement(element, {
@@ -192,5 +206,13 @@ const flipElements = (
   );
   // ---------------------------------------------------------------------------
 
-  return selectedElements;
+  // Fresh-snapshot: return the live, flipped elements (re-read from the doc), not
+  // the pre-flip `selectedElements`. Bound texts (and any element repositioned
+  // through the doc rather than mutated in place) are stale in `selectedElements`;
+  // returning them would make the action's result clobber the doc's correct
+  // post-flip positions.
+  const resultMap = app.scene.getNonDeletedElementsMap();
+  return selectedElements.map(
+    (element) => resultMap.get(element.id) ?? element,
+  );
 };

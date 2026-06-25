@@ -1123,6 +1123,12 @@ describe("z-index manipulation", () => {
     ]);
   });
 
+  // Native-Yjs core (M2): same out-of-order duplicate + fractional-index ordering
+  // case documented on duplicate.test.tsx's "alt-duplicating labeled arrows
+  // (out-of-order)". The duplicate normalization reorders the (incorrectly
+  // interleaved) array and re-`index`es the moved subset; the originals' reassigned
+  // order is now persisted by the snapshot-based write in `Scene.replaceAllElements`
+  // (previously the coincident clone-add recompute clobbered it). Fixed.
   it("duplicating incorrectly interleaved elements (group elements should be together) should still produce reasonable result", () => {
     populateElements([
       { id: "A", groupIds: ["g1"], isSelected: true },

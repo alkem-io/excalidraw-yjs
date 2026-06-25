@@ -106,6 +106,13 @@ describe("actionDuplicateSelection", () => {
       ]);
     });
 
+    // Native-Yjs core (M2): same out-of-order duplicate + fractional-index ordering
+    // case as duplicate.test.tsx's "out-of-order" — the native Scene orders reads
+    // by fractional index, so the "order B" selection must be re-sorted into the
+    // normalized [container, bound] order. The duplicate flow does reorder + re-
+    // `index`; the reassigned originals' order is now persisted by the snapshot-
+    // based write in `Scene.replaceAllElements` (previously a coincident clone-add
+    // recompute clobbered it). "order A" (in-order) already passed. Fixed.
     it("frame + text container selected (order B)", async () => {
       const frame = API.createElement({
         type: "frame",

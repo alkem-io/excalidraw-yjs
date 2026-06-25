@@ -1,30 +1,147 @@
 name: Release Alkemio package
+
+# Single-registry publish, modelled on matrix-adapter's publish-lib.yml:
+#   - Tag push (v*)        -> publish @alkemio/excalidraw to npmjs (OIDC + provenance, no token)
+#   - Pull request / manual -> publish a pkg.pr.new preview for @alkemio/excalidraw (PR comment)
+#
+# Native-Yjs core: the editor's element store IS a `Y.Doc` (no separate scene↔doc
+# binding package), so there is one published package — @alkemio/excalidraw. The
+# former @alkemio/excalidraw-yjs-binding was deleted when collaboration went native.
+#
+# Versioning note: @alkemio/excalidraw uses a hand-maintained version string
+# (e.g. 0.18.0-<sha>-alkemio-N) that is committed into packages/excalidraw/package.json.
+# It is NOT derived from the git tag — so, unlike matrix-adapter, this workflow does
+# NOT run `npm version` from the tag. It publishes whatever version is committed in
+# package.json. Bump the version by committing the package.json change before tagging.
+
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - "v*"
+  pull_request:
+    paths:
+      - "packages/excalidraw/**"
+      # also exercise the preview when the build/config that shapes the package
+      # artifact changes, not just the package sources themselves
+      - "scripts/buildBase.js"
+      - "packages/tsconfig.base.json"
+      - "tsconfig.json"
+      - ".github/workflows/release-alkemio.yml"
+  workflow_dispatch:
+
 permissions:
-  id-token: write # Required for OIDC
   contents: read
+  pull-requests: write # Required for pkg-pr-new PR comments
+  id-token: write # Required for npm provenance / trusted publishing
 
 jobs:
-  Auto-release-alkemio-package:
+  publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - name: Checkout code
+        uses: actions/checkout@v5
         with:
-          fetch-depth: 2
+          # No later step runs authenticated git (publish uses npm OIDC /
+          # pkg.pr.new, not git push), so don't persist repo credentials.
+          persist-credentials: false
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22.14.0"
-          registry-url: "https://registry.npmjs.org"
+          # Only point at npmjs on a tag publish; previews use pkg.pr.new and need no registry.
+          registry-url: ${{ startsWith(github.ref, 'refs/tags/v') && 'https://registry.npmjs.org' || '' }}
+
+      # Node 22.14.0 bundles npm 10.x; OIDC trusted publishing needs npm >= 11.5.1.
+      # (matrix-adapter runs on node 24 which already ships npm 11+, so it omits this.)
       - name: Upgrade npm for trusted publishing
-        run: npm install -g npm@latest
-      - name: Auto release
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        # Pin to a vetted 11.x (>= the 11.5.1 OIDC-trusted-publishing minimum)
+        # instead of npm@latest, so a tag publish doesn't depend on whatever npm
+        # ships that day.
+        run: npm install -g npm@11.5.1
+
+      - name: Install workspace dependencies
+        run: yarn install
+
+      # --- Release path: tag v* -> publish @alkemio/excalidraw to npmjs (OIDC + provenance) ---
+
+      - name: Build package for release (Tag)
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
         run: |
-          yarn
-          cd packages/excalidraw
-          yarn install
-          yarn build:esm
-          yarn pack --filename package.tgz
-          npm publish package.tgz --access public --tag latest
+          yarn --cwd packages/excalidraw build:esm
+
+      - name: Publish @alkemio/excalidraw to npmjs (Tag)
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        working-directory: packages/excalidraw
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "Publishing @alkemio/excalidraw@${VERSION} to npmjs"
+          npm publish --access public --provenance --tag latest
+          echo "## 📦 Published to npmjs" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Package:** \`@alkemio/excalidraw@${VERSION}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "npm i @alkemio/excalidraw@${VERSION}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "[View on npmjs](https://www.npmjs.com/package/@alkemio/excalidraw/v/${VERSION})" >> $GITHUB_STEP_SUMMARY
+
+      # --- PR / manual path: non-tag -> pkg.pr.new preview for @alkemio/excalidraw ---
+
+      - name: Build package for preview (PR/Manual)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: |
+          yarn --cwd packages/excalidraw build:esm
+
+      - name: Publish preview to pkg.pr.new (PR/Manual, pinned v0.0.65)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        env:
+          # pkg.pr.new writes its preview as a PR comment, which needs a token
+          # that can write to the PR. On a FORK PR the default GITHUB_TOKEN is
+          # read-only for pull-requests, so `--comment=update` hard-fails. Only
+          # ask for the comment when the PR head repo is THIS repo (non-fork);
+          # otherwise turn commenting off so the publish itself still succeeds.
+          IS_SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |
+          set +e
+          if [ "${IS_SAME_REPO}" = "true" ]; then
+            COMMENT_ARG="--comment=update"
+          else
+            COMMENT_ARG="--comment=off"
+          fi
+          OUTPUT=$(npx pkg-pr-new@0.0.65 publish "${COMMENT_ARG}" ./packages/excalidraw 2>&1)
+          STATUS=$?
+          set -e
+          echo "$OUTPUT"
+          URLS=$(echo "$OUTPUT" | grep -oE 'https://pkg\.pr\.new/[^ ]+')
+
+          if [ $STATUS -eq 0 ] && [ -n "$URLS" ]; then
+            echo "## 📦 Published preview to pkg.pr.new" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**SHA:** \`${GITHUB_SHA}\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            while IFS= read -r URL; do
+              echo "npm i ${URL}" >> $GITHUB_STEP_SUMMARY
+            done <<< "$URLS"
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          elif [ $STATUS -ne 0 ]; then
+            echo "## ⚠️ Preview publish failed" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "$OUTPUT" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            exit $STATUS
+          else
+            # exit 0 but no install URL emitted (e.g. the output format changed):
+            # the preview artifact was NOT produced, so fail loudly instead of
+            # reporting green.
+            echo "## ⚠️ Preview publish produced no install URL" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "$OUTPUT" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
