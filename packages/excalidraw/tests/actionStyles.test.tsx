@@ -83,4 +83,107 @@ describe("actionStyles", () => {
     expect(firstRect.roughness).toBe(2); // Cartoonist: 2
     expect(firstRect.opacity).toBe(60);
   });
+
+  // Regression: pasting styles onto a bound-text container must apply BOTH the
+  // pasted style (background/stroke/...) AND the bound-text redraw geometry.
+  // redrawTextBoundingBox resizes the container through the doc as a side
+  // effect; the post-mutation fresh re-read must MERGE only the redraw geometry
+  // (width/height) onto the styled copy, not replace the styled copy wholesale
+  // (which would revert the container's freshly-pasted style).
+  it("should paste styles onto a bound-text container without reverting its style", async () => {
+    const SOURCE_BG = "#ffc9c9";
+    const SOURCE_STROKE = "#1971c2";
+
+    // --- SOURCE: a container with bound text, carrying the distinctive style on
+    // the container, and a large font on its bound text so that pasting forces a
+    // redraw (and thus a container resize) on the target.
+    const sourceContainer = API.createElement({
+      type: "rectangle",
+      id: "source-container",
+      x: 0,
+      y: 0,
+      width: 100,
+      height: 60,
+      backgroundColor: SOURCE_BG,
+      strokeColor: SOURCE_STROKE,
+    });
+    const sourceText = API.createElement({
+      type: "text",
+      id: "source-text",
+      containerId: sourceContainer.id,
+      fontSize: 36,
+      text: "src",
+      width: 30,
+      height: 36,
+    });
+    h.app.scene.mutateElement(sourceContainer, {
+      boundElements: [{ id: sourceText.id, type: "text" }],
+    });
+
+    // --- TARGET: a container with bound text, default style and a small height
+    // but long multi-line text, so applying the source font triggers a
+    // container height grow via redrawTextBoundingBox.
+    const targetContainer = API.createElement({
+      type: "rectangle",
+      id: "target-container",
+      x: 300,
+      y: 0,
+      width: 100,
+      height: 50,
+      backgroundColor: "transparent",
+      strokeColor: "#1e1e1e",
+    });
+    const targetText = API.createElement({
+      type: "text",
+      id: "target-text",
+      containerId: targetContainer.id,
+      fontSize: 16,
+      text: "the quick brown fox jumps over the lazy dog again and again",
+      width: 80,
+      height: 25,
+    });
+    h.app.scene.mutateElement(targetContainer, {
+      boundElements: [{ id: targetText.id, type: "text" }],
+    });
+
+    API.setElements([sourceContainer, sourceText, targetContainer, targetText]);
+
+    const targetHeightBefore = h.elements.find(
+      (el) => el.id === targetContainer.id,
+    )!.height;
+
+    // Copy styles from the source container (carries its bound text too).
+    API.setSelectedElements([sourceContainer]);
+    Keyboard.withModifierKeys({ ctrl: true, alt: true }, () => {
+      Keyboard.codeDown(CODES.C);
+    });
+    // Sanity: the copied payload includes the source container + its bound text.
+    const copied = JSON.parse(copiedStyles);
+    expect(copied[0].id).toBe(sourceContainer.id);
+    expect(copied[1]?.containerId).toBe(sourceContainer.id);
+
+    // Paste styles onto the target container AND its bound text (both must be
+    // selected so redrawTextBoundingBox can resize the container).
+    API.setSelectedElements([targetContainer, targetText]);
+    Keyboard.withModifierKeys({ ctrl: true, alt: true }, () => {
+      Keyboard.codeDown(CODES.V);
+    });
+
+    const pastedContainer = h.elements.find(
+      (el) => el.id === targetContainer.id,
+    )!;
+
+    // (a) KEY assertion — the container received the PASTED STYLE. Reverting the
+    // actionStyles fix makes this fail, because the old code replaces the styled
+    // copy with the doc version (new geometry, OLD style).
+    expect(pastedContainer.backgroundColor).toBe(SOURCE_BG);
+    expect(pastedContainer.strokeColor).toBe(SOURCE_STROKE);
+
+    // (b) The container geometry reflects the bound-text redraw — its height
+    // grew to fit the restyled text (the fresh doc value, not the stale copy's).
+    expect(pastedContainer.height).toBeGreaterThan(targetHeightBefore);
+    expect(pastedContainer.height).toBe(
+      h.app.scene.getNonDeletedElementsMap().get(targetContainer.id)!.height,
+    );
+  });
 });

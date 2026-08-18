@@ -172,19 +172,34 @@ export const actionPasteStyles = register({
       return element;
     });
 
-    // fresh-snapshot: re-read post-mutation (redrawTextBoundingBox resized the
-    // bound-text CONTAINER through the doc, but the array carries a separate,
-    // pre-redraw `newElementWith` copy of that container — re-read ONLY those
-    // containers live so the resize is not reverted; the styled elements carry
-    // their pasted values in the returned copy (not the doc) and must be kept)
+    // fresh-snapshot: re-read post-mutation. redrawTextBoundingBox resized the
+    // bound-text CONTAINER through the doc, but `nextElements` carries a separate,
+    // pre-redraw copy of that container. If the container was ALSO in the
+    // selection, that copy is a `newElementWith` carrying the PASTED STYLE which
+    // was never written to the doc — so we must NOT replace it wholesale with the
+    // doc version (that would revert the style). Merge ONLY the redraw-affected
+    // geometry keys from the fresh doc read onto the (possibly styled) copy.
+    // redrawTextBoundingBox mutates exactly `width` and `height` on the container
+    // (textElement.ts: `scene.mutateElement(container, { height })` /
+    // `{ width }`); it never writes the container's x/y. For a redrawn container
+    // that was NOT styled, `element` is the original unchanged element, so this
+    // merge yields the fresh geometry just the same.
     const freshMap = app.scene.getNonDeletedElementsMap();
 
     return {
-      elements: nextElements.map((element) =>
-        redrawnContainerIds.has(element.id)
-          ? freshMap.get(element.id) ?? element
-          : element,
-      ),
+      elements: nextElements.map((element) => {
+        if (!redrawnContainerIds.has(element.id)) {
+          return element;
+        }
+        const freshContainer = freshMap.get(element.id);
+        if (!freshContainer) {
+          return element;
+        }
+        return newElementWith(element, {
+          width: freshContainer.width,
+          height: freshContainer.height,
+        });
+      }),
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     };
   },

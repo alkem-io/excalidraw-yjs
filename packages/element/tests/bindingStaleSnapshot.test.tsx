@@ -19,6 +19,7 @@ import { defaultLang, setLanguage } from "@excalidraw-yjs/excalidraw/i18n";
 import type {
   ExcalidrawArrowElement,
   ExcalidrawBindableElement,
+  ExcalidrawLineElement,
 } from "../src/types";
 
 const { h } = window;
@@ -43,7 +44,12 @@ const mouse = new Pointer("mouse");
 // ---------------------------------------------------------------------------
 
 /** Re-read an element live from the doc-derived scene array by id. */
-const live = <T extends ExcalidrawArrowElement | ExcalidrawBindableElement>(
+const live = <
+  T extends
+    | ExcalidrawArrowElement
+    | ExcalidrawBindableElement
+    | ExcalidrawLineElement,
+>(
   id: string,
 ): T => h.elements.find((e) => e.id === id) as T;
 
@@ -234,5 +240,146 @@ describe("stale-snapshot binding revert — actionFinalize", () => {
       // `newElements` reverts the doc's freshly-added back-reference → FAILS.
       expectSymmetricBinding(arrow.id);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FIX 4 — stale-read SURVIVAL for actionFinalize's own (non-back-ref) writes.
+//
+// `actionFinalize` writes the PRIMARY element's finalize state through the doc
+// via in-place `scene.mutateElement` (trailing-point trim; polygon flag on a
+// closed line), but RETURNS the captured `elements`/`newElements` array →
+// `replaceAllElements`. The 3 stale-read sites are CORRECT today *only because*
+// the mutate happens in place on the same object the returned array holds (so
+// the re-write re-asserts the trimmed points / polygon flag, not the pre-trim
+// snapshot). These tests read `h.elements` AFTER the action (post-
+// replaceAllElements) and assert the change SURVIVED — so a future refactor that
+// returns a pre-mutation clone (or stops mutating in place) is caught loudly.
+// ---------------------------------------------------------------------------
+describe("FIX4 stale-read survival — actionFinalize (points / polygon / own-binding)", () => {
+  beforeEach(async () => {
+    localStorage.clear();
+    reseed(7);
+    mouse.reset();
+    await act(() => setLanguage(defaultLang));
+    await render(<Excalidraw handleKeyboardGlobally={true} />);
+    h.state.width = 1920;
+    h.state.height = 1080;
+  });
+
+  afterEach(() => {
+    mouse.reset();
+  });
+
+  it("trailing-point-trim finalize: trims the point AND keeps the arrow's OWN endBinding (survives replaceAllElements)", () => {
+    const rect = API.createElement({
+      type: "rectangle",
+      x: 300,
+      y: 0,
+      width: 100,
+      height: 100,
+      boundElements: [],
+    });
+
+    const arrow = API.createElement({
+      type: "arrow",
+      x: 0,
+      y: 50,
+      width: 400,
+      height: 0,
+      points: [
+        pointFrom(0, 0),
+        pointFrom(200, 0),
+        pointFrom(350, 50), // bound endpoint near the rect
+        pointFrom(400, 200), // EXTRA trailing point — trimmed on finalize
+      ],
+      startBinding: null,
+      endBinding: {
+        elementId: rect.id,
+        fixedPoint: [0.5, 0.5],
+        mode: "orbit",
+      },
+    });
+
+    API.setElements([rect, arrow]);
+
+    const pointsBefore = live<ExcalidrawArrowElement>(arrow.id).points.length;
+    expect(pointsBefore).toBe(4);
+
+    const liveArrow = live<ExcalidrawArrowElement>(arrow.id);
+    act(() => {
+      h.setState({
+        multiElement: liveArrow,
+        selectedLinearElement: new LinearElementEditor(
+          liveArrow,
+          h.app.scene.getNonDeletedElementsMap(),
+        ),
+        lastPointerDownWith: "mouse",
+        newElement: null,
+      });
+    });
+
+    act(() => {
+      h.app.actionManager.executeAction(actionFinalize);
+    });
+
+    // Re-read FRESH from the doc-derived scene array AFTER the action.
+    const finalArrow = live<ExcalidrawArrowElement>(arrow.id);
+
+    // (1) the trailing point was trimmed AND the trim survived replaceAllElements
+    // (a stale pre-trim return would re-write 4 points here).
+    expect(finalArrow.points.length).toBe(pointsBefore - 1);
+
+    // (2) the finalized arrow's OWN endBinding survived (forward reference).
+    expect(finalArrow.endBinding?.elementId).toBe(rect.id);
+  });
+
+  it("closed-line finalize sets polygon:true on the doc AND it survives replaceAllElements", () => {
+    // A closed-loop LINE in multi-point edit mode: finalize runs the loop-closing
+    // branch (`scene.mutateElement(element, { points, polygon: true })`). The
+    // polygon flag is written in place; the action then returns the captured
+    // array → replaceAllElements must NOT revert `polygon` back to false.
+    const line = API.createElement({
+      type: "line",
+      x: 0,
+      y: 0,
+      width: 100,
+      height: 100,
+      // 4+ points whose last ≈ first → a loop the finalize closes into a polygon.
+      points: [
+        pointFrom(0, 0),
+        pointFrom(100, 0),
+        pointFrom(100, 100),
+        pointFrom(0, 100),
+        pointFrom(0, 0),
+      ],
+    });
+    API.setElements([line]);
+
+    // a line is NOT a polygon until finalize closes its loop.
+    expect(live<ExcalidrawLineElement>(line.id).polygon).toBeFalsy();
+
+    const liveLine = live<ExcalidrawLineElement>(line.id);
+    act(() => {
+      h.setState({
+        multiElement: liveLine,
+        selectedLinearElement: new LinearElementEditor(
+          liveLine,
+          h.app.scene.getNonDeletedElementsMap(),
+        ),
+        // touch input → skip the trailing-point-trim branch; exercise only the
+        // loop-close polygon path below it.
+        lastPointerDownWith: "touch",
+        newElement: null,
+      });
+    });
+
+    act(() => {
+      h.app.actionManager.executeAction(actionFinalize);
+    });
+
+    const finalLine = live<ExcalidrawLineElement>(line.id);
+    // polygon flag was set true on finalize AND survived replaceAllElements.
+    expect(finalLine.polygon).toBe(true);
   });
 });

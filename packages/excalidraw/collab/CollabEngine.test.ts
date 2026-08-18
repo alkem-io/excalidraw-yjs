@@ -190,6 +190,76 @@ describe("CollabEngine: the unified provider drives Scene.doc", () => {
     sceneB.destroy();
   });
 
+  // FIX 2 — yAppState (background + name) collaborates live over the SAME doc.
+  // A `scene.setAppState` under LOCAL_ORIGIN must broadcast like an element edit;
+  // the peer integrates it under REMOTE_ORIGIN (so `getPersistedAppState` reflects
+  // it) and must NOT echo it back (no loop) — exactly the element guarantees, now
+  // for the persistable appState subset.
+  it("live appState: a background/name change propagates to the peer (both halves)", () => {
+    const sceneA = new Scene();
+    const sceneB = new Scene();
+    const { a, b, flush } = makeLinkedTransports();
+    const engineA = new CollabEngine(sceneA, a);
+    const engineB = new CollabEngine(sceneB, b);
+
+    // A changes background + name through the doc (the producer path).
+    sceneA.setAppState({
+      viewBackgroundColor: "#ff0000",
+      name: "Shared Board",
+    });
+    flush();
+
+    // B sees both via the doc's yAppState (the consumer half).
+    expect(sceneB.getPersistedAppState().viewBackgroundColor).toBe("#ff0000");
+    expect(sceneB.getPersistedAppState().name).toBe("Shared Board");
+
+    // Reverse direction converges too.
+    sceneB.setAppState({ viewBackgroundColor: "#00ff00" });
+    flush();
+    expect(sceneA.getPersistedAppState().viewBackgroundColor).toBe("#00ff00");
+
+    engineA.destroy();
+    engineB.destroy();
+    sceneA.destroy();
+    sceneB.destroy();
+  });
+
+  it("live appState: a REMOTE appState apply does NOT echo back (no loop)", () => {
+    const sceneA = new Scene();
+    const sceneB = new Scene();
+
+    let aBroadcasts = 0;
+    const aTransport: CollabTransport = {
+      broadcast: () => {
+        aBroadcasts += 1;
+      },
+      onMessage: () => () => {},
+    };
+    const engineA = new CollabEngine(sceneA, aTransport);
+
+    // A local appState change DOES broadcast. (Use a DIFFERENT key from the remote
+    // change below so the assertion is about echo, not an LWW key conflict.)
+    sceneA.setAppState({ name: "Local A" });
+    const afterLocal = aBroadcasts;
+    expect(afterLocal).toBeGreaterThan(0);
+
+    // A remote appState change (from B) is applied into A under REMOTE_ORIGIN; it
+    // must update A's doc but produce NO new broadcast (no echo loop — the basis
+    // for the App-side `refreshAppStateFromScene` reconcile being safe).
+    sceneB.setAppState({ viewBackgroundColor: "#abcdef" });
+    const fromB = sceneB.encodeStateAsUpdate();
+    sceneA.applyRemoteUpdate(fromB);
+    expect(sceneA.getPersistedAppState().viewBackgroundColor).toBe("#abcdef");
+    // A's own local key is untouched (no conflict), and applying the remote update
+    // produced NO new broadcast.
+    expect(sceneA.getPersistedAppState().name).toBe("Local A");
+    expect(aBroadcasts).toBe(afterLocal); // applied, but no echo.
+
+    engineA.destroy();
+    sceneA.destroy();
+    sceneB.destroy();
+  });
+
   it("destroy() stops broadcasting and applying", () => {
     const sceneA = new Scene();
     let broadcasts = 0;

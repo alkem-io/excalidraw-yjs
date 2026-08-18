@@ -511,9 +511,26 @@ export class Scene {
     };
     this.yFiles.observe(filesObserver);
 
+    // The persistable appState subset (background + name) lives on the SAME doc
+    // (M4), so a change to `yAppState` — a local `setAppState`, a remote appState
+    // apply (REMOTE_ORIGIN, M3), or a load (`EPHEMERAL_ORIGIN`) — must notify the
+    // same `callbacks` as an element/files change so the App refreshes its React
+    // appState from the doc and re-renders (background/name are React state, not
+    // read from the doc by the renderer). `.observe` (shallow) is enough: each
+    // allow-listed key is a plain LWW scalar. Read-only on the App side (refresh
+    // from `getPersistedAppState()`), so this can never echo — the observer only
+    // fires `triggerUpdate`, it never writes back.
+    const appStateObserver = () => {
+      if (!this.suppressTrigger) {
+        this.triggerUpdate();
+      }
+    };
+    this.yAppState.observe(appStateObserver);
+
     this.detachObserver = () => {
       this.yElements.unobserveDeep(observer);
       this.yFiles.unobserve(filesObserver);
+      this.yAppState.unobserve(appStateObserver);
     };
 
     if (options?.doc) {
@@ -1120,6 +1137,32 @@ export class Scene {
   }
 
   /**
+   * Drop every file from the doc's `yFiles` whose id is NOT in `keepFileIds`
+   * (native-Yjs core, M4). `setFiles` is deliberately append-only — a normal save
+   * must never drop a file a peer just added — so file pruning is an explicit,
+   * separate operation, used when files become genuinely orphaned with no
+   * concurrency hazard: a scene CLEAR / reset (every file unreferenced), or a
+   * delete where the caller has computed the surviving referenced set. Without it
+   * a pasted-then-deleted image's binary would linger in the doc indefinitely.
+   *
+   * Written under {@link EPHEMERAL_ORIGIN}: a local, non-undoable maintenance
+   * write (mirrors a load). No-op (no transaction) when nothing is removed.
+   * Returns the number of files removed.
+   */
+  pruneFiles(keepFileIds: ReadonlySet<string>): number {
+    let removed = 0;
+    this.doc.transact(() => {
+      for (const id of [...this.yFiles.keys()]) {
+        if (!keepFileIds.has(id)) {
+          this.yFiles.delete(id);
+          removed++;
+        }
+      }
+    }, EPHEMERAL_ORIGIN);
+    return removed;
+  }
+
+  /**
    * Write the persistable appState subset (the `APPSTATE_ALLOW_LIST` keys —
    * background + name) into the doc's `yAppState`. Only those keys are
    * considered; every other appState field is local-only and ignored here (it
@@ -1395,17 +1438,16 @@ export class Scene {
       const prevSuppress = this.suppressTrigger;
       this.suppressTrigger = prevSuppress || !options.informMutation;
       try {
-        // Born-revealed: if this element is not yet in the doc, structurally add
-        // it as a tombstone under STRUCTURAL_ORIGIN (untracked by history) first,
-        // so the LOCAL_ORIGIN write below is a history-tracked reveal/update
-        // rather than a structural add (which undo would hard-remove). Mirrors
-        // `replaceAllElements`. (Normally `mutateElement` targets an existing
-        // element; this is the rare create-via-mutate path.)
-        if (!this.yElements.has(element.id)) {
-          this.doc.transact(() => {
-            this.materializeNewEntry(element as unknown as ElementRecord);
-          }, STRUCTURAL_ORIGIN);
-        }
+        // `mutateElement` is exclusively a MUTATION path: it requires `element`
+        // to be ALREADY inserted in the scene. The `inScene` guard above
+        // (`this.elementsMap.has(element.id)`) is true iff the id is in
+        // `yElements` (every doc entry derives into `elementsMap`), so the element
+        // is guaranteed to exist in the doc here — there is no born-revealed
+        // structural-add branch to take. The CREATE path is `insertNewElement`
+        // (→ `replaceAllElements`), which does the born-revealed tombstone+reveal.
+        // A "create via mutate" call falls through the `inScene` guard as a no-op
+        // and the element must be inserted via `insertNewElement` (see App.tsx,
+        // where `insertNewElement` follows the seeding `scene.mutateElement`).
         this.doc.transact(() => {
           const ymap = this.yElements.get(element.id);
           if (ymap) {

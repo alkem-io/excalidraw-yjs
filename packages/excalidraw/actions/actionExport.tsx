@@ -47,7 +47,16 @@ export const actionChangeProjectName = register<AppState["name"]>({
   name: "changeProjectName",
   label: "labels.fileTitle",
   trackEvent: false,
-  perform: (_elements, appState, value) => {
+  perform: (_elements, appState, value, app) => {
+    // Native-Yjs core (M4): the scene `name` is a collaborative/persistable
+    // appState field. Write the user's change through to the scene doc's
+    // `yAppState` under LOCAL_ORIGIN so a delta is generated and broadcast to
+    // peers (and persisted). Sole producer for the name — the remote→reconcile
+    // consumer (`refreshAppStateFromScene`) does a bare `setState`, never this
+    // action, so a remote-applied change never loops back.
+    if (value !== undefined) {
+      app.scene.setAppState({ name: value });
+    }
     return {
       appState: { ...appState, name: value },
       captureUpdate: CaptureUpdateAction.EVENTUALLY,

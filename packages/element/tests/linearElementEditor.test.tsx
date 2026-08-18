@@ -11,6 +11,7 @@ import {
 } from "@excalidraw-yjs/common";
 
 import { Excalidraw } from "@excalidraw-yjs/excalidraw";
+import { actionDuplicateSelection } from "@excalidraw-yjs/excalidraw/actions/actionDuplicateSelection";
 import * as InteractiveCanvas from "@excalidraw-yjs/excalidraw/renderer/interactiveScene";
 import * as StaticScene from "@excalidraw-yjs/excalidraw/renderer/staticScene";
 import { API } from "@excalidraw-yjs/excalidraw/tests/helpers/api";
@@ -1613,6 +1614,83 @@ describe("Test Linear Elements", () => {
       const tolerance = 0.01; // Small tolerance for floating point precision
 
       expect(angleDifference).toBeLessThan(tolerance);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // FIX 4 — stale-read SURVIVAL for point-edit delete / duplicate.
+  //
+  // `actionDeleteSelected` (point-edit branch) and `actionDuplicateSelection`
+  // (point-edit branch) mutate the linear element's `points` through the doc via
+  // in-place `scene.mutateElement` (deletePoints / duplicateSelectedPoints), then
+  // RETURN the captured `elements` array → `replaceAllElements`. They are CORRECT
+  // today *only because* the mutate happens in place on the same object the
+  // returned array holds, so the re-write re-asserts the new points rather than
+  // the pre-mutation snapshot. These tests read `h.elements` AFTER the action
+  // (post-replaceAllElements) and assert the point-count change SURVIVED — locking
+  // the invariant so a refactor returning a pre-mutation clone is caught.
+  // -------------------------------------------------------------------------
+  describe("FIX4 stale-read survival — point-edit delete / duplicate", () => {
+    it("deleting a point reduces points.length AND it stays reduced (survives replaceAllElements)", () => {
+      const line = createThreePointerLinearElement("line");
+      const liveLine = () =>
+        h.elements.find((e) => e.id === line.id)! as ExcalidrawLinearElement;
+
+      enterLineEditingMode(line);
+      expect(liveLine().points.length).toEqual(3);
+
+      const points = LinearElementEditor.getPointsGlobalCoordinates(
+        liveLine(),
+        arrayToMap(h.elements),
+      );
+
+      // Delete the middle point (selects it via pointerDown/Up, then DELETE).
+      deletePoint(points[1]);
+
+      // Re-read FRESH after the action: the deletion landed AND survived the
+      // returned-array replaceAllElements (a stale pre-delete return would
+      // re-write 3 points here).
+      expect(liveLine().points.length).toEqual(2);
+    });
+
+    it("duplicating a selected point increases points.length AND it stays increased (survives replaceAllElements)", () => {
+      const line = createThreePointerLinearElement("line");
+      const liveLine = () =>
+        h.elements.find((e) => e.id === line.id)! as ExcalidrawLinearElement;
+
+      enterLineEditingMode(line);
+      expect(liveLine().points.length).toEqual(3);
+
+      const points = LinearElementEditor.getPointsGlobalCoordinates(
+        liveLine(),
+        arrayToMap(h.elements),
+      );
+
+      // Select the middle point (pointerDown/Up on it) so the point-edit
+      // duplicate branch has a `selectedPointsIndices`.
+      fireEvent.pointerDown(interactiveCanvas, {
+        clientX: points[1][0],
+        clientY: points[1][1],
+      });
+      fireEvent.pointerUp(interactiveCanvas, {
+        clientX: points[1][0],
+        clientY: points[1][1],
+      });
+      expect(h.state.selectedLinearElement?.isEditing).toBe(true);
+      expect(
+        h.state.selectedLinearElement?.selectedPointsIndices?.length,
+      ).toBeGreaterThan(0);
+
+      const before = liveLine().points.length;
+
+      act(() => {
+        h.app.actionManager.executeAction(actionDuplicateSelection);
+      });
+
+      // Re-read FRESH after the action: the duplicate landed AND survived the
+      // returned-array replaceAllElements (a stale return would revert the added
+      // point, leaving the count unchanged).
+      expect(liveLine().points.length).toEqual(before + 1);
     });
   });
 });

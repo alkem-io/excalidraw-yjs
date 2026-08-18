@@ -257,6 +257,45 @@ describe("native-yjs Scene persistence: the doc IS the persistence unit", () => 
     restored.destroy();
   });
 
+  it("pruneFiles drops files not in the keep-set and leaves the rest (privacy / orphan cleanup)", () => {
+    const scene = new Scene([rect("a")]);
+    scene.setFiles({
+      keep: file("keep", "data:,KEEP"),
+      orphan: file("orphan", "data:,SECRET"),
+    });
+    expect(Object.keys(scene.getFiles()).sort()).toEqual(["keep", "orphan"]);
+
+    const removed = scene.pruneFiles(new Set(["keep"]));
+
+    expect(removed).toBe(1);
+    expect(Object.keys(scene.getFiles())).toEqual(["keep"]);
+    // the orphaned binary is gone from the doc → never encoded/broadcast again.
+    expect(scene.getFiles().orphan).toBeUndefined();
+
+    // pruning the rest leaves an empty files map.
+    expect(scene.pruneFiles(new Set())).toBe(1);
+    expect(scene.getFiles()).toEqual({});
+
+    scene.destroy();
+  });
+
+  it("pruneFiles is EPHEMERAL (non-undoable) — it never lands on the element undo stack", () => {
+    const scene = new Scene([rect("a")]);
+    scene.setFiles({ orphan: file("orphan", "data:,X") });
+    // a real local edit IS undoable, establishing a baseline depth.
+    scene.mutateElement(scene.getElement("a")!, { x: 7 });
+    scene.stopElementCapture();
+    const depthBefore = scene.undoManager.undoStack.length;
+
+    scene.pruneFiles(new Set());
+
+    // pruning files added no element undo step (it is a doc maintenance write).
+    expect(scene.undoManager.undoStack.length).toBe(depthBefore);
+    expect(scene.getFiles()).toEqual({});
+
+    scene.destroy();
+  });
+
   it("files + appState set on the doc collaborate via applyRemoteUpdate (they ride the same doc as elements)", () => {
     // Persistence-on-doc also means files/appState are part of the doc that
     // collaborates — a peer's file/appState change arrives through the same

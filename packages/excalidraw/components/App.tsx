@@ -2936,6 +2936,13 @@ class App extends React.Component<AppProps, AppState> {
     (opts?: { resetLoadingState: boolean }) => {
       // Not an undoable edit — history is cleared right after (resetHistory()).
       this.scene.replaceAllElements([], { recordHistory: false });
+      // Clearing the scene leaves every file orphaned — prune them from the doc
+      // (M4) so a cleared/reset whiteboard never persists or broadcasts the bytes
+      // of images that are no longer referenced by any element (privacy). The
+      // boundary save/wire filter also excludes them, but pruning here keeps the
+      // in-memory doc from carrying stale binaries and bounds its growth.
+      this.scene.pruneFiles(new Set());
+      this.files = {};
       this.setState((state) => ({
         ...getDefaultAppState(),
         isLoading: opts?.resetLoadingState ? false : state.isLoading,
@@ -3203,6 +3210,13 @@ class App extends React.Component<AppProps, AppState> {
     // `addMissingFiles`, or the write→observe→refresh cycle would loop. Ordered
     // before `triggerRender` so the render sees the freshest files.
     this.scene.onUpdate(this.refreshFilesFromScene);
+    // Keep the collaborative appState subset (background + name) in lock-step
+    // with the scene doc (M4) — same READ-ONLY mirror pattern as files: on every
+    // scene update (incl. a remote appState apply or a load) pull the persisted
+    // subset from the doc and `setState` only the keys that diverged. Never calls
+    // `setAppState` on the scene, so the refresh can never loop. Ordered before
+    // `triggerRender` so the render sees the freshest appState.
+    this.scene.onUpdate(this.refreshAppStateFromScene);
     this.scene.onUpdate(this.triggerRender);
     this.addEventListeners();
 
@@ -4746,6 +4760,47 @@ class App extends React.Component<AppProps, AppState> {
    */
   private refreshFilesFromScene = () => {
     this.files = this.scene.getFiles() as BinaryFiles;
+  };
+
+  /**
+   * Refresh the collaborative/persistable appState subset (background + name)
+   * from the scene doc (M4). Those fields live on `scene.doc` (`yAppState`) and
+   * collaborate/persist there, but the renderer reads them from React state
+   * (`this.state.viewBackgroundColor` / `this.state.name`), so a remote peer's
+   * change — or a restore on load — must be mirrored into React state for the UI
+   * to reflect it. Subscribed to `scene.onUpdate` (fires on every doc change),
+   * mirroring `refreshFilesFromScene`.
+   *
+   * STRICTLY read-only and ECHO-SAFE: it pulls from `scene.getPersistedAppState()`
+   * and `setState`s ONLY the keys whose doc value DIFFERS from current React
+   * state. It never writes back to the doc (the producers are the bg-color / name
+   * actions, which `setAppState` under LOCAL_ORIGIN). A remote-applied change
+   * reaches here via the doc observer, updates React state, and stops — there is
+   * no path from this `setState` back into `yAppState`, so it cannot loop or
+   * re-broadcast.
+   */
+  private refreshAppStateFromScene = () => {
+    const persisted = this.scene.getPersistedAppState();
+    const next: {
+      viewBackgroundColor?: AppState["viewBackgroundColor"];
+      name?: AppState["name"];
+    } = {};
+    if (
+      persisted.viewBackgroundColor !== undefined &&
+      persisted.viewBackgroundColor !== this.state.viewBackgroundColor
+    ) {
+      next.viewBackgroundColor =
+        persisted.viewBackgroundColor as AppState["viewBackgroundColor"];
+    }
+    if (persisted.name !== undefined && persisted.name !== this.state.name) {
+      next.name = persisted.name as AppState["name"];
+    }
+    // Only `setState` when the doc actually diverges from React state — so a
+    // local edit (React state already holds the value the producer just wrote to
+    // the doc) is a no-op here, and only a genuine remote/load change re-renders.
+    if (next.viewBackgroundColor !== undefined || next.name !== undefined) {
+      this.setState(next as Pick<AppState, "viewBackgroundColor" | "name">);
+    }
   };
 
   private triggerRender = (
