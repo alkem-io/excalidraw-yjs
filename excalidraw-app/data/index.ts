@@ -10,8 +10,12 @@ import {
 import { serializeAsJSON } from "@excalidraw-yjs/excalidraw/data/json";
 import { isInvisiblySmallElement } from "@excalidraw-yjs/element";
 import { isInitializedImageElement } from "@excalidraw-yjs/element";
+import { encodeSnapshotAsUpdate } from "@excalidraw-yjs/element";
+
 import { t } from "@excalidraw-yjs/excalidraw/i18n";
 import { bytesToHexString } from "@excalidraw-yjs/common";
+
+import type { FileRecord } from "@excalidraw-yjs/element";
 
 import type { UserIdleState } from "@excalidraw-yjs/common";
 import type { ImportedDataState } from "@excalidraw-yjs/excalidraw/data/types";
@@ -61,6 +65,84 @@ export const getSyncableElements = (
   elements.filter((element) =>
     isSyncableElement(element),
   ) as SyncableExcalidrawElement[];
+
+/**
+ * The fileIds still referenced by a LIVE (non-deleted, initialized) image element
+ * in `elements`. This is the privacy gate for the persistence/wire boundary: only
+ * a binary that some surviving element actually points at may be shipped/stored.
+ * Mirrors `exportToBackend`'s "files-from-live-elements" set so a pasted-then-
+ * deleted image's bytes are never leaked through the wire seed or the save.
+ */
+export const getReferencedFileIds = (
+  elements: readonly OrderedExcalidrawElement[],
+): Set<FileId> => {
+  const referenced = new Set<FileId>();
+  for (const element of elements) {
+    if (isInitializedImageElement(element) && !element.isDeleted) {
+      referenced.add(element.fileId);
+    }
+  }
+  return referenced;
+};
+
+/**
+ * Filter a files map down to only those referenced by a live element in
+ * `elements` (see {@link getReferencedFileIds}). A `BinaryFiles` value keyed by a
+ * fileId no live element references — e.g. an image that was pasted then deleted,
+ * or whose element was pruned — is dropped, so it is never broadcast or persisted.
+ */
+export const filterReferencedFiles = <T>(
+  files: Readonly<Record<string, T>>,
+  elements: readonly OrderedExcalidrawElement[],
+): Record<string, T> => {
+  const referenced = getReferencedFileIds(elements);
+  const out: Record<string, T> = {};
+  for (const [id, file] of Object.entries(files)) {
+    if (referenced.has(id as FileId)) {
+      out[id] = file;
+    }
+  }
+  return out;
+};
+
+/**
+ * Build a FILTERED full-scene Yjs update for the collaboration wire (native-Yjs
+ * core). The raw scene `Y.Doc` carries (a) deleted-element tombstones whose full
+ * content has aged past {@link DELETED_ELEMENT_TIMEOUT} and (b) every file binary
+ * ever added (append-only), so `Y.encodeStateAsUpdate(doc)` would re-broadcast
+ * stale deleted content and orphaned binaries on every join/resync. This rebuilds
+ * the full state from ONLY the syncable elements (`getSyncableElements`: live
+ * elements + tombstones still inside the timeout window, so peers still learn of
+ * recent deletions and converge) plus the files those live elements reference,
+ * then encodes it as a self-contained **v1** update (matching the incremental
+ * UPDATE bytes on the wire). The throwaway snapshot doc starts from an empty state
+ * vector, so the result is a valid, idempotent `REMOTE_ORIGIN` full-state merge on
+ * the receiver — exactly what the INIT seed / periodic resync needs.
+ */
+export const encodeSyncableSceneAsUpdate = (
+  elements: readonly OrderedExcalidrawElement[],
+  files: BinaryFiles,
+  appState: Pick<AppState, "viewBackgroundColor" | "name">,
+): Uint8Array => {
+  const syncableElements = getSyncableElements(elements);
+  return encodeSnapshotAsUpdate(
+    {
+      elements: syncableElements as unknown as readonly Record<
+        string,
+        unknown
+      >[],
+      files: filterReferencedFiles(
+        files as unknown as Record<string, FileRecord>,
+        syncableElements,
+      ),
+      appState: {
+        viewBackgroundColor: appState.viewBackgroundColor,
+        name: appState.name,
+      },
+    },
+    "v1",
+  );
+};
 
 const BACKEND_V2_GET = import.meta.env.VITE_APP_BACKEND_V2_GET_URL;
 const BACKEND_V2_POST = import.meta.env.VITE_APP_BACKEND_V2_POST_URL;

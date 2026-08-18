@@ -27,6 +27,13 @@ import {
 // `REMOTE_ORIGIN`, exactly as the editor's Scene does internally — no
 // `reconcileElements`, no scene-version gating.
 import { REMOTE_ORIGIN } from "@excalidraw-yjs/element";
+// Native-Yjs core (M3): a local EPHEMERAL write (scene load, file-prune, a
+// non-capturing/reset `updateScene`) mutates the doc and fires `doc.on("update")`
+// too, but it must NEVER go on the wire — broadcasting it would push destructive
+// deletes / whole-scene replacements to peers. We filter it out in `onDocUpdate`
+// alongside `REMOTE_ORIGIN`. (We deliberately do NOT filter `STRUCTURAL_ORIGIN`;
+// see the comment in `onDocUpdate`.)
+import { EPHEMERAL_ORIGIN } from "@excalidraw-yjs/element";
 import { AbortError } from "@excalidraw-yjs/excalidraw/errors";
 import { t } from "@excalidraw-yjs/excalidraw/i18n";
 import { withBatchedUpdates } from "@excalidraw-yjs/excalidraw/reactUtils";
@@ -63,6 +70,7 @@ import {
   WS_EVENTS,
 } from "../app_constants";
 import {
+  encodeSyncableSceneAsUpdate,
   generateCollaborationLinkData,
   getCollaborationLink,
   getSyncableElements,
@@ -138,6 +146,15 @@ class Collab extends PureComponent<CollabProps, CollabState> {
   excalidrawAPI: CollabProps["excalidrawAPI"];
   activeIntervalId: number | null;
   idleTimeoutId: number | null;
+  /**
+   * Interval that drives the periodic full-scene resync safety net (native-Yjs
+   * core, M3). The resync re-broadcasts the FULL doc state so a peer that dropped
+   * an incremental update still converges; it must fire on a TIME interval,
+   * independent of edit activity, NOT once per local edit (that turned every
+   * edit-burst into an O(scene) re-send). Set in `startCollaboration`, cleared +
+   * nulled wherever the socket/broadcast is torn down.
+   */
+  private sceneResyncIntervalId: number | null = null;
 
   private socketInitializationTimer?: number;
   /**
@@ -330,6 +347,12 @@ class Collab extends PureComponent<CollabProps, CollabState> {
     // the socket teardown path (which also detaches) didn't run (native-Yjs core, M3).
     this.detachDocBroadcast?.();
     this.detachDocBroadcast = null;
+    // Safety net: stop the periodic full-scene resync interval on unmount in case
+    // the socket teardown path (which also clears it) didn't run (native-Yjs core, M3).
+    if (this.sceneResyncIntervalId !== null) {
+      window.clearInterval(this.sceneResyncIntervalId);
+      this.sceneResyncIntervalId = null;
+    }
     this.onUmmount?.();
   }
 
@@ -412,7 +435,7 @@ class Collab extends PureComponent<CollabProps, CollabState> {
   };
 
   stopCollaboration = (keepRemoteState = true) => {
-    this.queueBroadcastSceneInit.cancel();
+    this.queueBroadcastSceneResync.cancel();
     this.queueSaveToFirebase.cancel();
     this.loadImageFiles.cancel();
     this.resetErrorIndicator(true);
@@ -465,6 +488,13 @@ class Collab extends PureComponent<CollabProps, CollabState> {
     // left/remounted room never double-broadcasts.
     this.detachDocBroadcast?.();
     this.detachDocBroadcast = null;
+    // Stop the periodic full-scene resync interval too — the socket is gone, so a
+    // resync would be a no-op (guarded by `isOpen()`), but leaving the timer
+    // running would leak across a left/remounted room (native-Yjs core, M3).
+    if (this.sceneResyncIntervalId !== null) {
+      window.clearInterval(this.sceneResyncIntervalId);
+      this.sceneResyncIntervalId = null;
+    }
     this.portal.close();
     this.fileManager.reset();
     if (!opts?.isUnload) {
@@ -626,17 +656,61 @@ class Collab extends PureComponent<CollabProps, CollabState> {
     // out so we never echo a peer's update back out.
     const doc = this.excalidrawAPI.getSceneDoc();
     const onDocUpdate = (update: Uint8Array, origin: unknown) => {
-      // never re-broadcast a remote apply (no echo); only updates this replica originated
-      if (origin === REMOTE_ORIGIN) {
+      // Only updates that should travel the wire are broadcast — i.e. everything
+      // EXCEPT a remote apply and a local ephemeral write:
+      //  - REMOTE_ORIGIN: a peer's edit we just applied; re-broadcasting it would
+      //    echo it straight back (and bump traffic with no new information).
+      //  - EPHEMERAL_ORIGIN: a local NON-undoable write — scene load/init, the
+      //    file-prune, a non-capturing/reset `updateScene` (CaptureUpdateAction.
+      //    NEVER). These are local bookkeeping, NOT user intent to share: a load
+      //    re-asserts state peers already hold, and a reset/prune would push
+      //    destructive deletes/whole-scene replacements to everyone in the room.
+      //
+      // What still passes (correctly):
+      //  - LOCAL_ORIGIN: ordinary undoable local edits — the user's real intent.
+      //  - UndoManager-origin (undo/redo): origin is the UndoManager, which is
+      //    none of the four sentinels, so it broadcasts — a peer must see an
+      //    undo/redo as a normal forward change.
+      //  - STRUCTURAL_ORIGIN: deliberately NOT filtered. A born-revealed create
+      //    is two SEPARATE transactions — a STRUCTURAL pass that materializes the
+      //    element's per-property `Y.Map` into `yElements` (born as an
+      //    `isDeleted:true` tombstone), then a LOCAL_ORIGIN reveal pass that writes
+      //    real props onto that same map and flips `isDeleted`. In Yjs the LOCAL
+      //    reveal update encodes only VALUE writes onto a map whose PARENT-creating
+      //    struct lives in the STRUCTURAL update; a fresh peer that received only
+      //    the reveal would queue those writes as pending (missing parent) and the
+      //    element would not integrate until the next full resync (up to
+      //    SYNC_FULL_SCENE_INTERVAL_MS later) — a transient invisible-element bug.
+      //    Broadcasting STRUCTURAL keeps the map-creation struct on the wire in the
+      //    same logical create op as the reveal, so the element integrates cleanly
+      //    and immediately. The minor cost (a tombstone-add update precedes the
+      //    reveal) is two small incremental updates Yjs merges idempotently — far
+      //    cheaper than a 20s invisibility window or a full-scene resend.
+      if (origin === REMOTE_ORIGIN || origin === EPHEMERAL_ORIGIN) {
         return;
       }
       if (this.portal.isOpen()) {
         void this.portal.broadcastSceneUpdate(WS_SUBTYPES.UPDATE, update);
-        this.queueBroadcastSceneInit(); // periodic full-resync safety net (throttled)
       }
     };
     doc.on("update", onDocUpdate);
     this.detachDocBroadcast = () => doc.off("update", onDocUpdate);
+
+    // Periodic full-scene resync safety net (native-Yjs core, M3). It re-broadcasts
+    // the FULL doc state as a WS_SUBTYPES.UPDATE so a peer that dropped an
+    // incremental update still converges. It is driven by a TIME interval here —
+    // independent of edit activity — NOT scheduled from `onDocUpdate`: doing the
+    // latter (via the leading-edge throttle) fired a full O(scene) re-send on the
+    // first edit of every burst, on top of the incremental update. Guarded by
+    // `isOpen()` so it is a no-op while the socket is down.
+    if (this.sceneResyncIntervalId !== null) {
+      window.clearInterval(this.sceneResyncIntervalId);
+    }
+    this.sceneResyncIntervalId = window.setInterval(() => {
+      if (this.portal.isOpen()) {
+        void this.portal.broadcastSceneResync();
+      }
+    }, SYNC_FULL_SCENE_INTERVAL_MS);
 
     // fallback in case you're not alone in the room but still don't receive
     // initial SCENE_INIT message
@@ -835,15 +909,24 @@ class Collab extends PureComponent<CollabProps, CollabState> {
       this.excalidrawAPI.resetScene();
 
       try {
-        const elements = await loadFromFirebase(
+        const loaded = await loadFromFirebase(
           roomLinkData.roomId,
           roomLinkData.roomKey,
           this.portal.socket,
         );
-        if (elements) {
+        if (loaded) {
           return {
-            elements,
+            elements: loaded.elements,
             scrollToContent: true,
+            // Native-Yjs core (M4): carry the persisted appState subset
+            // (`viewBackgroundColor` / `name`) and files through the load so a
+            // solo cold-load restores the saved scene's background/name instead
+            // of falling back to defaults (they live on the doc, not in the
+            // element array). App.initializeScene merges `appState` via
+            // `restoreAppState`; files seed the in-memory cache before image
+            // fetch.
+            appState: loaded.appState as Partial<ImportedDataState["appState"]>,
+            files: loaded.files as ImportedDataState["files"],
           };
         }
       } catch (error: any) {
@@ -1020,23 +1103,49 @@ class Collab extends PureComponent<CollabProps, CollabState> {
   };
 
   /**
-   * Encode the scene's `Y.Doc` current state as a Yjs update (native-Yjs core,
-   * M3) — the full state used to (re)seed a peer. Called by `Portal` from
-   * `broadcastSceneInit` (on `new-user` and the periodic full-resync).
+   * Encode the scene's current state as a FILTERED full-scene Yjs update
+   * (native-Yjs core, M3) — the full state used to seed a new peer
+   * (`broadcastSceneInit`, on `new-user`) or periodically resync already-joined
+   * peers (`broadcastSceneResync`).
+   *
+   * It does NOT raw-encode the scene `Y.Doc` (`Y.encodeStateAsUpdate(doc)`): the
+   * doc holds deleted-element tombstones whose content has aged past
+   * {@link DELETED_ELEMENT_TIMEOUT} and every file binary ever added (append-only),
+   * so a raw encode would re-broadcast stale deleted content and orphaned image
+   * bytes on every join/resync — a privacy leak (a pasted-then-deleted image) and
+   * unbounded resync growth. Instead it rebuilds the full state from the SYNCABLE
+   * elements + the files those live elements reference (mirroring the old
+   * element-JSON wire's `getSyncableElements` / files-from-live-elements filter),
+   * via `encodeSyncableSceneAsUpdate`. Recently-deleted elements (tombstones still
+   * inside the timeout window) ARE included, so peers still converge on deletions.
+   * The result is a self-contained V1 update — an idempotent `REMOTE_ORIGIN` merge
+   * on the receiver — matching the incremental UPDATE bytes already on the wire.
    */
   public encodeSceneAsUpdate = (): Uint8Array => {
-    return Y.encodeStateAsUpdate(this.excalidrawAPI.getSceneDoc());
+    const appState = this.excalidrawAPI.getAppState();
+    return encodeSyncableSceneAsUpdate(
+      this.excalidrawAPI.getSceneElementsIncludingDeleted(),
+      this.excalidrawAPI.getFiles(),
+      {
+        viewBackgroundColor: appState.viewBackgroundColor,
+        name: appState.name,
+      },
+    );
   };
 
   /**
    * Periodic full-scene resync safety net (native-Yjs core, M3). Throttled
-   * re-broadcast of the FULL doc state (`broadcastSceneInit`) so a peer that
-   * dropped an incremental update still converges. Replaces the old
+   * re-broadcast of the FULL doc state as a {@link WS_SUBTYPES.UPDATE}
+   * (`broadcastSceneResync`) so a peer that dropped an incremental update still
+   * converges. It MUST go via UPDATE, not INIT: an already-initialized peer drops
+   * INIT (honored only as its one-time first-in-room seed) but always applies
+   * UPDATE, so an INIT-based resync is silently dropped by every joined peer. A
+   * full-state update is an idempotent `REMOTE_ORIGIN` merge. Replaces the old
    * `queueBroadcastAllElements` full-scene JSON re-broadcast.
    */
-  queueBroadcastSceneInit = throttle(() => {
+  queueBroadcastSceneResync = throttle(() => {
     if (this.portal.isOpen()) {
-      void this.portal.broadcastSceneInit();
+      void this.portal.broadcastSceneResync();
     }
   }, SYNC_FULL_SCENE_INTERVAL_MS);
 

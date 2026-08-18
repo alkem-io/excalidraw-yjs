@@ -152,11 +152,32 @@ class Portal {
     await this._broadcastSocketData(data as SocketUpdateData);
   };
 
-  /** Send the FULL current scene-doc state to (re)seed a peer — used on
-   * `new-user` and as a periodic full-resync safety net. */
+  /** Send the FULL current scene-doc state to seed a genuinely NEW peer — used on
+   * `new-user`. Sent as {@link WS_SUBTYPES.INIT}, which the receiver applies ONLY
+   * while it is still uninitialized (its first-in-room seed). A peer that has
+   * already initialized DROPS INIT, so this must not be used for the periodic
+   * resync of already-joined peers — that goes via {@link broadcastSceneResync}. */
   broadcastSceneInit = async () => {
     await this.broadcastSceneUpdate(
       WS_SUBTYPES.INIT,
+      this.collab.encodeSceneAsUpdate(),
+    );
+  };
+
+  /**
+   * Periodic full-scene resync safety net (native-Yjs core, M3). Re-broadcast the
+   * FULL doc state as a {@link WS_SUBTYPES.UPDATE} — NOT INIT — so EVERY peer
+   * applies it: an already-initialized peer drops INIT (it is only honored as the
+   * one-time first-in-room seed) but always applies UPDATE. A full-state Yjs
+   * update is a valid, idempotent `REMOTE_ORIGIN` merge (Yjs dedups what the peer
+   * already holds), so this converges a peer that dropped an incremental update
+   * without disturbing one that is already up to date. Wire stays V1-consistent:
+   * `encodeSceneAsUpdate()` is `Y.encodeStateAsUpdate` (V1), matching the
+   * incremental UPDATE bytes already on the wire.
+   */
+  broadcastSceneResync = async () => {
+    await this.broadcastSceneUpdate(
+      WS_SUBTYPES.UPDATE,
       this.collab.encodeSceneAsUpdate(),
     );
   };

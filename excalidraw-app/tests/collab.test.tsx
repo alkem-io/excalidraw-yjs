@@ -17,12 +17,18 @@ import { vi } from "vitest";
 
 import { StoreIncrement } from "@excalidraw-yjs/element";
 
+import * as Y from "yjs";
+
+import { ELEMENTS, REMOTE_ORIGIN } from "@excalidraw-yjs/element";
+
 import type {
   DurableIncrement,
   EphemeralIncrement,
 } from "@excalidraw-yjs/element";
 
 import ExcalidrawApp from "../App";
+
+import { WS_SUBTYPES } from "../app_constants";
 
 const { h } = window;
 
@@ -267,5 +273,140 @@ describe("collaboration", () => {
         expect.objectContaining({ ...rect2Props, isDeleted: true }),
       ]);
     });
+  });
+
+  // FIX 1 (native-Yjs core M3): the periodic full-scene safety net that
+  // `onDocUpdate` schedules on every local edit (`queueBroadcastSceneResync`) must
+  // funnel through `Portal.broadcastSceneResync` (→ WS_SUBTYPES.UPDATE), which
+  // already-joined peers apply — NEVER `broadcastSceneInit` (→ INIT), which joined
+  // peers drop, so an INIT-routed resync silently never reconverges a replica that
+  // missed an incremental update. `portalResync.test.tsx` pins the Portal wire
+  // boundary (resync→UPDATE / init→INIT); this pins the Collab-side routing so a
+  // regression of the throttle target to `broadcastSceneInit` fails a test.
+  it("queueBroadcastSceneResync routes via broadcastSceneResync (UPDATE), not broadcastSceneInit (INIT) — FIX 1", async () => {
+    await render(<ExcalidrawApp />);
+
+    const collab = window.collab;
+    const { portal } = collab;
+
+    // Force the portal "open" so the throttled body actually runs.
+    portal.isOpen = vi.fn(() => true);
+    const resyncSpy = vi
+      .spyOn(portal, "broadcastSceneResync")
+      .mockResolvedValue(undefined);
+    const initSpy = vi
+      .spyOn(portal, "broadcastSceneInit")
+      .mockResolvedValue(undefined);
+
+    // lodash `throttle` fires on the leading edge, so the first call runs the body
+    // synchronously.
+    collab.queueBroadcastSceneResync();
+
+    expect(resyncSpy).toHaveBeenCalledTimes(1);
+    expect(initSpy).not.toHaveBeenCalled();
+  });
+
+  // FIX 1 + FIX 2 (native-Yjs core M3): exercise the `doc.on("update")` →
+  // `onDocUpdate` CALL SITE itself (the FIX-1 test above calls
+  // `queueBroadcastSceneResync()` directly and never touches `onDocUpdate`). This
+  // pins the live wire routing of local doc updates:
+  //   FIX 2 (origin filter): a LOCAL_ORIGIN edit broadcasts via
+  //     `broadcastSceneUpdate(WS_SUBTYPES.UPDATE, …)`; an EPHEMERAL_ORIGIN write
+  //     (a `captureUpdate: NEVER` scene reset/load/prune) and a REMOTE_ORIGIN apply
+  //     do NOT broadcast — so local resets never push destructive deletes to peers
+  //     and a peer's edit is never echoed back.
+  //   FIX 1 (resync moved off the edit path): a local edit must NOT itself trigger
+  //     a full-scene resync — that now fires on an interval, not per update.
+  // Mutating an EXISTING element (not creating one) keeps each edit a single
+  // tracked transaction, so the LOCAL broadcast is exactly one call (a create would
+  // also fire the paired STRUCTURAL pass, which is intentionally still broadcast).
+  it("onDocUpdate broadcasts LOCAL edits as UPDATE, suppresses EPHEMERAL/REMOTE, and does not resync per-edit — FIX 1 + FIX 2", async () => {
+    await render(<ExcalidrawApp />);
+
+    const collab = window.collab;
+    const { portal } = collab;
+
+    // Seed an existing element BEFORE collab starts, so later mutations are pure
+    // single-transaction updates (no born-revealed STRUCTURAL pass).
+    const rect = API.createElement({ type: "rectangle", id: "A", width: 100 });
+    API.updateScene({
+      elements: syncInvalidIndices([rect]),
+      captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+    });
+
+    // Start collaboration so `doc.on("update", onDocUpdate)` gets attached. We do
+    // NOT await the returned promise: with socket.io-client mocked to a no-op, the
+    // INIT/fallback handshake never fires, so the promise never resolves — but the
+    // subscription is wired synchronously partway through. `detachDocBroadcast`
+    // becomes non-null exactly when `onDocUpdate` is attached, so we wait on that.
+    // (Mirrors the fire-and-forget `startCollaboration(null)` the test above uses.)
+    void collab.startCollaboration(null);
+    await waitFor(() => {
+      // eslint-disable-next-line dot-notation
+      expect(collab["detachDocBroadcast"]).not.toBeNull();
+    });
+    // Force the portal "open" so the `if (this.portal.isOpen())` broadcast guard
+    // inside `onDocUpdate` passes.
+    portal.socketInitialized = true;
+    portal.isOpen = vi.fn(() => true);
+
+    const updateSpy = vi
+      .spyOn(portal, "broadcastSceneUpdate")
+      .mockResolvedValue(undefined);
+    const resyncSpy = vi
+      .spyOn(portal, "broadcastSceneResync")
+      .mockResolvedValue(undefined);
+
+    // (1) LOCAL_ORIGIN edit (captureUpdate: IMMEDIATELY) → broadcasts as UPDATE.
+    act(() => {
+      API.updateScene({
+        elements: syncInvalidIndices([
+          newElementWith(h.elements[0], { width: 222 }),
+        ]),
+        captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+      });
+    });
+
+    expect(updateSpy).toHaveBeenCalled();
+    expect(
+      updateSpy.mock.calls.every((call) => call[0] === WS_SUBTYPES.UPDATE),
+    ).toBe(true);
+    // FIX 1: the local edit must NOT itself drive a full-scene resync.
+    expect(resyncSpy).not.toHaveBeenCalled();
+
+    // (2) EPHEMERAL_ORIGIN write (captureUpdate: NEVER) → NOT broadcast.
+    updateSpy.mockClear();
+    act(() => {
+      API.updateScene({
+        elements: syncInvalidIndices([
+          newElementWith(h.elements[0], { width: 333 }),
+        ]),
+        captureUpdate: CaptureUpdateAction.NEVER,
+      });
+    });
+
+    expect(updateSpy).not.toHaveBeenCalled();
+
+    // (3) REMOTE_ORIGIN apply (the genuine production path:
+    // `Y.applyUpdate(doc, …, REMOTE_ORIGIN)`) → NOT re-broadcast (no echo). Build a
+    // real remote delta from a mirror doc so this exercises the actual apply path.
+    updateSpy.mockClear();
+    const sceneDoc = collab.excalidrawAPI.getSceneDoc();
+    const mirror = new Y.Doc();
+    Y.applyUpdate(mirror, Y.encodeStateAsUpdate(sceneDoc));
+    const mirrorElements = mirror.getMap<Y.Map<unknown>>(ELEMENTS);
+    mirror.transact(() => {
+      const ymap = mirrorElements.get("A");
+      ymap?.set("width", 444);
+    });
+    const remoteUpdate = Y.encodeStateAsUpdate(
+      mirror,
+      Y.encodeStateVector(sceneDoc),
+    );
+    act(() => {
+      Y.applyUpdate(sceneDoc, remoteUpdate, REMOTE_ORIGIN);
+    });
+
+    expect(updateSpy).not.toHaveBeenCalled();
   });
 });

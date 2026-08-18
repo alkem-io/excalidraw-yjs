@@ -599,15 +599,33 @@ export const buildSnapshotDoc = (snapshot: WhiteboardSnapshot): Y.Doc => {
 };
 
 /**
- * Encode a whiteboard snapshot to Yjs **V2** bytes — the editor's native
- * persistence wire/storage form, matching the server's stored doc format.
+ * Encode a whiteboard snapshot to Yjs bytes in the chosen wire format. `v2`
+ * (default) is the persistence/storage form (matching the server's stored doc);
+ * `v1` is the incremental-update form the live collaboration channel speaks. The
+ * snapshot is built into a fresh, throwaway doc, so its state vector starts from
+ * empty — `encodeStateAsUpdate` over it yields a self-contained full-state update
+ * a peer can apply directly. This is the building block the wire seed uses to ship
+ * a FILTERED full state (only syncable elements + referenced files) rather than the
+ * raw scene doc (which still carries over-timeout tombstones and orphaned file
+ * binaries).
  */
-export const encodeSnapshot = (snapshot: WhiteboardSnapshot): Uint8Array => {
+export const encodeSnapshotAsUpdate = (
+  snapshot: WhiteboardSnapshot,
+  format: "v1" | "v2" = "v2",
+): Uint8Array => {
   const doc = buildSnapshotDoc(snapshot);
-  const bytes = Y.encodeStateAsUpdateV2(doc);
+  const bytes =
+    format === "v2" ? Y.encodeStateAsUpdateV2(doc) : Y.encodeStateAsUpdate(doc);
   doc.destroy();
   return bytes;
 };
+
+/**
+ * Encode a whiteboard snapshot to Yjs **V2** bytes — the editor's native
+ * persistence wire/storage form, matching the server's stored doc format.
+ */
+export const encodeSnapshot = (snapshot: WhiteboardSnapshot): Uint8Array =>
+  encodeSnapshotAsUpdate(snapshot, "v2");
 
 /**
  * Decode stored Yjs **V2** bytes back into a whiteboard snapshot
