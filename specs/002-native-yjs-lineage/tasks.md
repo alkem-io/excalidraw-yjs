@@ -15,7 +15,7 @@
 - [ ] T005 INV-REVEAL (reappear-after-structural-removal re-detected). **Expected RED** (ties at V+1).
 - [ ] T006 INV-BOUNDED (over-timeout tombstone + orphan binary reclaimed; non-monotone store; deleted-image binary not sent to joiner). **Expected RED** (dead expiry check).
 - [ ] T007 INV-SAVE-SKIP (isSaved ⇔ live==stored; no redundant save, no false-skip). **Expected RED.**
-- [ ] T008 INV-WRITE-INTENT (a write through a deliberately stale reference touches only the declared keys; a peer's concurrent edit to another property survives). Cover a simple key, a JSON-leaf (`points`) and a nested one (`boundElements`). **Expected RED** — whole-object flush.
+- [x] T008 INV-WRITE-INTENT (a write through a deliberately stale reference touches only the declared keys; a peer's concurrent edit to another property survives). Cover a simple key, a JSON-leaf (`points`) and a nested one (`boundElements`). **Expected RED** — whole-object flush.
 - [ ] T009 INV-HISTORY-LOCKSTEP + INV-VERSION-MONOTONIC (history depths in lockstep across local/remote interleavings; `meta.version` never regresses; a passive remote edit does not wipe the redo branch). **Expected RED.**
 - [ ] T010 INV-ORIGIN table-driven over {origin} × {write path}, incl. `captureUpdate: NEVER` introducing new ids, and `resetScene` through `CollabEngine`. **Expected RED.**
 - [ ] T011 INV-NO-BINARY-WIRE + INV-WIRE-ROBUST + INV-APPSTATE-UNDO. **Expected RED.**
@@ -23,10 +23,10 @@
 
 ## Phase 2 — Write-path intent keys (FR-009, FR-011) — the DEEPEST fix
 
-- [ ] T013 `writeChangedKeys(ymap, element, intentKeys)`; `Scene.mutateElement` passes `Object.keys(updates)`. Thread the per-key `didChange` set that bare `mutateElement` already computes rather than recomputing it. Green **INV-WRITE-INTENT**.
-- [ ] T014 Guard the `meta.version` write (mirror the adjacent `versionHighWater` guard). Green **INV-VERSION-MONOTONIC**.
+- [x] T013 `writeChangedKeys(ymap, element, intentKeys)`; `Scene.mutateElement` passes `Object.keys(updates)`. Thread the per-key `didChange` set that bare `mutateElement` already computes rather than recomputing it. Green **INV-WRITE-INTENT**.
+- [x] T014 Guard the `meta.version` write (mirror the adjacent `versionHighWater` guard). Green **INV-VERSION-MONOTONIC**.
 - [ ] T015 Declare intent sets in the side-effecting helpers (`redrawTextBoundingBox`, `updateBoundElements`, `bindOrUnbind`) — see plan R6.
-- [ ] T016 Delete the 32 `freshMap.get(id) ?? element` bandaids, ONE FILE AT A TIME with the full suite green between (plan R5). A test that only passes with a bandaid means FR-009 is incomplete — fix FR-009, do not restore the bandaid.
+- [ ] T016 **(1/32 done)** Delete the 32 `freshMap.get(id) ?? element` bandaids, ONE FILE AT A TIME with the full suite green between (plan R5). A test that only passes with a bandaid means FR-009 is incomplete — fix FR-009, do not restore the bandaid. - **Confirmed on the first site (R5 was right, this is not mechanical):** `actionProperties.changeFontSize`'s `editedTextIds` exception was not compensating for the clobber — it was hiding a MISSING doc write (`fontSize` lived only in a detached `newElementWith` copy and reached the doc solely via `redrawTextBoundingBox`'s whole-object flush). Deleting the bandaid alone would have silently dropped the font change. Each remaining site needs the same question asked: compensating for the clobber (delete it) or hiding a missing write (fix the write first)?
 
 ## Phase 3 — History lockstep (FR-010)
 
