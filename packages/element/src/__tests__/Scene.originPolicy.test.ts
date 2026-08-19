@@ -53,16 +53,81 @@ describe("Scene.onDocUpdate origin policy", () => {
     scene.destroy();
   });
 
-  it("still broadcasts a creation (STRUCTURAL prelude is not suppressed)", () => {
-    // Guard: STRUCTURAL must stay on the wire — a born-revealed create is a
-    // structural add plus its reveal, and suppressing it would lose the element.
-    const scene = new Scene();
+  it("a RECORDING creation is exactly ONE update and a complete live peer element", () => {
+    // The other half of the guarantee: suppressing a non-recording create must not
+    // also suppress a real one, and the two transactions must arrive as one.
+    const a = new Scene();
+    const b = new Scene();
     const updates: Uint8Array[] = [];
-    scene.onDocUpdate((u) => updates.push(u));
+    a.onDocUpdate((u) => {
+      updates.push(u);
+      b.applyRemoteUpdate(u);
+    });
 
-    scene.replaceAllElements([rect("new")]);
+    a.replaceAllElements([rect("shared")]);
 
-    expect(updates.length).toBeGreaterThan(0);
-    scene.destroy();
+    expect(updates).toHaveLength(1);
+    const onPeer = b.getElement("shared");
+    expect(onPeer).toBeTruthy();
+    expect(onPeer!.isDeleted).toBe(false); // revealed, not a leaked tombstone
+    expect(onPeer!.width).toBe(10); // and complete
+    a.destroy();
+    b.destroy();
+  });
+
+  it("a remote apply is never echoed back", () => {
+    const a = new Scene();
+    const b = new Scene();
+    b.replaceAllElements([rect("fromB")]);
+
+    const echoed: Uint8Array[] = [];
+    a.onDocUpdate((u) => echoed.push(u));
+    a.applyRemoteUpdate(b.encodeStateAsUpdate());
+
+    expect(a.getElement("fromB")).toBeTruthy(); // it applied
+    expect(echoed).toHaveLength(0); // ...and did not bounce back
+    a.destroy();
+    b.destroy();
+  });
+});
+
+describe("Scene.onDocUpdate — a NON-RECORDING creation must be fully invisible", () => {
+  /** Two Scenes wired through the public transport surface. */
+  const link = (a: Scene, b: Scene) => {
+    const detach = [
+      a.onDocUpdate((u) => b.applyRemoteUpdate(u)),
+      b.onDocUpdate((u) => a.applyRemoteUpdate(u)),
+    ];
+    return () => detach.forEach((d) => d());
+  };
+
+  it("leaks no content-bearing tombstone to a peer", () => {
+    // A creation is a STRUCTURAL prelude (born-tombstoned, CONTENT-BEARING) plus a
+    // reveal. Filtering by transaction origin alone broadcasts the structural half
+    // of a non-recording create and filters the reveal — so the peer receives a
+    // tombstone carrying the element's real properties and never learns it should
+    // become live. That is worse than either broadcasting or suppressing the whole
+    // mutation: it is permanent divergence plus a content leak.
+    const a = new Scene();
+    const b = new Scene();
+
+    const updates: Uint8Array[] = [];
+    const detachCount = a.onDocUpdate((u) => updates.push(u));
+    const unlink = link(a, b);
+
+    a.replaceAllElements([rect("secret")], { recordHistory: false });
+
+    // GUARD: the write really happened locally, or the assertions below are vacuous.
+    expect(a.getElement("secret")).toBeTruthy();
+    expect(a.getElement("secret")!.isDeleted).toBe(false);
+
+    expect(updates).toHaveLength(0);
+    // ZERO entries, not merely zero LIVE elements — a tombstone is an entry.
+    expect([...b.yElements.keys()]).toEqual([]);
+
+    detachCount();
+    unlink();
+    a.destroy();
+    b.destroy();
   });
 });

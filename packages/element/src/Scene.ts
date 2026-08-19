@@ -460,6 +460,20 @@ export class Scene {
   private logicalBoundaryDepth = 0;
 
   /**
+   * Whether the OPEN logical mutation may reach peers.
+   *
+   * Transport visibility is a property of the whole mutation, not of the
+   * individual transactions inside it. A creation is a `STRUCTURAL` prelude —
+   * born-tombstoned but CONTENT-BEARING — plus a reveal; filtering by
+   * per-transaction origin would broadcast the structural half of a non-recording
+   * create and drop the reveal, leaving the peer holding a tombstone carrying the
+   * element's real properties that never becomes live. That is worse than either
+   * publishing or suppressing the whole thing: permanent divergence plus a content
+   * leak.
+   */
+  private logicalPublish = true;
+
+  /**
    * The exact update bytes Yjs emitted while the boundary was open, merged and
    * dispatched once when it closes.
    *
@@ -954,10 +968,7 @@ export class Scene {
     };
 
     const prevSuppress = this.suppressTrigger;
-    this.logicalBoundaryDepth++;
-    if (this.logicalBoundaryDepth === 1) {
-      this.logicalBuffer = { v1: [], v2: [] };
-    }
+    this.openLogicalMutation(plan.recordHistory);
     this.suppressTrigger = true;
     try {
       // G1 — structural prelude, absent adds only, born-tombstoned.
@@ -993,12 +1004,7 @@ export class Scene {
       }, writeOrigin);
     } finally {
       this.suppressTrigger = prevSuppress;
-      this.logicalBoundaryDepth--;
-      if (this.logicalBoundaryDepth === 0) {
-        const buffered = this.logicalBuffer;
-        this.logicalBuffer = null;
-        this.publishBuffered(buffered);
-      }
+      this.closeLogicalMutation();
     }
 
     // G4 — one notification, and only if the doc actually changed.
@@ -1014,6 +1020,36 @@ export class Scene {
    * buffered (a true no-op) dispatches nothing. Runs from a `finally`, so a
    * post-prelude throw still publishes what Yjs committed.
    */
+  /**
+   * Open a logical mutation. Everything Yjs emits until the matching close is
+   * buffered, then published as ONE update — or discarded entirely if the
+   * mutation is not publishable.
+   */
+  private openLogicalMutation(publish: boolean): void {
+    this.logicalBoundaryDepth++;
+    if (this.logicalBoundaryDepth === 1) {
+      this.logicalBuffer = { v1: [], v2: [] };
+      this.logicalPublish = publish;
+    } else if (!publish) {
+      // a nested non-publishable mutation taints the whole outer one
+      this.logicalPublish = false;
+    }
+  }
+
+  private closeLogicalMutation(): void {
+    this.logicalBoundaryDepth--;
+    if (this.logicalBoundaryDepth > 0) {
+      return;
+    }
+    const buffered = this.logicalBuffer;
+    const publish = this.logicalPublish;
+    this.logicalBuffer = null;
+    this.logicalPublish = true;
+    if (publish) {
+      this.publishBuffered(buffered);
+    }
+  }
+
   private publishBuffered(
     buffered: { v1: Uint8Array[]; v2: Uint8Array[] } | null,
   ): void {
@@ -1121,107 +1157,118 @@ export class Scene {
       snapshots.set(element.id, { ...(element as unknown as ElementRecord) });
     }
 
-    this.observerFired = false;
+    // ONE logical mutation across BOTH passes. Transport visibility belongs to the
+    // whole mutation: a creation's STRUCTURAL prelude is content-bearing, so
+    // publishing it while filtering the reveal would leave a peer holding a
+    // tombstone that carries the element's real properties and never becomes live.
+    // `recordHistory: false` (scene load/init, reset, prune) therefore discards
+    // EVERY buffered part, structural included.
+    this.openLogicalMutation(options?.recordHistory !== false);
+    try {
+      this.observerFired = false;
 
-    // Pass 1 (STRUCTURAL_ORIGIN, untracked by history): born-as-tombstone adds for
-    // NEW ids only. Skipped when there are no new ids (the common edit case), so a
-    // pure update is a single tracked transaction.
-    //
-    // Why only adds here, not removals: an element dropped from `nextElements` is
-    // *structurally removed* in the tracked reveal pass below, so undo can RE-ADD
-    // it (restore). New-element adds, by contrast, must be untracked here so that
-    // undo-of-create reverses only the tracked "reveal" (→ tombstone) rather than
-    // hard-removing the entry — see {@link STRUCTURAL_ORIGIN}.
-    //
-    // Its `triggerUpdate()` is suppressed: this pass produces an intermediate
-    // state (new elements still tombstoned, pre-reveal), and a single
-    // `replaceAllElements` must fire exactly one update — the reveal pass below
-    // fires it once the elements hold their real values.
-    if (newIds.size) {
-      const prevSuppress = this.suppressTrigger;
-      this.suppressTrigger = true;
-      try {
-        this.doc.transact(() => {
-          for (const element of ordered) {
-            if (newIds.has(element.id)) {
-              this.materializeNewEntry(snapshots.get(element.id)!);
+      // Pass 1 (STRUCTURAL_ORIGIN, untracked by history): born-as-tombstone adds for
+      // NEW ids only. Skipped when there are no new ids (the common edit case), so a
+      // pure update is a single tracked transaction.
+      //
+      // Why only adds here, not removals: an element dropped from `nextElements` is
+      // *structurally removed* in the tracked reveal pass below, so undo can RE-ADD
+      // it (restore). New-element adds, by contrast, must be untracked here so that
+      // undo-of-create reverses only the tracked "reveal" (→ tombstone) rather than
+      // hard-removing the entry — see {@link STRUCTURAL_ORIGIN}.
+      //
+      // Its `triggerUpdate()` is suppressed: this pass produces an intermediate
+      // state (new elements still tombstoned, pre-reveal), and a single
+      // `replaceAllElements` must fire exactly one update — the reveal pass below
+      // fires it once the elements hold their real values.
+      if (newIds.size) {
+        const prevSuppress = this.suppressTrigger;
+        this.suppressTrigger = true;
+        try {
+          this.doc.transact(() => {
+            for (const element of ordered) {
+              if (newIds.has(element.id)) {
+                this.materializeNewEntry(snapshots.get(element.id)!);
+              }
             }
+          }, STRUCTURAL_ORIGIN);
+        } finally {
+          this.suppressTrigger = prevSuppress;
+        }
+      }
+
+      // Reset so `observerFired` reflects ONLY whether the (trigger-firing) reveal
+      // pass below changed the doc.
+      this.observerFired = false;
+
+      // Pass 2 (reveal/update, tracked unless recordHistory:false): structurally
+      // remove dropped ids (so the doc — and thus `getElementsIncludingDeleted()` —
+      // matches the passed set exactly, as the pre-rewrite scene array did; a
+      // recording removal is captured so undo RE-ADDS the entry, and the editor's
+      // Store still synthesizes an `isDeleted:true` delta for reconciliation/history
+      // by diffing the derived elements), write each element's real property values
+      // (the "reveal" for new ids flips `isDeleted` to its actual value; for existing
+      // ids this is the ordinary per-property diff), and refresh the local
+      // reconciliation metadata per id. The doc is the only state written; the
+      // derived snapshots are minted fresh from it by the recompute that follows.
+      this.doc.transact(() => {
+        for (const id of removedIds) {
+          this.yElements.delete(id);
+          this.meta.delete(id);
+        }
+        for (const element of ordered) {
+          // Write from the pre-write snapshot, not the live object — see the
+          // snapshot rationale above (keeps the persisted values independent of any
+          // caller aliasing of `ordered`).
+          const record = snapshots.get(element.id)!;
+          const ymap = this.yElements.get(element.id);
+          if (ymap) {
+            writeChangedKeys(ymap, record);
           }
-        }, STRUCTURAL_ORIGIN);
-      } finally {
-        this.suppressTrigger = prevSuppress;
-      }
-    }
-
-    // Reset so `observerFired` reflects ONLY whether the (trigger-firing) reveal
-    // pass below changed the doc.
-    this.observerFired = false;
-
-    // Pass 2 (reveal/update, tracked unless recordHistory:false): structurally
-    // remove dropped ids (so the doc — and thus `getElementsIncludingDeleted()` —
-    // matches the passed set exactly, as the pre-rewrite scene array did; a
-    // recording removal is captured so undo RE-ADDS the entry, and the editor's
-    // Store still synthesizes an `isDeleted:true` delta for reconciliation/history
-    // by diffing the derived elements), write each element's real property values
-    // (the "reveal" for new ids flips `isDeleted` to its actual value; for existing
-    // ids this is the ordinary per-property diff), and refresh the local
-    // reconciliation metadata per id. The doc is the only state written; the
-    // derived snapshots are minted fresh from it by the recompute that follows.
-    this.doc.transact(() => {
-      for (const id of removedIds) {
-        this.yElements.delete(id);
-        this.meta.delete(id);
-      }
-      for (const element of ordered) {
-        // Write from the pre-write snapshot, not the live object — see the
-        // snapshot rationale above (keeps the persisted values independent of any
-        // caller aliasing of `ordered`).
-        const record = snapshots.get(element.id)!;
-        const ymap = this.yElements.get(element.id);
-        if (ymap) {
-          writeChangedKeys(ymap, record);
+          // Capture the element's (locally maintained) reconciliation metadata +
+          // any own-Symbol props (e.g. ORIG_ID) — not stored in the doc, but the
+          // derived snapshot must expose them. Version/etc. come from the snapshot,
+          // so the meta matches exactly what we just persisted. Own-Symbols are read
+          // from the live `element`: they are non-enumerable (ORIG_ID) so a spread
+          // snapshot omits them, and the recompute re-stamps them onto the fresh
+          // snapshot, so the live object is the canonical carrier.
+          // KNOWN DEFECT (confirmed, not fixed here) — spec 002 FR-011, task T014b.
+          // `bumpMetaVersionsFor` (undo/redo, remote apply) can raise the local meta
+          // above the version a caller's array carries. A stale action result then
+          // changes a property while carrying a low version, this records it
+          // verbatim, and the editor Store — which detects a change only when
+          // `prev.version < next.version` — silently drops a real edit from the
+          // change set and the history delta.
+          //
+          // Not patched here on purpose. Both a blanket `max(record.version,
+          // prev + 1)` and a narrowed regression-only bump change version values
+          // that the Store, the history deltas and ~64 existing tests depend on
+          // (transform/contextmenu/history snapshots encode exact versions). The
+          // fix has to reconcile meta versioning with Store change-detection as a
+          // whole, which is its own piece of work. See the skipped
+          // INV-VERSION-MONOTONIC case in `Scene.native-yjs-write-intent.test.ts`.
+          this.meta.set(element.id, {
+            version: record.version as number,
+            versionNonce: record.versionNonce as number,
+            updated: record.updated as number,
+            symbols: captureOwnSymbols(element),
+            boundElementsEmpty: isEmptyBoundElements(record),
+          });
+          if ((record.version as number) > this.versionHighWater) {
+            this.versionHighWater = record.version as number;
+          }
         }
-        // Capture the element's (locally maintained) reconciliation metadata +
-        // any own-Symbol props (e.g. ORIG_ID) — not stored in the doc, but the
-        // derived snapshot must expose them. Version/etc. come from the snapshot,
-        // so the meta matches exactly what we just persisted. Own-Symbols are read
-        // from the live `element`: they are non-enumerable (ORIG_ID) so a spread
-        // snapshot omits them, and the recompute re-stamps them onto the fresh
-        // snapshot, so the live object is the canonical carrier.
-        // KNOWN DEFECT (confirmed, not fixed here) — spec 002 FR-011, task T014b.
-        // `bumpMetaVersionsFor` (undo/redo, remote apply) can raise the local meta
-        // above the version a caller's array carries. A stale action result then
-        // changes a property while carrying a low version, this records it
-        // verbatim, and the editor Store — which detects a change only when
-        // `prev.version < next.version` — silently drops a real edit from the
-        // change set and the history delta.
-        //
-        // Not patched here on purpose. Both a blanket `max(record.version,
-        // prev + 1)` and a narrowed regression-only bump change version values
-        // that the Store, the history deltas and ~64 existing tests depend on
-        // (transform/contextmenu/history snapshots encode exact versions). The
-        // fix has to reconcile meta versioning with Store change-detection as a
-        // whole, which is its own piece of work. See the skipped
-        // INV-VERSION-MONOTONIC case in `Scene.native-yjs-write-intent.test.ts`.
-        this.meta.set(element.id, {
-          version: record.version as number,
-          versionNonce: record.versionNonce as number,
-          updated: record.updated as number,
-          symbols: captureOwnSymbols(element),
-          boundElementsEmpty: isEmptyBoundElements(record),
-        });
-        if ((record.version as number) > this.versionHighWater) {
-          this.versionHighWater = record.version as number;
-        }
-      }
-    }, revealOrigin);
+      }, revealOrigin);
 
-    // Yjs fires the observer (→ recompute → triggerUpdate) iff a transaction
-    // changed the doc. For a true no-op (e.g. re-asserting identical elements) it
-    // does not, so recompute once here to keep the derived caches coherent and to
-    // preserve the historical side effect of always firing on replaceAllElements.
-    if (!this.observerFired) {
-      this.recomputeFromDoc();
+      // Yjs fires the observer (→ recompute → triggerUpdate) iff a transaction
+      // changed the doc. For a true no-op (e.g. re-asserting identical elements) it
+      // does not, so recompute once here to keep the derived caches coherent and to
+      // preserve the historical side effect of always firing on replaceAllElements.
+      if (!this.observerFired) {
+        this.recomputeFromDoc();
+      }
+    } finally {
+      this.closeLogicalMutation();
     }
   }
 
