@@ -979,9 +979,14 @@ export interface ExcalidrawImperativeAPI {
     typeof App
   >["getSceneElementsMapIncludingDeleted"];
   /**
-   * The scene's `Y.Doc` — the native-Yjs element store (native-Yjs core, M3).
-   * A collaboration provider attaches to this doc directly to exchange Yjs
-   * updates (no scene-array broadcast / JSON reconciliation). See `App.getSceneDoc`.
+   * The scene's `Y.Doc` — the native-Yjs element store.
+   *
+   * Read access for inspection and encoding. This is NOT a supported way to wire
+   * up collaboration: a bare `doc.on("update")` subscription does not implement
+   * the origin and broadcast policy the editor requires (a remote apply must not
+   * be re-broadcast; a structural prelude and its reveal are one logical
+   * mutation), so a provider attached this way will emit and re-emit writes the
+   * editor never intended to send. A supported attach boundary is pending.
    */
   getSceneDoc: InstanceType<typeof App>["getSceneDoc"];
   history: {

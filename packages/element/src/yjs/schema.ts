@@ -576,9 +576,9 @@ export const readAppState = (
 //
 // The persistence unit is the WHOLE `Y.Doc` — elements + files + appState in the
 // ONE doc — encoded as Yjs **V2** bytes (`encodeStateAsUpdateV2`). This is the
-// exact format the Alkemio server / collab-service stores (a base64 V2 snapshot
-// over `getMap("elements")` / `getMap("files")` / `getMap("appState")`), so a
-// doc the editor persists IS what the backend stores, and vice-versa. These two
+// canonical persistence format over `getMap("elements")` / `getMap("files")` /
+// `getMap("appState")`, so a doc the editor persists IS what a storage or
+// collaboration backend holds, and vice-versa. These two
 // helpers are the editor-side persistence LAYER: build a portable doc from a
 // scene's content and encode it, or decode stored bytes back into a doc the
 // `Scene` constructor adopts (`new Scene(null, { doc })`). They deliberately do

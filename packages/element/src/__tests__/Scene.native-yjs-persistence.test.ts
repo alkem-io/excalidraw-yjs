@@ -94,11 +94,13 @@ describe("native-yjs Scene persistence: the doc IS the persistence unit", () => 
     scene.setAppState({ viewBackgroundColor: "#abcdef", name: "My board" });
 
     // SAVE: encode the whole doc (elements + files + appState) to Yjs V2 bytes.
-    const bytes = scene.encodeSnapshot();
+    const bytes = scene.encodeStateAsUpdate("v2");
     expect(bytes.byteLength).toBeGreaterThan(0);
 
     // LOAD: decode the bytes into a FRESH, independent Scene (no shared doc).
-    const restored = Scene.fromSnapshot(bytes);
+    const restoredDoc = new Y.Doc();
+    Y.applyUpdateV2(restoredDoc, bytes);
+    const restored = new Scene(null, { doc: restoredDoc });
 
     // --- elements match (content, modulo locally-derived reconcile meta) ---
     const before = byId(scene.getElementsIncludingDeleted());
@@ -138,7 +140,7 @@ describe("native-yjs Scene persistence: the doc IS the persistence unit", () => 
     scene.setFiles({ f1: file("f1", "data:image/png;base64,BBBB") });
     scene.setAppState({ viewBackgroundColor: "#123456", name: "n" });
 
-    const bytes = scene.encodeSnapshot();
+    const bytes = scene.encodeStateAsUpdate("v2");
 
     // Decode into a bare Y.Doc (no Scene) and read the canonical root maps — this
     // is exactly how the Alkemio server / collab-service reads the stored bytes.
@@ -190,7 +192,11 @@ describe("native-yjs Scene persistence: the doc IS the persistence unit", () => 
     ]);
 
     // It also does not appear in the encoded snapshot.
-    const restored = Scene.fromSnapshot(scene.encodeSnapshot());
+    const restored = (() => {
+      const d = new Y.Doc();
+      Y.applyUpdateV2(d, scene.encodeStateAsUpdate("v2"));
+      return new Scene(null, { doc: d });
+    })();
     const restoredKeys = Object.keys(restored.getPersistedAppState()).sort();
     expect(restoredKeys).toEqual(["name", "viewBackgroundColor"]);
 
@@ -247,7 +253,11 @@ describe("native-yjs Scene persistence: the doc IS the persistence unit", () => 
 
   it("an empty scene round-trips to an empty scene (no elements / files / appState)", () => {
     const scene = new Scene();
-    const restored = Scene.fromSnapshot(scene.encodeSnapshot());
+    const restored = (() => {
+      const d = new Y.Doc();
+      Y.applyUpdateV2(d, scene.encodeStateAsUpdate("v2"));
+      return new Scene(null, { doc: d });
+    })();
 
     expect(restored.getElementsIncludingDeleted()).toEqual([]);
     expect(restored.getFiles()).toEqual({});

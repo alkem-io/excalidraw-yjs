@@ -17,8 +17,8 @@
  * continues to re-export it under the old name so it still builds until it is
  * deleted at M3.
  */
-export const LOCAL_ORIGIN: { readonly name: "alkemio-yjs-core" } = {
-  name: "alkemio-yjs-core",
+export const LOCAL_ORIGIN: { readonly name: "excalidraw-yjs-local" } = {
+  name: "excalidraw-yjs-local",
 };
 
 export type LocalOrigin = typeof LOCAL_ORIGIN;
@@ -44,9 +44,10 @@ export type LocalOrigin = typeof LOCAL_ORIGIN;
  * Thus every undoable element lifecycle change is an `isDeleted`/property toggle,
  * never a structural add/remove — exactly Excalidraw's model.
  */
-export const STRUCTURAL_ORIGIN: { readonly name: "alkemio-yjs-structural" } = {
-  name: "alkemio-yjs-structural",
-};
+export const STRUCTURAL_ORIGIN: { readonly name: "excalidraw-yjs-structural" } =
+  {
+    name: "excalidraw-yjs-structural",
+  };
 
 export type StructuralOrigin = typeof STRUCTURAL_ORIGIN;
 
@@ -66,8 +67,8 @@ export type StructuralOrigin = typeof STRUCTURAL_ORIGIN;
  * of the in-progress gesture and correctly merge into its single undo step, which
  * the durable pointer-up commit then seals.)
  */
-export const EPHEMERAL_ORIGIN: { readonly name: "alkemio-yjs-ephemeral" } = {
-  name: "alkemio-yjs-ephemeral",
+export const EPHEMERAL_ORIGIN: { readonly name: "excalidraw-yjs-ephemeral" } = {
+  name: "excalidraw-yjs-ephemeral",
 };
 
 export type EphemeralOrigin = typeof EPHEMERAL_ORIGIN;
@@ -97,8 +98,8 @@ export type EphemeralOrigin = typeof EPHEMERAL_ORIGIN;
  * non-stale derived objects (every recompute fully re-reads the committed doc),
  * so held element references stay valid across remote applies.
  */
-export const REMOTE_ORIGIN: { readonly name: "alkemio-yjs-remote" } = {
-  name: "alkemio-yjs-remote",
+export const REMOTE_ORIGIN: { readonly name: "excalidraw-yjs-remote" } = {
+  name: "excalidraw-yjs-remote",
 };
 
 export type RemoteOrigin = typeof REMOTE_ORIGIN;

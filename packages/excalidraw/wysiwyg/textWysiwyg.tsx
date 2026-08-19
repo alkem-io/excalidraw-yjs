@@ -539,8 +539,8 @@ export const textWysiwyg = ({
       // when copy/pasting excalidraw elements, only paste the text content.
       //
       // The custom excalidraw MIME types only survive within the same family of
-      // browsers (won't work e.g. between chrome and firefox). Alkemio: when they
-      // are stripped, serialized elements arrive as text/plain only — so we read
+      // browsers (won't work e.g. between chrome and firefox). When they are
+      // stripped, serialized elements arrive as text/plain only — so we read
       // text/plain synchronously here (same tick as preventDefault, as FF
       // requires) and treat text/plain carrying the excalidraw clipboard
       // signature as element content too. This restores the fork's content-based

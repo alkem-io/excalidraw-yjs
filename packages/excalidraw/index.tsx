@@ -329,15 +329,12 @@ export {
   restoreLibraryItems,
 } from "./data/restore";
 
-// Native-Yjs collaboration (native-Yjs core, M3): the unified provider attaches
-// to the scene's `Y.Doc` and exchanges Yjs updates on it. This replaces the old
-// scene-array broadcast + JSON `reconcileElements` merge (both deleted) — Yjs
-// converges per-property natively.
-export { CollabEngine } from "./collab/CollabEngine";
-export type {
-  CollabTransport,
-  CollabEngineOptions,
-} from "./collab/CollabEngine";
+// NOTE: there is deliberately no public collaboration export here. `CollabEngine`
+// was exported but was never attachable through `ExcalidrawImperativeAPI` — its
+// constructor requires the internal `Scene`, which is not public — and it had zero
+// callers. Its correct origin/broadcast policy also depends on unfinished work
+// (spec 002 FR-017), so shipping it would freeze an intermediate design. A single
+// coherent attach boundary will be introduced when that policy is settled.
 
 export {
   exportToCanvas,

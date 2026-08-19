@@ -66,7 +66,7 @@
     "which": "4.0.0"
   },
   "bugs": "https://github.com/excalidraw/excalidraw/issues",
-  "repository": "https://github.com/excalidraw/excalidraw",
+  "repository": "https://github.com/alkem-io/excalidraw-yjs",
   "scripts": {
     "gen:types": "rimraf types && tsc",
     "build:esm": "rimraf dist && node ../../scripts/buildUtils.js && pnpm run gen:types"

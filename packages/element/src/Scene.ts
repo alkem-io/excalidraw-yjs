@@ -364,9 +364,9 @@ export class Scene {
    *
    * Native-Yjs core (M4): files and the persistable appState subset are ALSO on
    * this doc ({@link yFiles} / {@link yAppState}), so `encodeStateAsUpdateV2(doc)`
-   * is a complete, portable whiteboard snapshot — the exact format the Alkemio
-   * server / collab-service stores (`getMap("elements")` + `getMap("files")` +
-   * `getMap("appState")`). Persistence is therefore native: create/load/save
+   * is a complete, portable whiteboard snapshot over `getMap("elements")` +
+   * `getMap("files")` + `getMap("appState")` — the format any persistence layer or
+   * collaboration server stores. Persistence is therefore native: create/load/save
    * encode/decode THIS doc, not element JSON. (Local-only appState — selection /
    * zoom / scroll / active tool — is NEVER on the doc.)
    */
@@ -1600,28 +1600,6 @@ export class Scene {
   // service stores (a base64 V2 snapshot over `getMap("elements"/"files"/
   // "appState")`), so editor↔backend persistence is one format end to end.
   // ---------------------------------------------------------------------------
-
-  /**
-   * Encode the WHOLE scene doc (elements + files + persistable appState) to Yjs
-   * **V2** bytes — the native persistence/storage form. This is what a save
-   * writes; the server stores these bytes verbatim (base64). Equivalent to
-   * `encodeStateAsUpdate("v2")`, named for the persistence intent.
-   */
-  encodeSnapshot(): Uint8Array {
-    return Y.encodeStateAsUpdateV2(this.doc);
-  }
-
-  /**
-   * Build a `Scene` by decoding stored Yjs **V2** snapshot bytes into a fresh
-   * doc and adopting it — the load path. The decoded doc is the source of truth;
-   * elements/files/appState all come straight from it. The inverse of
-   * {@link encodeSnapshot} at the Scene boundary.
-   */
-  static fromSnapshot(bytes: Uint8Array): Scene {
-    const doc = new Y.Doc();
-    Y.applyUpdateV2(doc, bytes);
-    return new Scene(null, { doc });
-  }
 
   // ---------------------------------------------------------------------------
   // native element history (native-Yjs core, M2) — thin pass-throughs over the
