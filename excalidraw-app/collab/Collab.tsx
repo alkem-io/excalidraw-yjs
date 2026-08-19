@@ -22,25 +22,12 @@ import {
   isImageElement,
   isInitializedImageElement,
 } from "@excalidraw-yjs/element";
-// Native-Yjs core (M3): the scene's `Y.Doc` IS the wire. We drive it directly
-// via `yjs` (apply remote update bytes / encode full state) under
-// `REMOTE_ORIGIN`, exactly as the editor's Scene does internally — no
-// `reconcileElements`, no scene-version gating.
-import { REMOTE_ORIGIN } from "@excalidraw-yjs/element";
-// Native-Yjs core (M3): a local EPHEMERAL write (scene load, file-prune, a
-// non-capturing/reset `updateScene`) mutates the doc and fires `doc.on("update")`
-// too, but it must NEVER go on the wire — broadcasting it would push destructive
-// deletes / whole-scene replacements to peers. We filter it out in `onDocUpdate`
-// alongside `REMOTE_ORIGIN`. (We deliberately do NOT filter `STRUCTURAL_ORIGIN`;
-// see the comment in `onDocUpdate`.)
-import { EPHEMERAL_ORIGIN } from "@excalidraw-yjs/element";
 import { AbortError } from "@excalidraw-yjs/excalidraw/errors";
 import { t } from "@excalidraw-yjs/excalidraw/i18n";
 import { withBatchedUpdates } from "@excalidraw-yjs/excalidraw/reactUtils";
 
 import throttle from "lodash.throttle";
 import { PureComponent } from "react";
-import * as Y from "yjs";
 
 import type { ImportedDataState } from "@excalidraw-yjs/excalidraw/data/types";
 import type {
@@ -648,53 +635,21 @@ class Collab extends PureComponent<CollabProps, CollabState> {
       this.saveCollabRoomToFirebase(getSyncableElements(elements));
     }
 
-    // Native-Yjs core (M3): the scene's `Y.Doc` IS the wire. Subscribe to local
-    // doc updates and broadcast their bytes to the room. A local edit already
-    // mutated the doc (under a local origin) and fires `doc.on("update")`, so the
-    // broadcast happens here automatically — onChange/`syncElements` no longer
-    // broadcasts the scene. Remote applies (under `REMOTE_ORIGIN`) are filtered
-    // out so we never echo a peer's update back out.
-    const doc = this.excalidrawAPI.getSceneDoc();
-    const onDocUpdate = (update: Uint8Array, origin: unknown) => {
-      // Only updates that should travel the wire are broadcast — i.e. everything
-      // EXCEPT a remote apply and a local ephemeral write:
-      //  - REMOTE_ORIGIN: a peer's edit we just applied; re-broadcasting it would
-      //    echo it straight back (and bump traffic with no new information).
-      //  - EPHEMERAL_ORIGIN: a local NON-undoable write — scene load/init, the
-      //    file-prune, a non-capturing/reset `updateScene` (CaptureUpdateAction.
-      //    NEVER). These are local bookkeeping, NOT user intent to share: a load
-      //    re-asserts state peers already hold, and a reset/prune would push
-      //    destructive deletes/whole-scene replacements to everyone in the room.
-      //
-      // What still passes (correctly):
-      //  - LOCAL_ORIGIN: ordinary undoable local edits — the user's real intent.
-      //  - UndoManager-origin (undo/redo): origin is the UndoManager, which is
-      //    none of the four sentinels, so it broadcasts — a peer must see an
-      //    undo/redo as a normal forward change.
-      //  - STRUCTURAL_ORIGIN: deliberately NOT filtered. A born-revealed create
-      //    is two SEPARATE transactions — a STRUCTURAL pass that materializes the
-      //    element's per-property `Y.Map` into `yElements` (born as an
-      //    `isDeleted:true` tombstone), then a LOCAL_ORIGIN reveal pass that writes
-      //    real props onto that same map and flips `isDeleted`. In Yjs the LOCAL
-      //    reveal update encodes only VALUE writes onto a map whose PARENT-creating
-      //    struct lives in the STRUCTURAL update; a fresh peer that received only
-      //    the reveal would queue those writes as pending (missing parent) and the
-      //    element would not integrate until the next full resync (up to
-      //    SYNC_FULL_SCENE_INTERVAL_MS later) — a transient invisible-element bug.
-      //    Broadcasting STRUCTURAL keeps the map-creation struct on the wire in the
-      //    same logical create op as the reveal, so the element integrates cleanly
-      //    and immediately. The minor cost (a tombstone-add update precedes the
-      //    reveal) is two small incremental updates Yjs merges idempotently — far
-      //    cheaper than a 20s invisibility window or a full-scene resend.
-      if (origin === REMOTE_ORIGIN || origin === EPHEMERAL_ORIGIN) {
-        return;
-      }
-      if (this.portal.isOpen()) {
-        void this.portal.broadcastSceneUpdate(WS_SUBTYPES.UPDATE, update);
-      }
-    };
-    doc.on("update", onDocUpdate);
-    this.detachDocBroadcast = () => doc.off("update", onDocUpdate);
+    // Subscribe to local logical updates and broadcast them to the room.
+    //
+    // The origin policy lives in ONE place — the editor's transport boundary — so
+    // there is deliberately no filtering here. `onLocalSceneUpdate` already
+    // withholds a remote apply (no echo) and any non-undoable local bookkeeping
+    // (scene load/init, reset, prune), and delivers a create's structural pass and
+    // reveal as a single update rather than a leaked tombstone. Re-implementing
+    // any of that here would be a second copy of the policy, free to drift.
+    this.detachDocBroadcast = this.excalidrawAPI.onLocalSceneUpdate(
+      (update: Uint8Array) => {
+        if (this.portal.isOpen()) {
+          void this.portal.broadcastSceneUpdate(WS_SUBTYPES.UPDATE, update);
+        }
+      },
+    );
 
     // Periodic full-scene resync safety net (native-Yjs core, M3). It re-broadcasts
     // the FULL doc state as a WS_SUBTYPES.UPDATE so a peer that dropped an
@@ -965,7 +920,7 @@ class Collab extends PureComponent<CollabProps, CollabState> {
    * (no echo). Then refresh any image files referenced by the merged scene.
    */
   private applyRemoteSceneUpdate = (update: Uint8Array) => {
-    Y.applyUpdate(this.excalidrawAPI.getSceneDoc(), update, REMOTE_ORIGIN);
+    this.excalidrawAPI.applyRemoteSceneUpdate(update);
 
     this.loadImageFiles();
   };

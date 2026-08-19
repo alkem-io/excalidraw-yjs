@@ -91,6 +91,40 @@ describe("Scene.onDocUpdate origin policy", () => {
   });
 });
 
+/**
+ * appState (background colour, scene name) rides the SAME doc as the elements, so
+ * the origin policy must cover it identically. This matters because `Scene` keeps
+ * an observer on `yAppState` to push remote changes into the editor — an observer
+ * that writes back would turn one peer's background change into an endless
+ * round-trip between the two clients.
+ */
+describe("Scene.onDocUpdate origin policy — appState rides the same doc", () => {
+  it("broadcasts a LOCAL appState change but never echoes a remote one", () => {
+    const a = new Scene();
+    const b = new Scene();
+
+    const updates: Uint8Array[] = [];
+    a.onDocUpdate((u) => updates.push(u));
+
+    // A local appState change is real user intent — it must reach the wire.
+    a.setAppState({ name: "Local A" });
+    const afterLocal = updates.length;
+    expect(afterLocal).toBeGreaterThan(0);
+
+    // A peer's appState change is applied under the remote origin. Use a DIFFERENT
+    // key so this asserts echo behaviour rather than last-writer-wins on one key.
+    b.setAppState({ viewBackgroundColor: "#abcdef" });
+    a.applyRemoteUpdate(b.encodeStateAsUpdate());
+
+    expect(a.getPersistedAppState().viewBackgroundColor).toBe("#abcdef"); // applied
+    expect(a.getPersistedAppState().name).toBe("Local A"); // local key intact
+    expect(updates).toHaveLength(afterLocal); // ...and NOT echoed back out
+
+    a.destroy();
+    b.destroy();
+  });
+});
+
 describe("Scene.onDocUpdate — a NON-RECORDING creation must be fully invisible", () => {
   /** Two Scenes wired through the public transport surface. */
   const link = (a: Scene, b: Scene) => {

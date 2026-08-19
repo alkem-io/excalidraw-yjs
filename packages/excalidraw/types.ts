@@ -992,7 +992,13 @@ export interface ExcalidrawImperativeAPI {
    * current consumer doing this is the bundled collaboration client
    * (`excalidraw-app/collab/Collab.tsx`), which filters origins explicitly.
    */
-  getSceneDoc: InstanceType<typeof App>["getSceneDoc"];
+  /**
+   * Collaboration transport, carrying the editor's origin policy. Use these rather
+   * than subscribing to a raw `Y.Doc`.
+   */
+  onLocalSceneUpdate: InstanceType<typeof App>["onLocalSceneUpdate"];
+  applyRemoteSceneUpdate: InstanceType<typeof App>["applyRemoteSceneUpdate"];
+  encodeSceneAsUpdate: InstanceType<typeof App>["encodeSceneAsUpdate"];
   history: {
     clear: InstanceType<typeof App>["resetHistory"];
   };

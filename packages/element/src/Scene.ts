@@ -1541,8 +1541,16 @@ export class Scene {
       //
       // STRUCTURAL_ORIGIN is deliberately NOT suppressed: a born-revealed create
       // is a structural add plus its reveal, and dropping the structural half
-      // would leave peers without the element. The logical-mutation boundary
-      // below is what makes the pair arrive as one message.
+      // would leave peers without the element. It is NOT enough that the reveal
+      // carries every property — in Yjs the reveal encodes only VALUE writes onto
+      // a map whose parent-creating struct lives in the structural update, so a
+      // peer receiving the reveal alone queues them as pending on a missing
+      // parent and shows nothing until the next full resync. The logical-mutation
+      // boundary below is what makes the pair arrive as one message.
+      //
+      // Undo/redo is likewise NOT suppressed: its origin is the UndoManager,
+      // which is none of the sentinels, so it broadcasts — a peer must see an
+      // undo as an ordinary forward change.
       if (origin === REMOTE_ORIGIN || origin === EPHEMERAL_ORIGIN) {
         return;
       }

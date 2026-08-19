@@ -771,7 +771,9 @@ class App extends React.Component<AppProps, AppState> {
       getSceneElementsIncludingDeleted: this.getSceneElementsIncludingDeleted,
       getSceneElementsMapIncludingDeleted:
         this.getSceneElementsMapIncludingDeleted,
-      getSceneDoc: this.getSceneDoc,
+      onLocalSceneUpdate: this.onLocalSceneUpdate,
+      applyRemoteSceneUpdate: this.applyRemoteSceneUpdate,
+      encodeSceneAsUpdate: this.encodeSceneAsUpdate,
       history: {
         clear: this.resetHistory,
       },
@@ -2492,9 +2494,31 @@ class App extends React.Component<AppProps, AppState> {
    * no JSON reconciliation — Yjs converges per-property natively. Exposed so the
    * app's collab layer can attach a transport to the one source of truth.
    */
-  public getSceneDoc = () => {
-    return this.scene.doc;
-  };
+  /**
+   * Subscribe to LOCAL logical updates, for a collaboration transport.
+   *
+   * The supported way to attach a provider. It carries the editor's ONE origin
+   * policy: a remote apply is never echoed, non-undoable local bookkeeping (scene
+   * load/init, reset, prune) is never broadcast — those would push destructive
+   * whole-scene deletes to peers — and a create's structural pass and its reveal
+   * arrive as a single message rather than as a leaked content-bearing tombstone.
+   *
+   * Subscribing to the raw `Y.Doc` bypasses all of it.
+   */
+  public onLocalSceneUpdate = (
+    cb: (update: Uint8Array) => void,
+    format: "v1" | "v2" = "v1",
+  ) => this.scene.onDocUpdate(cb, format);
+
+  /** Integrate a peer's update: neither re-broadcast nor captured into local undo. */
+  public applyRemoteSceneUpdate = (
+    update: Uint8Array,
+    format: "v1" | "v2" = "v1",
+  ) => this.scene.applyRemoteUpdate(update, format);
+
+  /** Encode current scene state, for an initial sync or a save. */
+  public encodeSceneAsUpdate = (format: "v1" | "v2" = "v1") =>
+    this.scene.encodeStateAsUpdate(format);
 
   public getSceneElements = () => {
     return this.scene.getNonDeletedElements();

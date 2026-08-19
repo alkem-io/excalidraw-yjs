@@ -19,7 +19,7 @@ import { StoreIncrement } from "@excalidraw-yjs/element";
 
 import * as Y from "yjs";
 
-import { ELEMENTS, REMOTE_ORIGIN } from "@excalidraw-yjs/element";
+import { ELEMENTS } from "@excalidraw-yjs/element";
 
 import type {
   DurableIncrement,
@@ -387,24 +387,25 @@ describe("collaboration", () => {
 
     expect(updateSpy).not.toHaveBeenCalled();
 
-    // (3) REMOTE_ORIGIN apply (the genuine production path:
-    // `Y.applyUpdate(doc, …, REMOTE_ORIGIN)`) → NOT re-broadcast (no echo). Build a
-    // real remote delta from a mirror doc so this exercises the actual apply path.
+    // (3) a remote apply → NOT re-broadcast (no echo). Build a real remote delta
+    // from a mirror doc so this exercises the actual integrate-and-notify path
+    // rather than asserting on an origin constant.
     updateSpy.mockClear();
-    const sceneDoc = collab.excalidrawAPI.getSceneDoc();
+    // Seed the mirror and apply its delta through the PUBLIC transport boundary
+    // (`encodeSceneAsUpdate` / `applyRemoteSceneUpdate`) — the same two calls a
+    // real provider makes. Nothing here touches the scene's `Y.Doc` directly, so
+    // this exercises the production path rather than a test-only shortcut.
     const mirror = new Y.Doc();
-    Y.applyUpdate(mirror, Y.encodeStateAsUpdate(sceneDoc));
+    Y.applyUpdate(mirror, collab.excalidrawAPI.encodeSceneAsUpdate());
     const mirrorElements = mirror.getMap<Y.Map<unknown>>(ELEMENTS);
     mirror.transact(() => {
       const ymap = mirrorElements.get("A");
       ymap?.set("width", 444);
     });
-    const remoteUpdate = Y.encodeStateAsUpdate(
-      mirror,
-      Y.encodeStateVector(sceneDoc),
-    );
     act(() => {
-      Y.applyUpdate(sceneDoc, remoteUpdate, REMOTE_ORIGIN);
+      collab.excalidrawAPI.applyRemoteSceneUpdate(
+        Y.encodeStateAsUpdate(mirror),
+      );
     });
 
     expect(updateSpy).not.toHaveBeenCalled();
