@@ -1,6 +1,7 @@
 import React from "react";
 
 import { isPromiseLike } from "@excalidraw-yjs/common";
+import { captureElementBase } from "@excalidraw-yjs/element";
 
 import type {
   ExcalidrawElement,
@@ -52,7 +53,10 @@ const trackAction = (
 export class ActionManager {
   actions = {} as Record<ActionName, Action>;
 
-  updater: (actionResult: ActionResult | Promise<ActionResult>) => void;
+  updater: (
+    actionResult: ActionResult | Promise<ActionResult>,
+    invocationBase?: readonly OrderedExcalidrawElement[],
+  ) => void;
 
   getAppState: () => Readonly<AppState>;
   getElementsIncludingDeleted: () => readonly OrderedExcalidrawElement[];
@@ -64,13 +68,18 @@ export class ActionManager {
     getElementsIncludingDeleted: () => readonly OrderedExcalidrawElement[],
     app: AppClassProperties,
   ) {
-    this.updater = (actionResult) => {
+    this.updater = (actionResult, invocationBase) => {
+      // FR-016/T016a: the invocation snapshot must survive the await. `ActionFn`
+      // may be async, so by the time the result resolves the scene can have moved
+      // on (a peer's update, a side-effect helper's own write). Carrying the base
+      // through the promise is what lets the result later be applied as intent
+      // against the CURRENT doc instead of overwriting it.
       if (isPromiseLike(actionResult)) {
         actionResult.then((actionResult) => {
-          return updater(actionResult);
+          return updater(actionResult, invocationBase);
         });
       } else {
-        return updater(actionResult);
+        return updater(actionResult, invocationBase);
       }
     };
     this.getAppState = getAppState;
@@ -125,7 +134,10 @@ export class ActionManager {
 
     event.preventDefault();
     event.stopPropagation();
-    this.updater(data[0].perform(elements, appState, value, this.app));
+    this.updater(
+      data[0].perform(elements, appState, value, this.app),
+      captureElementBase(elements),
+    );
     return true;
   }
 
@@ -139,7 +151,10 @@ export class ActionManager {
 
     trackAction(action, source, appState, elements, this.app, value);
 
-    this.updater(action.perform(elements, appState, value, this.app));
+    this.updater(
+      action.perform(elements, appState, value, this.app),
+      captureElementBase(elements),
+    );
   }
 
   /**
@@ -163,13 +178,15 @@ export class ActionManager {
       const updateData = (formState?: any) => {
         trackAction(action, "ui", appState, elements, this.app, formState);
 
+        const invocationElements = this.getElementsIncludingDeleted();
         this.updater(
           action.perform(
-            this.getElementsIncludingDeleted(),
+            invocationElements,
             this.getAppState(),
             formState,
             this.app,
           ),
+          captureElementBase(invocationElements),
         );
       };
 

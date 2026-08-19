@@ -1,5 +1,9 @@
 import { newElement } from "../../newElement";
-import { computeElementIntent, diffElementKeys } from "../intent";
+import {
+  captureElementBase,
+  computeElementIntent,
+  diffElementKeys,
+} from "../intent";
 import { deepEqual } from "../schema";
 
 import type { ElementRecord } from "../schema";
@@ -115,5 +119,55 @@ describe("presence-aware intent diff (FR-016 / T016b)", () => {
     expect(intent.added.map((e) => e.id)).toEqual(["c"]);
     expect(intent.deleted).toEqual(["b"]);
     expect(intent.changed.size).toBe(0);
+  });
+});
+
+describe("captureElementBase — the invocation snapshot (FR-016 / T016a)", () => {
+  it("does not alias NESTED persisted fields", () => {
+    // The failure a top-level spread produces: the nested array is shared, so a
+    // later in-place mutation changes the "before" image too and the key diffs
+    // as UNCHANGED — deriving no intent for a real change.
+    const live: ElementRecord = {
+      id: "a",
+      groupIds: ["g1"],
+      boundElements: [{ id: "t1", type: "text" }],
+      customData: { nested: { deep: 1 } },
+    };
+    const [base] = captureElementBase([live]);
+
+    (live.groupIds as string[]).push("g2");
+    (live.boundElements as { id: string }[])[0].id = "CHANGED";
+    ((live.customData as any).nested as any).deep = 99;
+
+    expect(base.groupIds).toEqual(["g1"]);
+    expect((base.boundElements as { id: string }[])[0].id).toBe("t1");
+    expect(((base.customData as any).nested as any).deep).toBe(1);
+
+    // ...and the diff therefore SEES the change, which is the point.
+    expect(diffElementKeys(base, live).has("groupIds")).toBe(true);
+    expect(diffElementKeys(base, live).has("boundElements")).toBe(true);
+    expect(diffElementKeys(base, live).has("customData")).toBe(true);
+  });
+
+  it("NON-VACUITY: a top-level spread WOULD alias and miss those changes", () => {
+    const live: ElementRecord = { id: "a", groupIds: ["g1"] };
+    const shallow = { ...live } as ElementRecord;
+    (live.groupIds as string[]).push("g2");
+    // The shallow copy tracked the mutation, so the diff sees nothing.
+    expect(shallow.groupIds).toEqual(["g1", "g2"]);
+    expect([...diffElementKeys(shallow, live)]).toEqual([]);
+  });
+
+  it("preserves own Symbol properties that a spread and structuredClone drop", () => {
+    const ORIG_ID = Symbol("ORIG_ID");
+    const live: ElementRecord = { id: "a" };
+    Object.defineProperty(live, ORIG_ID, {
+      value: "original",
+      enumerable: false,
+    });
+
+    const [base] = captureElementBase([live]);
+    expect((base as any)[ORIG_ID]).toBe("original");
+    expect({ ...live }[ORIG_ID as any]).toBeUndefined(); // a spread loses it
   });
 });

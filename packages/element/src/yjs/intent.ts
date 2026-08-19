@@ -123,3 +123,50 @@ export const computeElementIntent = (
 
   return { added, deleted, changed };
 };
+
+/**
+ * The stable "before" image an action is diffed against (spec 002, FR-016 /
+ * T016a).
+ *
+ * A bare reference to the scene array is NOT a snapshot. `Scene.mutateElement`
+ * mutates the caller's scratch object in place before the doc re-derives, so a
+ * held reference tracks the live element and would diff as unchanged. A
+ * top-level spread is not enough either: it leaves nested persisted fields
+ * (`points`, `groupIds`, `boundElements`, `roundness`, `scale`, `crop`,
+ * `customData`) aliased to the same objects, which then mutate underneath the
+ * base and again diff as unchanged — silently yielding "no intent" for a real
+ * change.
+ *
+ * So every own enumerable value is deep-copied. Own **Symbol** properties (e.g.
+ * `ORIG_ID`) are re-attached by descriptor rather than copied by value:
+ * `structuredClone` drops them entirely, and they are non-enumerable so a spread
+ * misses them, yet the reconciliation path depends on them.
+ */
+const deepCopyValue = (value: unknown): unknown => {
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map(deepCopyValue);
+  }
+  const src = value as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(src)) {
+    out[key] = deepCopyValue(src[key]);
+  }
+  return out;
+};
+
+export const captureElementBase = <T extends object>(
+  elements: readonly T[],
+): readonly T[] =>
+  elements.map((element) => {
+    const copy = deepCopyValue(element) as T;
+    for (const sym of Object.getOwnPropertySymbols(element)) {
+      const desc = Object.getOwnPropertyDescriptor(element, sym);
+      if (desc) {
+        Object.defineProperty(copy, sym, desc);
+      }
+    }
+    return copy;
+  });

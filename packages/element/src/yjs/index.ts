@@ -6,5 +6,6 @@
  * per-property element↔`Y.Map` schema and the transaction-origin sentinel that
  * the doc write paths share.
  */
+export * from "./intent";
 export * from "./origin";
 export * from "./schema";
