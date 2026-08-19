@@ -376,35 +376,6 @@ const getInvalidIndicesGroups = (elements: readonly ExcalidrawElement[]) => {
   return indicesGroups;
 };
 
-/**
- * FORMAT-only validity: the index is present and parses as a fractional index.
- *
- * Deliberately neighbour-INDEPENDENT (spec 002 / T016j). Relational validity is
- * what produces ties, and a tie is classified at the CALLER boundary, never
- * globally repaired or rejected: generic repair would write an index nobody
- * declared, and generic rejection would refuse a legitimate concurrent
- * same-gap insert, for which id tie-break IS the convergence rule.
- *
- * NOT claimed here: that a tied action result is fine as-is. Today
- * `replaceAllElements` runs `syncInvalidIndices` before persistence, so a tie is
- * canonicalized and the accept-as-is behaviour has never been observed —
- * deterministic convergence is not the same as preserving the action's intended
- * array order. See T016j.
- */
-export const isWellFormedIndex = (
-  index: ExcalidrawElement["index"] | undefined,
-): boolean => {
-  if (!index) {
-    return false;
-  }
-  try {
-    validateOrderKey(index);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
 const isValidFractionalIndex = (
   index: ExcalidrawElement["index"] | undefined,
   predecessor: ExcalidrawElement["index"] | undefined,

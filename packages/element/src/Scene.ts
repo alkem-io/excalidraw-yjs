@@ -1,6 +1,8 @@
 import throttle from "lodash.throttle";
 import * as Y from "yjs";
 
+import { validateOrderKey } from "@excalidraw-yjs/fractional-indexing";
+
 import {
   randomInteger,
   arrayToMap,
@@ -16,7 +18,6 @@ import { getElementsInGroup } from "@excalidraw-yjs/element";
 
 import {
   syncInvalidIndices,
-  isWellFormedIndex,
   syncMovedIndices,
   validateFractionalIndices,
   orderByFractionalIndex,
@@ -68,6 +69,33 @@ import {
 } from "./yjs";
 
 import type { AppState } from "../../excalidraw/types";
+
+/**
+ * FORMAT-only index validity for the planner's scoped gate (spec 002 / T016j):
+ * present, and parses as a fractional index.
+ *
+ * Deliberately NOT neighbour-relative — relational position is the caller's
+ * business, and a relational tie is classified there rather than repaired or
+ * rejected here.
+ *
+ * Module-private on purpose. An earlier cut exported this from
+ * `fractionalIndex.ts`, which the package and headless entrypoints re-export,
+ * turning one private planner check into public library API. The published
+ * surface does not grow for an internal gate.
+ */
+const isWellFormedIndex = (
+  index: ExcalidrawElement["index"] | undefined,
+): boolean => {
+  if (!index) {
+    return false;
+  }
+  try {
+    validateOrderKey(index);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 type ElementPlan = {
   readonly add: readonly { record: ElementRecord; keys: ReadonlySet<string> }[];
