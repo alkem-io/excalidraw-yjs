@@ -57,6 +57,7 @@
     "build:esm": "rimraf dist && node ../../scripts/buildBase.js && pnpm run gen:types"
   },
   "dependencies": {
+    "@excalidraw-yjs/math": "workspace:*",
     "tinycolor2": "1.6.0"
   },
   "devDependencies": {

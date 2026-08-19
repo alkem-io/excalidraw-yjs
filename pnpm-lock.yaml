@@ -209,6 +209,9 @@ importers:
 
   packages/common:
     dependencies:
+      '@excalidraw-yjs/math':
+        specifier: workspace:*
+        version: link:../math
       tinycolor2:
         specifier: 1.6.0
         version: 1.6.0

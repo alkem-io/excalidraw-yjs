@@ -7,7 +7,15 @@ const getConfig = (outdir) => ({
   outdir,
   bundle: true,
   format: "esm",
-  entryPoints: ["src/index.ts"],
+  // `src/headless.ts` is a SECOND entry so `@excalidraw-yjs/element/headless`
+  // resolves to its own bundle rather than the full barrel. Without it the
+  // exports map's `./*` wildcard would send the subpath back to `index.js`,
+  // loading the browser-only modules the entry exists to exclude. Packages
+  // without that file are unaffected — esbuild skips a missing entry only if we
+  // filter it, so the list is built from what exists on disk.
+  entryPoints: ["src/index.ts", "src/headless.ts"].filter((e) =>
+    require("fs").existsSync(path.resolve(process.cwd(), e)),
+  ),
   entryNames: "[name]",
   assetNames: "[dir]/[name]",
   alias: {
