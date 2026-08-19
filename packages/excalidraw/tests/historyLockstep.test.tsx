@@ -1,28 +1,25 @@
 import * as Y from "yjs";
 
-import { Scene } from "@excalidraw-yjs/element";
+import { CaptureUpdateAction, Scene } from "@excalidraw-yjs/element";
 
 import { Excalidraw } from "../index";
 
 import { API } from "./helpers/api";
-import { Pointer } from "./helpers/ui";
-import { render } from "./test-utils";
+import { act, render } from "./test-utils";
 
 const { h } = window;
-const mouse = new Pointer("mouse");
 
 /**
  * INV-HISTORY-LOCKSTEP (spec 002, FR-010 / US9).
  *
- * Element history is the doc's `Y.UndoManager`, which tracks only `LOCAL_ORIGIN`.
- * The editor's `History` stack carries the paired appState delta plus a
- * `hasElementChange` flag. The two must stay in lockstep: a REMOTE apply is not
- * this user's action and must contribute NOTHING to either.
+ * A peer's change is not this user's action, so it must never become something
+ * this user can undo.
  *
- * The remote-apply path lost `captureUpdate: CaptureUpdateAction.NEVER` in the
- * M3 cutover and nothing replaced it, so a peer's change leaks into the next
- * capturing local increment. The stacks then disagree, and one Ctrl+Z pops the
- * StackItem belonging to an EARLIER action — tombstoning the user's own work.
+ * Stated behaviourally rather than as stack depths. `History` and the
+ * `UndoManager` legitimately hold different numbers of entries — an
+ * appState-only step creates a `History` entry with `hasElementChange: false`
+ * and no `UndoManager` item at all — so equal depths is not the contract and
+ * asserting it would fail for a correct editor.
  */
 
 /** Depths of both stacks, which must move together. */
@@ -46,41 +43,50 @@ const applyRemoteEdit = (id: string, x: number) => {
   mirrorScene.destroy();
 };
 
-describe("INV-HISTORY-LOCKSTEP", () => {
+describe("a remote apply is not locally undoable", () => {
   beforeEach(async () => {
     await render(<Excalidraw handleKeyboardGlobally />);
   });
 
-  // SKIPPED — its premise does not hold as written, so it is not evidence of the
-  // defect it describes. Measured step by step: after the remote apply the depths
-  // are unchanged (history 1, undoManager 1); the divergence appears only on the
-  // NEXT click, which is an appState-only step. Such a step creates a `History`
-  // entry carrying an appState delta with `hasElementChange: false`, and by
-  // design contributes no `UndoManager` entry — so equal DELTAS is the wrong
-  // assertion, not a failing one. Re-scope against T017 before un-skipping; see
-  // that task for the measurement.
-  it.skip("a remote apply contributes NOTHING to either history stack", async () => {
+  it("adds no undoable step, and a later local undo leaves it intact", async () => {
     const rect = API.createElement({ type: "rectangle", id: "r1", x: 0, y: 0 });
     API.setElements([rect]);
     API.setSelectedElements([rect]);
 
-    // CONTROL: a local gesture with no remote traffic. Both stacks move together.
-    mouse.clickAt(500, 500); // deselect — an appState-only increment
-    const control = depths();
+    // A local edit, so there IS something undoable — otherwise "undo does not
+    // touch the remote change" could pass with nothing to undo at all.
+    act(() => {
+      h.app.updateScene({
+        elements: [
+          ...h.elements,
+          API.createElement({ type: "rectangle", id: "local-1" }),
+        ],
+        captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+      });
+    });
+    const before = depths();
+    expect(before.undoManager).toBeGreaterThan(0); // guard
 
-    // REPRO: the identical gesture, with a peer's edit interleaved.
-    API.setSelectedElements([rect]);
+    // The peer's edit, through the boundary a provider actually uses.
     applyRemoteEdit("r1", 123);
-    mouse.clickAt(600, 600);
-    const withRemote = depths();
+    const after = depths();
 
-    // The remote apply must not have added a history entry beyond the control.
-    expect(withRemote.history - control.history).toBe(
-      withRemote.undoManager - control.undoManager,
-    );
+    // GUARD: the remote change really landed.
+    expect(h.scene.getElement("r1")!.x).toBe(123);
+    // ...and it created nothing to undo, on either stack.
+    expect(after.undoManager).toBe(before.undoManager);
+    expect(after.history).toBe(before.history);
+
+    // One undo removes the LOCAL element and leaves the peer's change standing.
+    act(() => {
+      h.app.actionManager.executeAction(
+        h.app.actionManager.actions.undo as never,
+      );
+    });
+
+    expect(
+      h.elements.filter((e) => !e.isDeleted).map((e) => e.id),
+    ).not.toContain("local-1");
+    expect(h.scene.getElement("r1")!.x).toBe(123);
   });
-
-  // The redo-branch half of INV-HISTORY-LOCKSTEP needs an appState accessor the
-  // test harness does not expose; deferred to the FR-010 implementation rather
-  // than asserted through a private field.
 });

@@ -128,7 +128,7 @@ A peer's edit arrives between two of my gestures. My next Ctrl+Z undoes _my_ las
 
 **Independent Test**: draw, apply a peer update via `Y.applyUpdate(doc, u, REMOTE_ORIGIN)`, deselect; assert `History.undoStack` entries and `scene.undoManager.undoStack.length` stay in lockstep (control run without the peer update gives the same depths); assert one undo reverts only the local gesture. Plus: assert a purely passive remote edit does not wipe the local redo branch.
 
-**Invariant INV-HISTORY-LOCKSTEP**: for every interleaving of local gestures and remote applies, `History.undoStack` depth equals the `UndoManager` stack depth, and a remote apply contributes zero entries to either.
+**Invariant INV-HISTORY-LOCKSTEP**: a peer's change is never something this user can undo. Stated behaviourally, because `History` and the `UndoManager` legitimately hold different numbers of entries — an appState-only step creates a `History` entry with `hasElementChange: false` and no `UndoManager` item — so equal stack depths is NOT the contract and asserting it would fail for a correct editor. The three requirements are: (1) a remote apply adds no locally undoable step; (2) after a remote apply, the next local undo affects only the intended local action and both replicas converge; (3) appState-only local history stays locally undoable without requiring an element `UndoManager` item.
 
 **Invariant INV-VERSION-MONOTONIC**: an element's stored `meta.version` never decreases; a write whose scratch version is behind the doc's does not regress it, and the Store never discards a write that genuinely changed the doc.
 
