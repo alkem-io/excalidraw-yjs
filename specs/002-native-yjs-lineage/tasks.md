@@ -56,6 +56,8 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
 
 - [ ] T018a Correct the Scene API surface published to consumers: the method is **`encodeStateAsUpdate(...)`** (plus `encodeStateVector()`, `encodeSnapshot()`), NOT `encodeAsUpdate()` — the latter appears in `plan.md` prose and was relayed to the server team in error.
 
+- [ ] T016j **(BLOCKS the syncActionResult slice — found in review)** `ElementPlan` is contracted as fully normalized and validated, and index policy is planner-owned. Neither is implemented: `commitPlan` asserts only id-set disjointness, and `applyElementChanges` copies `result` records without resolving or validating fractional indices. `replaceAllElements` today calls `syncInvalidIndices` + `validateIndicesThrottled`; switching any creation caller over would persist `newElement`'s missing index or stale/duplicate ordering. G6 is claimed but unbuilt, and the current "invalid plan writes NOTHING" test proves only contradictory membership, not record/index validity. Finish the planner's scoped ordering design, prevalidate the finished plan before the structural prelude, and plant malformed / duplicate / missing-index cases proving ZERO doc writes. Index policy must NOT move into `commitPlan` — that was rejected as a mode in disguise.
+
 ## Phase 3 — History lockstep (FR-010)
 
 - [ ] T017 A `REMOTE_ORIGIN` apply absorbs into the Store snapshot without contributing a history entry or clearing the redo branch. Green **INV-HISTORY-LOCKSTEP** — and with T013/T014, the re-enabled 34-test block from T002.

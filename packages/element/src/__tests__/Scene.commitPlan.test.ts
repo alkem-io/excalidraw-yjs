@@ -178,3 +178,69 @@ describe("commitPlan", () => {
     scene.destroy();
   });
 });
+
+describe("commitPlan — deletions must reach a peer (G5 convergence)", () => {
+  /** Two Scenes wired through the public collaboration surface. */
+  const link = (a: Scene, b: Scene) => {
+    const detach = [
+      a.onDocUpdate((u) => b.applyRemoteUpdate(u)),
+      b.onDocUpdate((u) => a.applyRemoteUpdate(u)),
+    ];
+    return () => detach.forEach((d) => d());
+  };
+
+  it("a structural REMOVAL reaches the peer", () => {
+    // A Yjs state vector tracks inserted struct clocks, NOT delete-set
+    // advancement — so a deletion leaves the vector unchanged while still
+    // emitting an update. Any no-op test based on state-vector equality silently
+    // drops deletion-only mutations and the peer diverges forever.
+    const a = new Scene();
+    const b = new Scene();
+    a.replaceAllElements([
+      rec("keep") as unknown as ExcalidrawElement,
+      rec("doomed") as unknown as ExcalidrawElement,
+    ]);
+    b.applyRemoteUpdate(a.encodeStateAsUpdate());
+    expect(b.getElement("doomed")).toBeDefined();
+
+    const unlink = link(a, b);
+    commit(a, emptyPlan({ remove: ["doomed"] }));
+
+    expect(a.getElement("doomed")).toBeFalsy();
+    expect(b.getElement("doomed")).toBeFalsy();
+    expect(b.getElement("keep")).toBeDefined();
+    unlink();
+    a.destroy();
+    b.destroy();
+  });
+
+  it("clearing an existing PROPERTY reaches the peer", () => {
+    const a = new Scene();
+    const b = new Scene();
+    a.replaceAllElements([
+      rec("a", { link: "https://example.com" }) as unknown as ExcalidrawElement,
+    ]);
+    b.applyRemoteUpdate(a.encodeStateAsUpdate());
+    expect(b.getElement("a")!.link).toBe("https://example.com");
+
+    const unlink = link(a, b);
+    // declared: clear `link` — a delete-only write on the Y.Map
+    commit(
+      a,
+      emptyPlan({
+        write: new Map([
+          [
+            "a",
+            { record: rec("a", { link: undefined }), keys: new Set(["link"]) },
+          ],
+        ]),
+      }),
+    );
+
+    expect(a.getElement("a")!.link).toBeUndefined();
+    expect(b.getElement("a")!.link).toBeUndefined();
+    unlink();
+    a.destroy();
+    b.destroy();
+  });
+});

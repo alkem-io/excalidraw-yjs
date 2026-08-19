@@ -387,6 +387,20 @@ export class Scene {
   /** >0 while a logical mutation is open; per-transaction delivery is withheld. */
   private logicalBoundaryDepth = 0;
 
+  /**
+   * The exact update bytes Yjs emitted while the boundary was open, merged and
+   * dispatched once when it closes.
+   *
+   * Buffering the real bytes — rather than recomputing a delta from a saved state
+   * vector — is what makes deletions converge. A Yjs state vector tracks inserted
+   * struct clocks, NOT delete-set advancement, so `encodeStateVector` is byte-
+   * identical before and after a deletion. Any "did the doc change?" test built on
+   * state-vector equality therefore drops deletion-only mutations silently and the
+   * peer diverges forever. Merging what was actually emitted also carries no
+   * historical delete-set baggage, and yields nothing at all for a true no-op.
+   */
+  private logicalBuffer: { v1: Uint8Array[]; v2: Uint8Array[] } | null = null;
+
   private internalDocHandlers: Array<[string, (...a: never[]) => void]> = [];
 
   /**
@@ -814,7 +828,6 @@ export class Scene {
       (this.yElements.has(a.record.id as string) ? collided : absent).push(a);
     }
 
-    const before = Y.encodeStateVector(this.doc);
     const changedIds = new Set<string>();
     const writeOrigin = plan.recordHistory ? LOCAL_ORIGIN : EPHEMERAL_ORIGIN;
 
@@ -838,6 +851,9 @@ export class Scene {
 
     const prevSuppress = this.suppressTrigger;
     this.logicalBoundaryDepth++;
+    if (this.logicalBoundaryDepth === 1) {
+      this.logicalBuffer = { v1: [], v2: [] };
+    }
     this.suppressTrigger = true;
     try {
       // G1 — structural prelude, absent adds only, born-tombstoned.
@@ -874,7 +890,11 @@ export class Scene {
     } finally {
       this.suppressTrigger = prevSuppress;
       this.logicalBoundaryDepth--;
-      this.publishLogicalDelta(before);
+      if (this.logicalBoundaryDepth === 0) {
+        const buffered = this.logicalBuffer;
+        this.logicalBuffer = null;
+        this.publishBuffered(buffered);
+      }
     }
 
     // G4 — one notification, and only if the doc actually changed.
@@ -884,29 +904,26 @@ export class Scene {
     return { changedIds };
   }
 
-  /** G5 — emit the whole logical mutation as ONE delta, or nothing if the doc
-   * did not change. Runs in a `finally`, so a post-prelude throw still publishes
-   * what Yjs committed. */
-  private publishLogicalDelta(beforeStateVector: Uint8Array): void {
-    if (this.logicalBoundaryDepth > 0 || this.docUpdateSubs.length === 0) {
+  /**
+   * G5 — dispatch the whole logical mutation as ONE transport message, by
+   * merging exactly the updates Yjs emitted inside the boundary. Nothing
+   * buffered (a true no-op) dispatches nothing. Runs from a `finally`, so a
+   * post-prelude throw still publishes what Yjs committed.
+   */
+  private publishBuffered(
+    buffered: { v1: Uint8Array[]; v2: Uint8Array[] } | null,
+  ): void {
+    if (!buffered) {
       return;
     }
-    const after = Y.encodeStateVector(this.doc);
-    if (
-      after.length === beforeStateVector.length &&
-      after.every((b, i) => b === beforeStateVector[i])
-    ) {
-      return; // no-op: zero transport activity
-    }
     for (const format of ["v1", "v2"] as const) {
-      if (!this.docUpdateSubs.some((sub) => sub.format === format)) {
+      const parts = buffered[format];
+      if (parts.length === 0) {
         continue;
       }
-      const delta =
-        format === "v2"
-          ? Y.encodeStateAsUpdateV2(this.doc, beforeStateVector)
-          : Y.encodeStateAsUpdate(this.doc, beforeStateVector);
-      this.dispatchDocUpdate(format, delta);
+      const merged =
+        format === "v2" ? Y.mergeUpdatesV2(parts) : Y.mergeUpdates(parts);
+      this.dispatchDocUpdate(format, merged);
     }
   }
 
@@ -1379,6 +1396,7 @@ export class Scene {
         return;
       }
       if (this.logicalBoundaryDepth > 0) {
+        this.logicalBuffer?.[format].push(update);
         return;
       }
       this.dispatchDocUpdate(format, update);
