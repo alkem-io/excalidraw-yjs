@@ -481,8 +481,11 @@ export const actionLoadScene = register({
         console.warn(error);
         return false;
       }
+      // Report the failure only. `elements` here is the array captured at
+      // INVOCATION, and this path runs after an await — re-applying it would
+      // overwrite anything that reached the doc while the file dialog was open,
+      // reverting a peer's edit as a side effect of a failed load.
       return {
-        elements,
         appState: { ...appState, errorMessage: error.message },
         files: app.files,
         captureUpdate: CaptureUpdateAction.EVENTUALLY,
