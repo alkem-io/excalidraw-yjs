@@ -1528,11 +1528,29 @@ export class Scene {
    * the provider/transport decides which it speaks. Idempotent: re-applying an
    * already-integrated update is a Yjs no-op (and fires no observer).
    */
-  applyRemoteUpdate(update: Uint8Array, format: "v1" | "v2" = "v1"): void {
-    if (format === "v2") {
-      Y.applyUpdateV2(this.doc, update, REMOTE_ORIGIN);
-    } else {
-      Y.applyUpdate(this.doc, update, REMOTE_ORIGIN);
+  applyRemoteUpdate(update: Uint8Array, format: "v1" | "v2" = "v1"): boolean {
+    // This is a NETWORK boundary: the bytes come from a peer, a relay or
+    // storage, and can be truncated, corrupted or in the wrong format. Yjs
+    // throws on a malformed update, and an unguarded apply propagates that out
+    // of the transport's message handler — which does not merely drop the bad
+    // message, it tears down the handler and silently ends the session. Every
+    // LATER update is then lost even though the doc is still perfectly usable.
+    // Rejecting the message and staying live is strictly better.
+    try {
+      if (format === "v2") {
+        Y.applyUpdateV2(this.doc, update, REMOTE_ORIGIN);
+      } else {
+        Y.applyUpdate(this.doc, update, REMOTE_ORIGIN);
+      }
+      return true;
+    } catch (error) {
+      // Reported, not swallowed: a persistent stream of these is a real wiring
+      // bug (wrong format, wrong room, a broken relay) and must stay diagnosable.
+      console.error(
+        `Scene.applyRemoteUpdate: rejected a malformed ${format} update (${update.byteLength} bytes)`,
+        error,
+      );
+      return false;
     }
   }
 
