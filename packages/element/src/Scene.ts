@@ -97,6 +97,54 @@ const isWellFormedIndex = (
   }
 };
 
+/**
+ * Build Scene's six derived views from an array of materialized records.
+ *
+ * PURE: no `this`, no metadata, no notification. It is the second of the three
+ * things `recomputeFromDoc` used to do inline — record materialization and
+ * metadata reconciliation (which mutate `meta` and `versionHighWater`), then view
+ * building, then notification. Only view building is safe to run against records
+ * that are not the committed doc, which is why it is factored out (spec 002,
+ * T016k): a draft rebuild through `recomputeFromDoc` would mutate COMMITTED
+ * reconciliation state that a discard could not restore.
+ *
+ * Extracted with no behaviour change: `orderByFractionalIndex` still sorts the
+ * passed array IN PLACE, and the returned objects are the same instances the
+ * caller's records are, so identity-keyed caches downstream behave identically.
+ */
+const materializeViews = (
+  records: OrderedExcalidrawElement[],
+): {
+  elements: readonly OrderedExcalidrawElement[];
+  elementsMap: SceneElementsMap;
+  nonDeletedElements: readonly Ordered<NonDeletedExcalidrawElement>[];
+  nonDeletedElementsMap: NonDeletedSceneElementsMap;
+  frames: readonly ExcalidrawFrameLikeElement[];
+  nonDeletedFramesLikes: readonly NonDeleted<ExcalidrawFrameLikeElement>[];
+} => {
+  orderByFractionalIndex(records);
+
+  const frames: ExcalidrawFrameLikeElement[] = [];
+  const elementsMap = toBrandedType<SceneElementsMap>(new Map());
+  for (const element of records) {
+    if (isFrameLikeElement(element)) {
+      frames.push(element);
+    }
+    elementsMap.set(element.id, element);
+  }
+
+  const nonDeleted = getNonDeletedElements(records);
+
+  return {
+    elements: records,
+    elementsMap,
+    nonDeletedElements: nonDeleted.elements,
+    nonDeletedElementsMap: nonDeleted.elementsMap,
+    frames,
+    nonDeletedFramesLikes: getNonDeletedElements(frames).elements,
+  };
+};
+
 type ElementPlan = {
   readonly add: readonly { record: ElementRecord; keys: ReadonlySet<string> }[];
   readonly remove: readonly string[];
@@ -1301,26 +1349,13 @@ export class Scene {
     // Order by fractional index (ties by id) — identical semantics to the
     // pre-rewrite `syncInvalidIndices`-ordered array. `orderByFractionalIndex`
     // sorts in place; `next` is our own fresh array so that is safe.
-    orderByFractionalIndex(next);
-
-    const nextFrameLikes: ExcalidrawFrameLikeElement[] = [];
-    const elementsMap = toBrandedType<SceneElementsMap>(new Map());
-    for (const element of next) {
-      if (isFrameLikeElement(element)) {
-        nextFrameLikes.push(element);
-      }
-      elementsMap.set(element.id, element);
-    }
-
-    this.elements = next;
-    this.elementsMap = elementsMap;
-
-    const nonDeletedElements = getNonDeletedElements(this.elements);
-    this.nonDeletedElements = nonDeletedElements.elements;
-    this.nonDeletedElementsMap = nonDeletedElements.elementsMap;
-
-    this.frames = nextFrameLikes;
-    this.nonDeletedFramesLikes = getNonDeletedElements(this.frames).elements;
+    const views = materializeViews(next);
+    this.elements = views.elements;
+    this.elementsMap = views.elementsMap;
+    this.nonDeletedElements = views.nonDeletedElements;
+    this.nonDeletedElementsMap = views.nonDeletedElementsMap;
+    this.frames = views.frames;
+    this.nonDeletedFramesLikes = views.nonDeletedFramesLikes;
 
     if (!this.suppressTrigger) {
       this.triggerUpdate();

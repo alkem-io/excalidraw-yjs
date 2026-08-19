@@ -19,7 +19,7 @@ The classes matter more than the count. "Never drafts" is mechanism wording and 
 | `actionPaste` | Clipboard:59 | 0 | **DELEGATES A WRITE AFTER `await`** — `app.pasteFromClipboard(createPasteEvent({types}))` (line 92) | inserts elements without returning them |
 | `actionLoadScene` | Export:458 | 0 | **DELEGATES A WRITE AFTER `await`, THEN RETURNS A SECOND ActionResult** — `app.addElementsFromPasteOrLibrary({...})`, then `return { elements: app.scene.getNonDeletedElements() }` | membership applied twice (see T016n) |
 
-**Measured precondition**: all eight have **zero element writes in their synchronous prefix** (checked from the `perform` body to the first `await`). This is what makes "discard an _empty_ draft on a promise-like result" valid.
+**Verified by tracing** (source-path inspection from each `perform` body to its first `await`, NOT runtime instrumentation): all eight have zero element writes in their synchronous prefix. This is what makes "discard an _empty_ draft on a promise-like result" valid.
 
 ## `actionCut` — why function-level labels are insufficient
 
