@@ -1545,29 +1545,23 @@ export class Scene {
    * the provider/transport decides which it speaks. Idempotent: re-applying an
    * already-integrated update is a Yjs no-op (and fires no observer).
    */
-  applyRemoteUpdate(update: Uint8Array, format: "v1" | "v2" = "v1"): boolean {
-    // This is a NETWORK boundary: the bytes come from a peer, a relay or
-    // storage, and can be truncated, corrupted or in the wrong format. Yjs
-    // throws on a malformed update, and an unguarded apply propagates that out
-    // of the transport's message handler — which does not merely drop the bad
-    // message, it tears down the handler and silently ends the session. Every
-    // LATER update is then lost even though the doc is still perfectly usable.
-    // Rejecting the message and staying live is strictly better.
-    try {
-      if (format === "v2") {
-        Y.applyUpdateV2(this.doc, update, REMOTE_ORIGIN);
-      } else {
-        Y.applyUpdate(this.doc, update, REMOTE_ORIGIN);
-      }
-      return true;
-    } catch (error) {
-      // Reported, not swallowed: a persistent stream of these is a real wiring
-      // bug (wrong format, wrong room, a broken relay) and must stay diagnosable.
-      console.error(
-        `Scene.applyRemoteUpdate: rejected a malformed ${format} update (${update.byteLength} bytes)`,
-        error,
-      );
-      return false;
+  applyRemoteUpdate(update: Uint8Array, format: "v1" | "v2" = "v1"): void {
+    // Deliberately UNGUARDED — it throws on a malformed update, and the caller
+    // must handle that. A `try/catch` here that logged and continued would be
+    // actively harmful, because Yjs apply is NOT atomic on a decode failure:
+    // measured over every truncation offset of a real delta, 10 of 1056 both
+    // threw AND left the doc mutated, all of them near the tail — precisely what
+    // a dropped connection produces. One such case integrated four new elements
+    // while the file, the deletion marker and the property edit from the SAME
+    // logical update never arrived. Swallowing that would continue on a doc that
+    // is partially applied and internally inconsistent, which is worse than
+    // failing loudly. Recovery means discarding this Scene generation and
+    // resyncing, and that belongs to the transport that owns the session — not
+    // to a catch block in the element layer. See T027.
+    if (format === "v2") {
+      Y.applyUpdateV2(this.doc, update, REMOTE_ORIGIN);
+    } else {
+      Y.applyUpdate(this.doc, update, REMOTE_ORIGIN);
     }
   }
 
