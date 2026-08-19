@@ -462,6 +462,12 @@ export const actionLoadScene = register({
         elements,
       );
 
+      // `addElementsFromPasteOrLibrary` owns the COMPLETE load: restore/duplicate,
+      // indices, frame placement, the scene write, bound-text redraw, files,
+      // selection/appState, fit-to-content, and `store.scheduleCapture()` — which
+      // is the IMMEDIATELY capture this used to request. Returning an
+      // `ActionResult` here would only re-assert that same freshly-read state
+      // through `syncActionResult`, applying the load's membership a second time.
       app.addElementsFromPasteOrLibrary({
         elements: loadedElements,
         files,
@@ -469,13 +475,7 @@ export const actionLoadScene = register({
         fitToContent: true,
       });
 
-      return {
-        elements: app.scene.getNonDeletedElements(),
-        appState: app.state,
-        files: app.files,
-        captureUpdate: CaptureUpdateAction.IMMEDIATELY,
-        replaceFiles: false,
-      };
+      return false;
     } catch (error: any) {
       if (error?.name === "AbortError") {
         console.warn(error);
