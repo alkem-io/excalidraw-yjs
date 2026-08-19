@@ -1,8 +1,10 @@
 # T016b contract — one commit primitive, two planners
 
-**Status**: revision 2, pre-implementation. **Spec**: FR-016, FR-017, T014b.
+**Status**: revision 4, pre-implementation. **Spec**: FR-016, FR-017, T014b.
 
-> Revision 2 corrects six defects found in review. Verified each before accepting: the census arithmetic (my table was **16/4**, not 15/5 — I counted table ROWS, several of which cover two sites), three omitted Scene-internal callers (I filtered out `Scene.ts` wholesale to avoid matching the method definition and lost its call sites with it), and the claim that `syncActionResult` reaches the doc via public `updateScene` — it does **not**, it calls `this.scene.replaceAllElements` directly at `App.tsx:2832`. I invented that relationship; the boundary choice must not rest on it.
+> Revisions 2–4 correct defects found in review (rev 2's edits silently failed to apply; rev 3 landed them with asserts; rev 4 adds the selector type, private committer, return-name and validation-scope fixes).
+>
+> Rev 2 notes: Verified each before accepting: the census arithmetic (my table was **16/4**, not 15/5 — I counted table ROWS, several of which cover two sites), three omitted Scene-internal callers (I filtered out `Scene.ts` wholesale to avoid matching the method definition and lost its call sites with it), and the claim that `syncActionResult` reaches the doc via public `updateScene` — it does **not**, it calls `this.scene.replaceAllElements` directly at `App.tsx:2832`. I invented that relationship; the boundary choice must not rest on it.
 
 ## 1. The plan shape
 
@@ -33,7 +35,9 @@ type ElementPlan = {
 ## 2. The commit primitive
 
 ```ts
-commitPlan(plan: ElementPlan): { writtenIds: ReadonlySet<string> }
+// PRIVATE — shared machinery, not a third supported write API. MCP and editor
+// callers get the two semantic planners only.
+commitPlan(plan: ElementPlan): { changedIds: ReadonlySet<string> }
 ```
 
 Sole owner of tombstone materialization, origins, the transaction and broadcast boundary, metadata handling, observer scheduling and failure cleanup. Neither planner may touch a `Y.Map` directly.
@@ -44,22 +48,38 @@ Observable guarantees:
 
 - **G1** At most ONE untracked `STRUCTURAL` prelude, only for `plan.add`, materializing complete born-tombstoned records. Required because a `LOCAL` structural add lets `UndoManager` hard-remove the element on undo, and a wholly `STRUCTURAL` create is not undoable; Yjs cannot give nested parts of one transaction different origins.
 - **G2** Exactly ONE action transaction carrying `remove`, `write`, and the reveal of `add` — reveal last, so an element is never live before its complete record exists. History-tracked **iff** the origin is `LOCAL`; `EPHEMERAL` is not a tracked transaction.
-- **G3** Metadata for actually-written ids is updated inside that same transaction, with the **current** behaviour preserved. This contract does **NOT** close T014b, and revision 1's claim that it did was wrong: the already-scoped `max(meta, prev + 1)` bump was measured to break semantic tests, and T016e records the mechanism as OPEN. What this primitive provides is the _integration seam_ — it returns the effective changed ids, which is the information a fix needs and the reason T014b should be solved here. T014b stays RED until the separate revision-token migration across Store / `ElementsDelta` / caches is designed and measured.
+- **G3** Metadata for actually-written ids is updated inside that same transaction, with the **current** behaviour preserved. The return is `changedIds`: ids whose add, remove or scoped write **actually changed the doc**, structural removals included — not merely the ids a plan mentioned. This contract does **NOT** close T014b, and revision 1's claim that it did was wrong: the already-scoped `max(meta, prev + 1)` bump was measured to break semantic tests, and T016e records the mechanism as OPEN. What this primitive provides is the _integration seam_ — it returns the effective changed ids, which is the information a fix needs and the reason T014b should be solved here. T014b stays RED until the separate revision-token migration across Store / `ElementsDelta` / caches is designed and measured.
 - **G4** **At most one** externally observable Scene notification / Store scheduling point — exactly one only when the commit actually changes the doc. A no-op plan, or a collision whose declared values already equal current state, produces ZERO notification rather than manufacturing activity. (The STRUCTURAL pass still recomputes internally; `suppressTrigger` hides it from callbacks.)
 - **G5** **At most one** broadcast for the whole plan, emitted as a single delta from the pre-plan state vector, and none at all when the doc did not change. **(closes FR-017)** Scoped to `Scene.onDocUpdate` / `CollabEngine` transport: an arbitrary external `doc.on("update")` observer still sees the underlying Yjs transactions, and this contract does not claim otherwise.
-- **G6** The finished plan is validated BEFORE the prelude (indices already resolved by the planner). On failure, a `finally` either publishes the resulting delta or performs explicit structural cleanup and publishes that net result — never silently discards a committed structural write.
+- **G6** The finished plan is validated BEFORE the prelude (indices already resolved by the planner). If an unexpected exception occurs after the structural prelude, the `finally` publishes the ACTUAL delta from the saved state vector and rethrows. **No rollback or cleanup machinery** — Yjs has already committed whatever preceded the throw, and publishing that state is what preserves convergence. Build cleanup only when a concrete failure demands it.
 - **G7** An id in `plan.add` that already exists in the doc (interleaved remote add) is NOT structurally replaced: it is treated as existing and only its declared keys are written.
 
 ## 3. The two planners
 
 ```ts
 // intent-preserving: apply what the action meant, to the doc as it is now
-applyElementChanges(base, result, declaredIntent?, opts) -> commitPlan(plan)
+applyElementChanges(base, result, { declaredIntent?, recordHistory? } = {}) -> commitPlan(plan)
 // authoritative: membership of the supplied set is the truth
 reconcileAllElementsAuthoritatively(elements, opts) -> commitPlan(plan)
 //   opts.skipValidation: for the isolated mid-history temp Scene (delta.ts:1899), which has no
 //   up-to-date scene to validate against. An AUTHORITATIVE-PLANNER option, never on ElementPlan.
+//   It may skip only the dev/test diagnostic + bound-text validation. It may NOT skip
+//   normalization, nor commitPlan's structural assertions (disjoint id sets, records present,
+//   valid resolved indices) — those always run.
 ```
+
+`declaredIntent` is **SELECTORS ONLY** — it never carries records, so there is exactly one source of values and no winner to invent:
+
+```ts
+type DeclaredElementIntent = {
+  readonly addedIds: ReadonlySet<string>;
+  readonly removedIds: ReadonlySet<string>;
+  /** existing-id writes only; a creation establishes all persisted own keys */
+  readonly keysById: ReadonlyMap<string, ReadonlySet<string>>;
+};
+```
+
+Every value is read from the canonical `result` record for that id. `computeElementIntent` adapts into this same selector shape rather than being a parallel channel. Validation before any transaction: every added/changed id MUST exist in `result`, and removed ids MUST NOT — contradictions are rejected, not resolved.
 
 `declaredIntent` is **not** a later addition. The governing spec already states that a derived diff is not the definition of intent — an explicit same-value assignment is invisible to any diff, and async actions cannot be solved by one. So the explicit per-id membership/key channel exists from day one, for headless MCP and async action paths. `computeElementIntent` is the DERIVED fallback, valid only on the **audited synchronous** migration path.
 
