@@ -25,7 +25,7 @@ type ElementPlan = {
     string,
     { record: ElementRecord; keys: ReadonlySet<string> }
   >;
-  /** the existing origin/history choice — LOCAL (tracked) vs EPHEMERAL (not) */
+  /** the existing origin/history choice — LOCAL (tracked) vs STRUCTURAL (untracked) */
   readonly recordHistory: boolean;
 };
 ```
@@ -47,11 +47,11 @@ Sole owner of tombstone materialization, origins, the transaction and broadcast 
 Observable guarantees:
 
 - **G1** At most ONE untracked `STRUCTURAL` prelude, only for `plan.add`, materializing complete born-tombstoned records. Required because a `LOCAL` structural add lets `UndoManager` hard-remove the element on undo, and a wholly `STRUCTURAL` create is not undoable; Yjs cannot give nested parts of one transaction different origins.
-- **G2** Exactly ONE action transaction carrying `remove`, `write`, and the reveal of `add` — reveal last, so an element is never live before its complete record exists. History-tracked **iff** the origin is `LOCAL`; `EPHEMERAL` is not a tracked transaction.
+- **G2** Exactly ONE action transaction carrying `remove`, `write`, and the reveal of `add` — reveal last, so an element is never live before its complete record exists. History-tracked **iff** the origin is `LOCAL`; `STRUCTURAL` is not a tracked transaction.
 - **G3** Metadata for actually-written ids is updated inside that same transaction, with the **current** behaviour preserved. The return is `changedIds`: ids whose add, remove or scoped write **actually changed the doc**, structural removals included — not merely the ids a plan mentioned. This contract does **NOT** close T014b, and revision 1's claim that it did was wrong: the already-scoped `max(meta, prev + 1)` bump was measured to break semantic tests, and T016e records the mechanism as OPEN. What this primitive provides is the _integration seam_ — it returns the effective changed ids, which is the information a fix needs and the reason T014b should be solved here. T014b stays RED until the separate revision-token migration across Store / `ElementsDelta` / caches is designed and measured.
 - **G4** **At most one** externally observable Scene notification / Store scheduling point — exactly one only when the commit actually changes the doc. A no-op plan, or a collision whose declared values already equal current state, produces ZERO notification rather than manufacturing activity. (The STRUCTURAL pass still recomputes internally; `suppressTrigger` hides it from callbacks.)
-- **G5** **At most one** broadcast for the whole plan, emitted as a single delta from the pre-plan state vector, and none at all when the doc did not change. **(closes FR-017)** Scoped to `Scene.onDocUpdate` / `CollabEngine` transport: an arbitrary external `doc.on("update")` observer still sees the underlying Yjs transactions, and this contract does not claim otherwise.
-- **G6** The finished plan is validated BEFORE the prelude (indices already resolved by the planner). If an unexpected exception occurs after the structural prelude, the `finally` publishes the ACTUAL delta from the saved state vector and rethrows. **No rollback or cleanup machinery** — Yjs has already committed whatever preceded the throw, and publishing that state is what preserves convergence. Build cleanup only when a concrete failure demands it.
+- **G5** **At most one** broadcast for the whole plan — the exact update bytes Yjs emitted while the boundary was open, merged with `Y.mergeUpdates` and dispatched once — and none at all when the doc did not change. Buffering the emitted bytes is what makes deletions survive: a delta recomputed from a pre-plan state vector drops them, because a state vector tracks inserted struct clocks and not delete-set advancement. **(closes FR-017)** Scoped to the `Scene.onDocUpdate` transport: an arbitrary external `doc.on("update")` observer still sees the underlying Yjs transactions, and this contract does not claim otherwise.
+- **G6** The finished plan is validated BEFORE the prelude (indices already resolved by the planner). If an unexpected exception occurs after the structural prelude, the `finally` publishes the ACTUAL buffered emitted bytes and rethrows. **No rollback or cleanup machinery** — Yjs has already committed whatever preceded the throw, and publishing that state is what preserves convergence. Build cleanup only when a concrete failure demands it.
 - **G7** An id in `plan.add` that already exists in the doc (interleaved remote add) is NOT structurally replaced: it is treated as existing and only its declared keys are written.
 
 ## 3. The two planners

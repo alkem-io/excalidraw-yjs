@@ -17,7 +17,7 @@ Please add the latest change on the top under the correct section.
 
 ### Breaking changes
 
-- **Native-Yjs collaboration core:** `reconcileElements` is no longer exported from `@excalidraw-yjs/excalidraw`. The editor's element store is now a `Y.Doc`, so the old scene-array broadcast + JSON `reconcileElements` merge were removed — Yjs converges per-property natively. There is currently no public collaboration engine export; a supported attach boundary is not yet part of the published API.
+- **Native-Yjs collaboration core:** `reconcileElements` is no longer exported from `@excalidraw-yjs/excalidraw`. The editor's element store is now a `Y.Doc`, so the old scene-array broadcast + JSON `reconcileElements` merge were removed — Yjs converges per-property natively. A provider attaches through `ExcalidrawAPI.onLocalSceneUpdate` / `applyRemoteSceneUpdate` / `encodeSceneAsUpdate`, which carry the editor's origin policy — a remote apply is never echoed, and a creation reaches peers as one update rather than a bare tombstone. The raw `Y.Doc` is not part of the public API.
 
 - Theme changes initiated by the default UI are now delegated to `<Excalidraw onThemeChange={(theme) => ...} />` when supplied. If `onThemeChange` is not supplied, light/dark theme toggling still falls back to updating the internal editor state.
 
@@ -31,7 +31,7 @@ Please add the latest change on the top under the correct section.
 
 ### Features
 
-- Added `ExcalidrawAPI.isDestroyed` flag. Set to `true` once the editor unmounts. Calling any `get*` method, `onStateChange`, or `onEvent` on a destroyed API instance will throw in development and `console.error` in production. The `ExcalidrawAPI` will be reset to `null` on umount, but to be extra safe, you should check `ExcalidrawAPI.isDestroyed` before calling these methods to guard against subtle race conditions in your code.
+- Added `ExcalidrawAPI.isDestroyed` flag. Set to `true` once the editor unmounts. Every method on a destroyed API instance throws, including nested ones such as `history.clear`; `id` and `isDestroyed` remain readable. The `ExcalidrawAPI` is also reset to `null` on unmount, but check `ExcalidrawAPI.isDestroyed` before calling a method to guard against race conditions in your own code.
 
 - Added `onMount`, `onInitialize`, and `onUnmount` props. `onMount` receives `{ excalidrawAPI, container }` once the editor root is mounted. `onInitialize` fires once the initial scene has loaded. `onUnmount` fires just before unmounting.
 

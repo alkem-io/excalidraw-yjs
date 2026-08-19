@@ -11,11 +11,7 @@
  * It is a unique, opaque object — identity is the only thing that matters, so it
  * is compared by reference. One module-level singleton is shared by every write
  * path so a write made in the schema's diff helpers is recognised as "ours".
- *
- * Historically this lived in `packages/yjs-binding` as `BINDING_ORIGIN`; it is now
- * a core element concern (the doc is the element store). The yjs-binding package
- * continues to re-export it under the old name so it still builds until it is
- * deleted at M3.
+
  */
 export const LOCAL_ORIGIN: { readonly name: "excalidraw-yjs-local" } = {
   name: "excalidraw-yjs-local",
@@ -52,35 +48,13 @@ export const STRUCTURAL_ORIGIN: { readonly name: "excalidraw-yjs-structural" } =
 export type StructuralOrigin = typeof STRUCTURAL_ORIGIN;
 
 /**
- * Origin for a *local but non-undoable* element write (native-Yjs core, M2 —
- * element history).
- *
- * The `Y.UndoManager` tracks `LOCAL_ORIGIN` and so captures every edit made
- * under it. But Excalidraw issues writes that must NEVER enter the undo stack —
- * `CaptureUpdateAction.NEVER`: scene initialization / load, programmatic
- * non-capturing `updateScene`s, the re-application of an undo/redo result, and
- * (M3) remote applies. Those go through the Scene under `EPHEMERAL_ORIGIN`
- * instead, which the UndoManager does NOT track — so the change still lands in
- * the doc (the source of truth) and re-renders, but produces no undo step.
- *
- * (Mid-drag `informMutation:false` writes stay on `LOCAL_ORIGIN`: they ARE part
- * of the in-progress gesture and correctly merge into its single undo step, which
- * the durable pointer-up commit then seals.)
- */
-export const EPHEMERAL_ORIGIN: { readonly name: "excalidraw-yjs-ephemeral" } = {
-  name: "excalidraw-yjs-ephemeral",
-};
-
-export type EphemeralOrigin = typeof EPHEMERAL_ORIGIN;
-
-/**
  * Origin for a *remote* update applied to `Scene.doc` by the collaboration
  * provider (native-Yjs core, M3 — collaboration).
  *
  * A remote peer's Yjs update is integrated via `Scene.applyRemoteUpdate`, which
  * wraps `Y.applyUpdate(doc, bytes, REMOTE_ORIGIN)` so the transaction carries
  * this sentinel. It is deliberately a DISTINCT object from {@link LOCAL_ORIGIN}
- * /{@link STRUCTURAL_ORIGIN}/{@link EPHEMERAL_ORIGIN}, which gives M3 its two core
+ * /{@link STRUCTURAL_ORIGIN}, which gives M3 its two core
  * guarantees for free:
  *
  *  1. **Undo isolation.** The `Y.UndoManager` tracks ONLY `LOCAL_ORIGIN`

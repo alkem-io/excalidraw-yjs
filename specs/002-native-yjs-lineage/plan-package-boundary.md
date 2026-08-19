@@ -46,7 +46,6 @@ For each generic workflow, list the exact functions/types consumed; export only 
 
 | target | evidence |
 | --- | --- |
-| `CollabEngine` public export | non-test references are **only** its own definition and the `index.tsx` export line. Zero callers, unattachable through the public API (constructor needs `Scene`, which is not exported), and its correct origin/filter boundary depends on unfinished FR-017. Keeping it is preserving an intermediate stage. |
 | `Scene.encodeSnapshot()` | **0** production callers, 4 test uses, and the body is `return Y.encodeStateAsUpdateV2(this.doc)` — a duplicate of `encodeStateAsUpdate("v2")`. |
 | `Scene.fromSnapshot()` | **0** production callers, 3 test uses. |
 
@@ -61,7 +60,7 @@ Keep the converters. Make the lineage semantics unmissable:
 
 ## Ordering
 
-1. **Now**: product-neutral origin sentinels, correct repository metadata on both packages, delete the `CollabEngine` public export. Independent of T016.
+1. **Now**: product-neutral origin sentinels, correct repository metadata on both packages, keep the provider surface to the one Scene transport boundary. Independent of T016.
 2. **Now-ish**: delete the two redundant `Scene` snapshot methods once their tests are re-pointed.
 3. **Next**: the public-surface audit and the narrowed barrel + tarball consumer test. This is the smallest slice that unblocks headless consumers and does **not** wait on T016, nor block it.
 4. **Deferred**: converter renaming, after the call-site audit.

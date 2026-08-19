@@ -2488,17 +2488,31 @@ class App extends React.Component<AppProps, AppState> {
    * Subscribe to LOCAL logical updates, for a collaboration transport.
    *
    * The supported way to attach a provider. It carries the editor's ONE origin
-   * policy: a remote apply is never echoed, non-undoable local bookkeeping (scene
-   * load/init, reset, prune) is never broadcast — those would push destructive
-   * whole-scene deletes to peers — and a create's structural pass and its reveal
-   * arrive as a single message rather than as a leaked content-bearing tombstone.
+   * policy: a remote apply is never echoed back, and a create's structural pass
+   * and its reveal arrive as a single message rather than as a content-bearing
+   * tombstone. Every other change to the shared document is delivered, including
+   * writes that produce no undo step — a shared-document write cannot be hidden
+   * from peers, since the next full-state encode carries it regardless.
+   *
+   * A local reset is not delivered here because it does not touch this document
+   * at all: it replaces the Scene generation, and this subscription is rebound to
+   * the new one.
    *
    * Subscribing to the raw `Y.Doc` bypasses all of it.
    */
   public onLocalSceneUpdate = (
     cb: (update: Uint8Array) => void,
     format: "v1" | "v2" = "v1",
-  ) => this.scene.onDocUpdate(cb, format);
+  ) => {
+    // Registered with App, not with the Scene, so the subscription SURVIVES a
+    // reset — see {@link sceneTransportSubscribers}.
+    const entry = { cb, format, detach: this.scene.onDocUpdate(cb, format) };
+    this.sceneTransportSubscribers.add(entry);
+    return () => {
+      entry.detach();
+      this.sceneTransportSubscribers.delete(entry);
+    };
+  };
 
   /** Integrate a peer's update: neither re-broadcast nor captured into local undo. */
   public applyRemoteSceneUpdate = (
@@ -2943,20 +2957,92 @@ class App extends React.Component<AppProps, AppState> {
   };
 
   /**
+   * Wire the editor's read-only mirrors of the scene doc. Called for the initial
+   * Scene and again for every replacement generation, so a swap never leaves the
+   * editor observing a destroyed doc.
+   *
+   * Files live on `scene.doc`, which is the source of truth. On every scene
+   * update — a local `setFiles`, a remote files apply, a load, undo/redo — refresh
+   * `this.files` from the doc, then render. Both mirrors are strictly READ-ONLY
+   * (`getFiles()` / `getPersistedAppState()`): neither may write back to the
+   * scene, or the write -> observe -> refresh cycle would loop. Both are ordered
+   * before `triggerRender` so the render sees the freshest values.
+   */
+  private registerSceneCallbacks() {
+    this.scene.onUpdate(this.refreshFilesFromScene);
+    this.scene.onUpdate(this.refreshAppStateFromScene);
+    this.scene.onUpdate(this.triggerRender);
+  }
+
+  /**
+   * Transport subscriptions handed out by {@link onLocalSceneUpdate}.
+   *
+   * Owned by App rather than by the Scene because the Scene is REPLACEABLE: a
+   * reset swaps in a new generation, and a subscriber bound directly to the old
+   * doc would silently stop receiving updates. That is not hypothetical — the
+   * fallback `initializeRoom` path can reset the scene AFTER a transport has
+   * already subscribed, which would leave collaboration permanently deaf.
+   */
+  private sceneTransportSubscribers = new Set<{
+    cb: (update: Uint8Array) => void;
+    format: "v1" | "v2";
+    detach: () => void;
+  }>();
+
+  private rebindSceneTransportSubscribers() {
+    for (const entry of this.sceneTransportSubscribers) {
+      // the previous generation is destroyed, so its detach is already moot
+      entry.detach = this.scene.onDocUpdate(entry.cb, entry.format);
+    }
+  }
+
+  /** Discard the current Scene and everything bound to it. */
+  private teardownSceneGeneration() {
+    this.renderer.destroy();
+    this.scene.destroy();
+    this.files = {};
+    this.imageCache.clear();
+  }
+
+  /** Assign a fresh Scene and the objects bound to it. Registers nothing. */
+  private constructSceneGeneration() {
+    this.scene = new Scene();
+    this.fonts = new Fonts(this.scene);
+    this.renderer = new Renderer(this.scene);
+  }
+
+  /**
+   * Swap in a fresh Scene generation, discarding the current one entirely.
+   *
+   * This is how a genuinely LOCAL reset happens. Clearing the shared doc instead
+   * cannot work: withholding the clear from the incremental wire does not remove
+   * it — its structs and delete-set stay in the doc, so the next full-state encode
+   * (INIT seed, periodic resync, persistence) republishes the clear and destroys
+   * every peer's copy of the scene. A new doc has no such history to leak.
+   *
+   * Renderer and Fonts are bound to a specific Scene, so they are rebuilt too,
+   * and the editor's mirrors plus any live transport subscriptions are rebound to
+   * the new generation.
+   */
+  private replaceSceneGeneration() {
+    this.teardownSceneGeneration();
+    this.constructSceneGeneration();
+    this.registerSceneCallbacks();
+    this.rebindSceneTransportSubscribers();
+  }
+
+  /**
    * Resets scene & history.
    * ! Do not use to clear scene user action !
    */
   private resetScene = withBatchedUpdates(
     (opts?: { resetLoadingState: boolean }) => {
-      // Not an undoable edit — history is cleared right after (resetHistory()).
-      this.scene.replaceAllElements([], { recordHistory: false });
-      // Clearing the scene leaves every file orphaned — prune them from the doc
-      // (M4) so a cleared/reset whiteboard never persists or broadcasts the bytes
-      // of images that are no longer referenced by any element (privacy). The
-      // boundary save/wire filter also excludes them, but pruning here keeps the
-      // in-memory doc from carrying stale binaries and bounds its growth.
-      this.scene.pruneFiles(new Set());
-      this.files = {};
+      // A local reset must not touch the shared doc at all — see
+      // {@link replaceSceneGeneration}. Clearing it in place would be
+      // republished by the next full-state encode and would delete every peer's
+      // elements and image binaries. Swapping generations also makes the file
+      // prune unnecessary: the new doc simply has no binaries to orphan.
+      this.replaceSceneGeneration();
       this.setState((state) => ({
         ...getDefaultAppState(),
         isLoading: opts?.resetLoadingState ? false : state.isLoading,
@@ -3216,22 +3302,7 @@ class App extends React.Component<AppProps, AppState> {
       });
     }
 
-    // Keep the in-memory files cache in lock-step with the scene doc (M4).
-    // Files live on `scene.doc`; the doc is the source of truth. On every scene
-    // update — a local `setFiles`, a remote files apply (collaboration), a load,
-    // or undo/redo — refresh `this.files` from the doc, then render. This is a
-    // READ-ONLY mirror (`scene.getFiles()`): it must NEVER call `setFiles` /
-    // `addMissingFiles`, or the write→observe→refresh cycle would loop. Ordered
-    // before `triggerRender` so the render sees the freshest files.
-    this.scene.onUpdate(this.refreshFilesFromScene);
-    // Keep the collaborative appState subset (background + name) in lock-step
-    // with the scene doc (M4) — same READ-ONLY mirror pattern as files: on every
-    // scene update (incl. a remote appState apply or a load) pull the persisted
-    // subset from the doc and `setState` only the keys that diverged. Never calls
-    // `setAppState` on the scene, so the refresh can never loop. Ordered before
-    // `triggerRender` so the render sees the freshest appState.
-    this.scene.onUpdate(this.refreshAppStateFromScene);
-    this.scene.onUpdate(this.triggerRender);
+    this.registerSceneCallbacks();
     this.addEventListeners();
 
     if (this.props.autoFocus && this.excalidrawContainerRef.current) {
@@ -3273,24 +3344,40 @@ class App extends React.Component<AppProps, AppState> {
   }
 
   public componentWillUnmount() {
-    // we're recreating the api object reference so that the
-    // <ExcalidrawAPIContext.Provider/> picks up on it
-    this.api = { ...this.api, isDestroyed: true };
-
-    for (const key of Object.keys(this.api) as (keyof typeof this.api)[]) {
-      if (
-        (key.startsWith("get") ||
-          key === "onStateChange" ||
-          key === "onEvent") &&
-        typeof this.api[key] === "function"
-      ) {
-        (this.api as any)[key] = () => {
-          throw new Error(
-            "ExcalidrawAPI is no longer usable after the editor has been unmounted and will return invalid/empty data. You should check for `ExcalidrawAPI.isDestroyed` before calling get* methods on subscribing to state/event changes.",
-          );
-        };
+    // Invalidate the object consumers hold, IN PLACE, so a retained reference
+    // reports `isDestroyed` and cannot call through into a torn-down editor.
+    //
+    // EVERY callable member is replaced, including callables nested one level
+    // down (`history.clear`), rather than a list of method names: a name list
+    // silently stops covering whatever is added next, which is exactly how a
+    // retained API keeps a working back door. `id` and `isDestroyed` stay as
+    // data so a consumer can still check before calling.
+    const dead = (): never => {
+      throw new Error(
+        "ExcalidrawAPI is no longer usable after the editor has been unmounted. Every method throws; check `ExcalidrawAPI.isDestroyed` before calling one or subscribing to state/event changes.",
+      );
+    };
+    const invalidate = (target: Record<string, unknown>, depth: number) => {
+      for (const key of Object.keys(target)) {
+        const value = target[key];
+        if (typeof value === "function") {
+          target[key] = dead;
+        } else if (
+          depth > 0 &&
+          value &&
+          typeof value === "object" &&
+          !Array.isArray(value)
+        ) {
+          invalidate(value as Record<string, unknown>, depth - 1);
+        }
       }
-    }
+    };
+    invalidate(this.api as unknown as Record<string, unknown>, 1);
+    (this.api as { isDestroyed: boolean }).isDestroyed = true;
+
+    // ...then create a new reference so <ExcalidrawAPIContext.Provider/>
+    // re-renders. It spreads the invalidated members, so both objects are dead.
+    this.api = { ...this.api };
 
     this.editorLifecycleEvents.emit("editor:unmount");
     this.props.onUnmount?.();
@@ -3298,13 +3385,21 @@ class App extends React.Component<AppProps, AppState> {
 
     (window as any).launchQueue?.setConsumer(() => {});
 
-    this.renderer.destroy();
-    this.scene.destroy();
-    this.scene = new Scene();
-    this.fonts = new Fonts(this.scene);
-    this.renderer = new Renderer(this.scene);
-    this.files = {};
-    this.imageCache.clear();
+    // Nothing may hold a transport subscription past unmount, so detach and drop
+    // them all. Teardown below constructs a replacement generation but registers
+    // nothing against it.
+    for (const entry of this.sceneTransportSubscribers) {
+      entry.detach();
+    }
+    this.sceneTransportSubscribers.clear();
+    // Leave the component's fields valid: `componentDidMount` recreates the API
+    // and re-registers the Scene callbacks when the same instance is remounted
+    // (StrictMode), so it must find a usable Scene/Fonts/Renderer. Construct
+    // WITHOUT registering — registration is `componentDidMount`'s job, and doing
+    // it here too would leave a remounted editor with duplicate mirrors and a
+    // duplicate render callback.
+    this.teardownSceneGeneration();
+    this.constructSceneGeneration();
     this.resizeObserver?.disconnect();
     this.unmounted = true;
     this.removeEventListeners();

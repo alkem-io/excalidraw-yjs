@@ -51,7 +51,6 @@ import {
   APPSTATE,
   LOCAL_ORIGIN,
   STRUCTURAL_ORIGIN,
-  EPHEMERAL_ORIGIN,
   REMOTE_ORIGIN,
   elementToYMap,
   ELEMENT_DELETIONS,
@@ -232,7 +231,7 @@ const captureOwnSymbols = (
  * keys); `path[0]` (a string) is the element id for a per-element / nested
  * (`boundElements`) change. Returns `"full"` if any event can't be resolved to a
  * concrete id — the caller then conservatively treats *all* known ids as
- * changed. (Same derivation as the M1 `yjs-binding` apply path.)
+ * changed.
  */
 const changedElementIds = (
   events: readonly Y.YEvent<Y.AbstractType<unknown>>[],
@@ -465,26 +464,10 @@ export class Scene {
     cb: (update: Uint8Array) => void;
   }> = [];
 
-  /** >0 while a logical mutation is open; per-transaction delivery is withheld. */
-  private logicalBoundaryDepth = 0;
-
   /**
-   * Whether the OPEN logical mutation may reach peers.
-   *
-   * Transport visibility is a property of the whole mutation, not of the
-   * individual transactions inside it. A creation is a `STRUCTURAL` prelude —
-   * born-tombstoned but CONTENT-BEARING — plus a reveal; filtering by
-   * per-transaction origin would broadcast the structural half of a non-recording
-   * create and drop the reveal, leaving the peer holding a tombstone carrying the
-   * element's real properties that never becomes live. That is worse than either
-   * publishing or suppressing the whole thing: permanent divergence plus a content
-   * leak.
-   */
-  private logicalPublish = true;
-
-  /**
-   * The exact update bytes Yjs emitted while the boundary was open, merged and
-   * dispatched once when it closes.
+   * The exact update bytes Yjs emitted while a logical mutation was open, merged
+   * and dispatched once when it closes. Non-null exactly while one is open, so
+   * per-transaction delivery is withheld for that span.
    *
    * Buffering the real bytes — rather than recomputing a delta from a saved state
    * vector — is what makes deletions converge. A Yjs state vector tracks inserted
@@ -634,12 +617,11 @@ export class Scene {
       // downstream. The Scene's other local origins are excluded:
       //  - STRUCTURAL_ORIGIN: born-revealed add / prune; meta is (re)written by
       //    the paired reveal pass.
-      //  - EPHEMERAL_ORIGIN: a local non-undoable write (scene load, etc.) whose
-      //    meta the write path sets directly.
+      //    A non-undoable local write (a load, an import) also lands under
+      //    STRUCTURAL, and its meta is set directly by the write path too.
       if (
         transaction.origin !== LOCAL_ORIGIN &&
-        transaction.origin !== STRUCTURAL_ORIGIN &&
-        transaction.origin !== EPHEMERAL_ORIGIN
+        transaction.origin !== STRUCTURAL_ORIGIN
       ) {
         this.bumpMetaVersionsFor(changedElementIds(events));
       }
@@ -649,7 +631,7 @@ export class Scene {
 
     // Files live on the SAME doc (M4), so a change to `yFiles` — a local
     // `setFiles`, OR a remote files apply (REMOTE_ORIGIN, M3), OR a load
-    // (`EPHEMERAL_ORIGIN`) — must notify the same `callbacks` as an element
+    // (a non-recording write, `STRUCTURAL_ORIGIN`) — must notify the same `callbacks` as an element
     // change, so the editor refreshes its in-memory files cache and re-renders.
     // `.observe` (not `observeDeep`): each `yFiles` value is a whole FileRecord
     // stored as a JSON-leaf — files are added/removed, never sub-merged (see the
@@ -668,7 +650,7 @@ export class Scene {
 
     // The persistable appState subset (background + name) lives on the SAME doc
     // (M4), so a change to `yAppState` — a local `setAppState`, a remote appState
-    // apply (REMOTE_ORIGIN, M3), or a load (`EPHEMERAL_ORIGIN`) — must notify the
+    // apply (REMOTE_ORIGIN, M3), or a load (`STRUCTURAL_ORIGIN`) — must notify the
     // same `callbacks` as an element/files change so the App refreshes its React
     // appState from the doc and re-renders (background/name are React state, not
     // read from the doc by the renderer). `.observe` (shallow) is enough: each
@@ -1020,7 +1002,10 @@ export class Scene {
     }
 
     const changedIds = new Set<string>();
-    const writeOrigin = plan.recordHistory ? LOCAL_ORIGIN : EPHEMERAL_ORIGIN;
+    // A non-recording write is UNTRACKED BY UNDO, not invisible to peers: it
+    // mutates the shared doc, so the next full-state encode carries it whatever
+    // the incremental policy says . STRUCTURAL is exactly that pair.
+    const writeOrigin = plan.recordHistory ? LOCAL_ORIGIN : STRUCTURAL_ORIGIN;
 
     const scopedWrite = (
       entry: { record: ElementRecord; keys: ReadonlySet<string> },
@@ -1041,7 +1026,7 @@ export class Scene {
     };
 
     const prevSuppress = this.suppressTrigger;
-    this.openLogicalMutation(plan.recordHistory);
+    this.openLogicalMutation();
     this.suppressTrigger = true;
     try {
       // G1 — structural prelude, absent adds only, born-tombstoned.
@@ -1096,39 +1081,33 @@ export class Scene {
   }
 
   /**
-   * G5 — dispatch the whole logical mutation as ONE transport message, by
-   * merging exactly the updates Yjs emitted inside the boundary. Nothing
-   * buffered (a true no-op) dispatches nothing. Runs from a `finally`, so a
-   * post-prelude throw still publishes what Yjs committed.
+   * Open a logical mutation: everything Yjs emits until the matching close is
+   * buffered, then dispatched as ONE transport message by merging exactly those
+   * emitted bytes (G5). Nothing buffered — a true no-op — dispatches nothing.
+   * The close runs from a `finally`, so a throw after the structural prelude
+   * still publishes what Yjs actually committed.
+   *
+   * The emitted bytes are buffered rather than a delta recomputed from a
+   * pre-mutation state vector: a state vector tracks inserted struct clocks and
+   * not delete-set advancement, so a recomputed delta silently drops deletions.
    */
-  /**
-   * Open a logical mutation. Everything Yjs emits until the matching close is
-   * buffered, then published as ONE update — or discarded entirely if the
-   * mutation is not publishable.
-   */
-  private openLogicalMutation(publish: boolean): void {
-    this.logicalBoundaryDepth++;
-    if (this.logicalBoundaryDepth === 1) {
-      this.logicalBuffer = { v1: [], v2: [] };
-      this.logicalPublish = publish;
-    } else if (!publish) {
-      // a nested non-publishable mutation taints the whole outer one
-      this.logicalPublish = false;
+  private openLogicalMutation(): void {
+    if (this.logicalBuffer !== null) {
+      // Nesting is unsupported: the only openers are `commitPlan` and
+      // `replaceAllElements`, and neither calls the other. A nested open is a
+      // programming error, not a mode to fold two mutations into one message.
+      throw new Error("Scene: a logical mutation is already open.");
     }
+    this.logicalBuffer = { v1: [], v2: [] };
   }
 
   private closeLogicalMutation(): void {
-    this.logicalBoundaryDepth--;
-    if (this.logicalBoundaryDepth > 0) {
-      return;
+    if (this.logicalBuffer === null) {
+      throw new Error("Scene: no logical mutation is open.");
     }
     const buffered = this.logicalBuffer;
-    const publish = this.logicalPublish;
     this.logicalBuffer = null;
-    this.logicalPublish = true;
-    if (publish) {
-      this.publishBuffered(buffered);
-    }
+    this.publishBuffered(buffered);
   }
 
   private publishBuffered(
@@ -1179,13 +1158,13 @@ export class Scene {
        * `false` for `CaptureUpdateAction.NEVER` writes — scene load/init,
        * non-capturing programmatic updates, undo/redo re-application, remote
        * applies — so the change lands in the doc but produces NO undo step. See
-       * {@link EPHEMERAL_ORIGIN}.
+       * {@link STRUCTURAL_ORIGIN} — untracked by undo, but still published.
        */
       recordHistory?: boolean;
     },
   ) {
     const revealOrigin =
-      options?.recordHistory === false ? EPHEMERAL_ORIGIN : LOCAL_ORIGIN;
+      options?.recordHistory === false ? STRUCTURAL_ORIGIN : LOCAL_ORIGIN;
     // we do trust the insertion order on the map, though maybe we shouldn't and should prefer order defined by fractional indices
     const _nextElements = toArray(nextElements);
 
@@ -1238,13 +1217,12 @@ export class Scene {
       snapshots.set(element.id, { ...(element as unknown as ElementRecord) });
     }
 
-    // ONE logical mutation across BOTH passes. Transport visibility belongs to the
-    // whole mutation: a creation's STRUCTURAL prelude is content-bearing, so
-    // publishing it while filtering the reveal would leave a peer holding a
-    // tombstone that carries the element's real properties and never becomes live.
-    // `recordHistory: false` (scene load/init, reset, prune) therefore discards
-    // EVERY buffered part, structural included.
-    this.openLogicalMutation(options?.recordHistory !== false);
+    // ONE logical mutation across BOTH passes, so the pair reaches a peer as a
+    // single message. A creation's STRUCTURAL prelude is content-bearing, and
+    // delivering it separately from its reveal would leave the peer holding a
+    // tombstone that carries the element's real properties and never becomes
+    // live. Buffering both and emitting once makes that unrepresentable.
+    this.openLogicalMutation();
     try {
       this.observerFired = false;
 
@@ -1628,15 +1606,18 @@ export class Scene {
       return;
     }
     const handler = (update: Uint8Array, origin: unknown) => {
-      // The ONE origin policy for the transport boundary. Both suppressions are
-      // load-bearing, and a consumer must not have to rediscover either:
+      // The ONE origin policy for the transport boundary, and it withholds
+      // exactly one thing:
       //
       //  - REMOTE_ORIGIN: a peer's edit we just applied. Re-broadcasting it is the
       //    echo loop.
-      //  - EPHEMERAL_ORIGIN: a local NON-undoable write — scene load/init, reset,
-      //    file pruning, a non-capturing programmatic update. These are
-      //    DESTRUCTIVE on the wire: a reset broadcasts a whole-scene delete, so a
-      //    peer loses every element and every image binary.
+      //
+      // Everything else that touches this document is delivered, including writes
+      // that produce no undo step (a load, a non-capturing programmatic update).
+      // Such a write is untracked by history, not invisible: its structs live in
+      // the doc, so the next full-state encode carries it whatever this callback
+      // does. Work that must NOT reach peers cannot happen on this document —
+      // the editor replaces the Scene generation for that.
       //
       // STRUCTURAL_ORIGIN is deliberately NOT suppressed: a born-revealed create
       // is a structural add plus its reveal, and dropping the structural half
@@ -1650,10 +1631,10 @@ export class Scene {
       // Undo/redo is likewise NOT suppressed: its origin is the UndoManager,
       // which is none of the sentinels, so it broadcasts — a peer must see an
       // undo as an ordinary forward change.
-      if (origin === REMOTE_ORIGIN || origin === EPHEMERAL_ORIGIN) {
+      if (origin === REMOTE_ORIGIN) {
         return;
       }
-      if (this.logicalBoundaryDepth > 0) {
+      if (this.logicalBuffer !== null) {
         this.logicalBuffer?.[format].push(update);
         return;
       }
@@ -1674,14 +1655,19 @@ export class Scene {
   // ---------------------------------------------------------------------------
   // files + persistable appState on the doc (native-Yjs core, M4 — persistence)
   //
-  // Image binaries and the persistable appState subset live in THIS doc, so an
-  // encoded doc is the whole whiteboard (see {@link encodeSnapshot}). These thin
+  // Image binaries and the persistable appState subset live in THIS doc, so
+  // `encodeStateAsUpdate` over it yields the whole whiteboard. These thin
   // accessors are how the editor reads/writes them; the renderer keeps consuming
   // a plain files object and the plain appState — the doc is just where the
-  // durable copy lives and collaborates. Writes go under a chosen origin so a
-  // load (`EPHEMERAL_ORIGIN`) is non-undoable while a normal edit (`LOCAL_ORIGIN`,
-  // the default) is broadcast to peers and recorded; a remote files/appState
-  // change arrives via the same `applyRemoteUpdate` path the elements do.
+  // durable copy lives and collaborates.
+  //
+  // Origins here mean what they mean everywhere: an ordinary local write is
+  // `LOCAL_ORIGIN` and is published, maintenance is `STRUCTURAL_ORIGIN` and is
+  // also published, and a peer's change arrives through `applyRemoteUpdate` under
+  // `REMOTE_ORIGIN` and is never echoed. Undo ownership is NOT decided by origin
+  // alone but by which map is in scope: the `UndoManager` covers `yElements` and
+  // `yElementDeletions` only, so writes to `yFiles`/`yAppState` produce no Yjs
+  // undo step whatever origin they carry.
   // ---------------------------------------------------------------------------
 
   /**
@@ -1690,11 +1676,10 @@ export class Scene {
    * removes an image's binary on element delete), so this never drops a file a
    * peer just added. No-op (no transaction) when nothing changed.
    *
-   * Always `LOCAL_ORIGIN`. The former `recordHistory: false` option had zero
-   * callers in production or tests, and it existed to request the one thing an
-   * origin cannot deliver for a shared-document write: invisibility to peers
-   * (see T031). The load path is the constructor / adopted doc, not a
-   * non-recording write.
+   * Written under `LOCAL_ORIGIN`, so the change is published to peers. That does
+   * NOT make it undoable: the `UndoManager` is scoped to `yElements` and
+   * {@link yElementDeletions}, so a write to `yFiles` produces no undo step at
+   * all. Loading a document is done by adopting its doc, not by writing here.
    */
   setFiles(files: Readonly<Record<string, FileRecord>>): void {
     this.doc.transact(() => {
@@ -1706,32 +1691,6 @@ export class Scene {
    * the doc (deep-cloned, never aliasing doc-internal data). */
   getFiles(): Record<string, FileRecord> {
     return readFiles(this.yFiles);
-  }
-
-  /**
-   * Drop every file from the doc's `yFiles` whose id is NOT in `keepFileIds`
-   * (native-Yjs core, M4). `setFiles` is deliberately append-only — a normal save
-   * must never drop a file a peer just added — so file pruning is an explicit,
-   * separate operation, used when files become genuinely orphaned with no
-   * concurrency hazard: a scene CLEAR / reset (every file unreferenced), or a
-   * delete where the caller has computed the surviving referenced set. Without it
-   * a pasted-then-deleted image's binary would linger in the doc indefinitely.
-   *
-   * Written under {@link EPHEMERAL_ORIGIN}: a local, non-undoable maintenance
-   * write (mirrors a load). No-op (no transaction) when nothing is removed.
-   * Returns the number of files removed.
-   */
-  pruneFiles(keepFileIds: ReadonlySet<string>): number {
-    let removed = 0;
-    this.doc.transact(() => {
-      for (const id of [...this.yFiles.keys()]) {
-        if (!keepFileIds.has(id)) {
-          this.yFiles.delete(id);
-          removed++;
-        }
-      }
-    }, EPHEMERAL_ORIGIN);
-    return removed;
   }
 
   /**
@@ -1757,8 +1716,9 @@ export class Scene {
    * **Origin** is {@link STRUCTURAL_ORIGIN}, in ONE transaction:
    *  - not `LOCAL_ORIGIN` — the `UndoManager` tracks that, so a sweep would enter
    *    the undo stack and Ctrl+Z would resurrect reclaimed content;
-   *  - not `EPHEMERAL_ORIGIN` — the wire policy suppresses that, so peers would
-   *    keep the content forever and re-seed it to the next joiner.
+   *    (There is no "local-only" origin to reach for: a
+   *    shared-doc write cannot be hidden from peers, because the next full-state
+   *    encode carries it regardless.)
    *  Structural is untracked by undo AND published, which is what maintenance
    *  needs. Every writable replica may sweep: `Y.Map` deletes commute, so a
    *  replica that receives another's sweep simply has nothing left to delete —
@@ -1820,9 +1780,10 @@ export class Scene {
    * considered; every other appState field is local-only and ignored here (it
    * must not persist or collaborate).
    *
-   * Always `LOCAL_ORIGIN` — see the note on {@link setFiles}; the
-   * `recordHistory: false` option had zero callers and requested an
-   * unachievable guarantee.
+   * Written under `LOCAL_ORIGIN`, so the change is published to peers. Like
+   * {@link setFiles} this is outside the `UndoManager`'s scope, so it produces no
+   * Yjs undo step; reverting the persisted appState on undo is the editor
+   * history's responsibility, not this doc's.
    */
   setAppState(
     appState: Readonly<Partial<Record<AppStateAllowKey, unknown>>>,
@@ -2038,7 +1999,8 @@ export class Scene {
       /**
        * Whether this mutation is an undoable local edit (default `true`). Pass
        * `false` for `CaptureUpdateAction.NEVER` mutations so the doc changes but
-       * no undo step is produced. See {@link EPHEMERAL_ORIGIN}.
+       * no undo step is produced. Written under {@link STRUCTURAL_ORIGIN}:
+       * untracked by undo, but still published to peers.
        */
       recordHistory?: boolean;
     } = {
@@ -2047,7 +2009,7 @@ export class Scene {
     },
   ): TElement {
     const writeOrigin =
-      options.recordHistory === false ? EPHEMERAL_ORIGIN : LOCAL_ORIGIN;
+      options.recordHistory === false ? STRUCTURAL_ORIGIN : LOCAL_ORIGIN;
     const elementsMap = this.getNonDeletedElementsMap();
 
     const { version: prevVersion } = element;

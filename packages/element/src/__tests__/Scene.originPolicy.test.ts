@@ -18,25 +18,34 @@ const rect = (id: string): ExcalidrawElement =>
  * Its origin policy must be the SAME one the bundled collaboration client applies
  * — there is one correct policy, and it lives here.
  *
- * EPHEMERAL writes are local, non-undoable maintenance: scene load/init, reset,
- * file pruning, non-capturing programmatic updates. Broadcasting them pushes
- * destructive whole-scene deletes to peers. The bundled client suppresses them
- * explicitly; a consumer following the advertised Scene API must not have to
- * rediscover that.
+ * Only ONE thing is withheld: a remote apply, which must never be echoed back.
+ * A non-recording write (scene load/init, a non-capturing programmatic update) is
+ * NOT withheld — a shared-doc write cannot be hidden from
+ * peers at all, since the next full-state encode carries it regardless. Such a
+ * write is untracked by undo, not invisible. Work that genuinely must not reach
+ * peers cannot live on the shared doc; the editor replaces the Scene generation
+ * instead.
  */
 describe("Scene.onDocUpdate origin policy", () => {
-  it("does NOT broadcast an EPHEMERAL write", () => {
+  it("DOES broadcast a non-recording write — it is untracked, not invisible", () => {
+    // A non-recording write changes the shared document, so its structs are in
+    // the next full-state encode whatever the incremental policy does. The
+    // contract is therefore: untracked by undo, published like any other shared
+    // change.
     const scene = new Scene();
-    scene.replaceAllElements([rect("a"), rect("b")]);
+    // Seed non-recording too, so the undo assertion below isolates the write
+    // under test rather than inheriting an undo step from the seed.
+    scene.replaceAllElements([rect("a"), rect("b")], { recordHistory: false });
+    expect(scene.canUndoElements()).toBe(false); // guard
 
     const updates: Uint8Array[] = [];
     scene.onDocUpdate((u) => updates.push(u));
 
-    // exactly what a scene reset does: a non-undoable local clear
-    scene.replaceAllElements([], { recordHistory: false });
+    scene.replaceAllElements([rect("a")], { recordHistory: false });
 
-    expect(scene.getElementsIncludingDeleted()).toHaveLength(0); // it happened
-    expect(updates).toHaveLength(0); // ...and it was not broadcast
+    expect(scene.getElementsIncludingDeleted()).toHaveLength(1); // it happened
+    expect(updates.length).toBeGreaterThan(0); // ...and peers are told
+    expect(scene.canUndoElements()).toBe(false); // ...with no undo step
     scene.destroy();
   });
 
@@ -125,7 +134,7 @@ describe("Scene.onDocUpdate origin policy — appState rides the same doc", () =
   });
 });
 
-describe("Scene.onDocUpdate — a NON-RECORDING creation must be fully invisible", () => {
+describe("Scene.onDocUpdate — a non-recording creation is atomic on the wire", () => {
   /** Two Scenes wired through the public transport surface. */
   const link = (a: Scene, b: Scene) => {
     const detach = [
@@ -135,13 +144,16 @@ describe("Scene.onDocUpdate — a NON-RECORDING creation must be fully invisible
     return () => detach.forEach((d) => d());
   };
 
-  it("leaks no content-bearing tombstone to a peer", () => {
+  it("reaches the peer as a complete LIVE element, never a bare tombstone", () => {
     // A creation is a STRUCTURAL prelude (born-tombstoned, CONTENT-BEARING) plus a
-    // reveal. Filtering by transaction origin alone broadcasts the structural half
-    // of a non-recording create and filters the reveal — so the peer receives a
-    // tombstone carrying the element's real properties and never learns it should
-    // become live. That is worse than either broadcasting or suppressing the whole
-    // mutation: it is permanent divergence plus a content leak.
+    // reveal. Filtering by transaction origin alone, which
+    // broadcast the structural half and dropped the reveal, leaving the peer with a
+    // tombstone carrying the element's real properties that never became live —
+    // permanent divergence plus a content leak.
+    //
+    // Non-recording creations are now published , so the invariant that
+    // matters is atomicity: the prelude and its reveal arrive as ONE update, and
+    // the peer never observes the intermediate tombstone.
     const a = new Scene();
     const b = new Scene();
 
@@ -151,13 +163,16 @@ describe("Scene.onDocUpdate — a NON-RECORDING creation must be fully invisible
 
     a.replaceAllElements([rect("secret")], { recordHistory: false });
 
-    // GUARD: the write really happened locally, or the assertions below are vacuous.
+    // GUARD: the write really happened locally, or the assertions are vacuous.
     expect(a.getElement("secret")).toBeTruthy();
     expect(a.getElement("secret")!.isDeleted).toBe(false);
 
-    expect(updates).toHaveLength(0);
-    // ZERO entries, not merely zero LIVE elements — a tombstone is an entry.
-    expect([...b.yElements.keys()]).toEqual([]);
+    // ONE message, not a tombstone-add followed by a reveal.
+    expect(updates).toHaveLength(1);
+    // ...and the peer holds a complete, LIVE element.
+    expect([...b.yElements.keys()]).toEqual(["secret"]);
+    expect(b.getElement("secret")).toBeTruthy();
+    expect(b.getElement("secret")!.isDeleted).toBe(false);
 
     detachCount();
     unlink();

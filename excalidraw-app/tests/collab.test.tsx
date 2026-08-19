@@ -310,17 +310,17 @@ describe("collaboration", () => {
   // `onDocUpdate` CALL SITE itself (the FIX-1 test above calls
   // `queueBroadcastSceneResync()` directly and never touches `onDocUpdate`). This
   // pins the live wire routing of local doc updates:
-  //   FIX 2 (origin filter): a LOCAL_ORIGIN edit broadcasts via
-  //     `broadcastSceneUpdate(WS_SUBTYPES.UPDATE, …)`; an EPHEMERAL_ORIGIN write
-  //     (a `captureUpdate: NEVER` scene reset/load/prune) and a REMOTE_ORIGIN apply
-  //     do NOT broadcast — so local resets never push destructive deletes to peers
-  //     and a peer's edit is never echoed back.
+  //   FIX 2 (origin filter): local edits broadcast via
+  //     `broadcastSceneUpdate(WS_SUBTYPES.UPDATE, …)` — including a
+  //     `captureUpdate: NEVER` write, which is untracked by history but is still a
+  //     change to the shared document. Only a REMOTE_ORIGIN apply is withheld, so
+  //     a peer's edit is never echoed back.
   //   FIX 1 (resync moved off the edit path): a local edit must NOT itself trigger
   //     a full-scene resync — that now fires on an interval, not per update.
   // Mutating an EXISTING element (not creating one) keeps each edit a single
   // tracked transaction, so the LOCAL broadcast is exactly one call (a create would
   // also fire the paired STRUCTURAL pass, which is intentionally still broadcast).
-  it("onDocUpdate broadcasts LOCAL edits as UPDATE, suppresses EPHEMERAL/REMOTE, and does not resync per-edit — FIX 1 + FIX 2", async () => {
+  it("broadcasts local edits as UPDATE, never echoes a remote apply, and does not resync per-edit", async () => {
     await render(<ExcalidrawApp />);
 
     const collab = window.collab;
@@ -374,7 +374,9 @@ describe("collaboration", () => {
     // FIX 1: the local edit must NOT itself drive a full-scene resync.
     expect(resyncSpy).not.toHaveBeenCalled();
 
-    // (2) EPHEMERAL_ORIGIN write (captureUpdate: NEVER) → NOT broadcast.
+    // (2) a non-recording write (captureUpdate: NEVER) → IS broadcast. It is
+    // untracked by undo, not invisible: it changes the shared document, so the
+    // next full-state resync carries it regardless.
     updateSpy.mockClear();
     act(() => {
       API.updateScene({
@@ -385,7 +387,10 @@ describe("collaboration", () => {
       });
     });
 
-    expect(updateSpy).not.toHaveBeenCalled();
+    expect(updateSpy).toHaveBeenCalled();
+    expect(
+      updateSpy.mock.calls.every((call) => call[0] === WS_SUBTYPES.UPDATE),
+    ).toBe(true);
 
     // (3) a remote apply → NOT re-broadcast (no echo). Build a real remote delta
     // from a mirror doc so this exercises the actual integrate-and-notify path

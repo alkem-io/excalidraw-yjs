@@ -639,10 +639,11 @@ class Collab extends PureComponent<CollabProps, CollabState> {
     //
     // The origin policy lives in ONE place — the editor's transport boundary — so
     // there is deliberately no filtering here. `onLocalSceneUpdate` already
-    // withholds a remote apply (no echo) and any non-undoable local bookkeeping
-    // (scene load/init, reset, prune), and delivers a create's structural pass and
-    // reveal as a single update rather than a leaked tombstone. Re-implementing
-    // any of that here would be a second copy of the policy, free to drift.
+    // withholds a remote apply (no echo) and delivers a create's structural pass
+    // and reveal as a single update rather than a leaked tombstone. A local reset
+    // never arrives here at all, because it replaces the Scene generation instead
+    // of writing to the shared doc. Re-implementing any of that here would be a
+    // second copy of the policy, free to drift.
     this.detachDocBroadcast = this.excalidrawAPI.onLocalSceneUpdate(
       (update: Uint8Array) => {
         if (this.portal.isOpen()) {

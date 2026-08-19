@@ -15,10 +15,6 @@ import type { BoundElement } from "../types";
  * properties of the same element both survive (per-property LWW, not whole-object
  * replace). This file owns the element↔`Y.Map` mapping in both directions plus the
  * per-property diff write path.
- *
- * Historically this lived in `packages/yjs-binding/src/schema.ts`; it has moved
- * into `packages/element` because the doc is now the element store. The
- * yjs-binding package re-exports it for now (deleted at M3).
  */
 
 /**
