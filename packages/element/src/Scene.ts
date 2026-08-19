@@ -1482,8 +1482,21 @@ export class Scene {
       return;
     }
     const handler = (update: Uint8Array, origin: unknown) => {
-      // Do not re-broadcast a remote apply — only updates this replica originated.
-      if (origin === REMOTE_ORIGIN) {
+      // The ONE origin policy for the transport boundary. Both suppressions are
+      // load-bearing, and a consumer must not have to rediscover either:
+      //
+      //  - REMOTE_ORIGIN: a peer's edit we just applied. Re-broadcasting it is the
+      //    echo loop.
+      //  - EPHEMERAL_ORIGIN: a local NON-undoable write — scene load/init, reset,
+      //    file pruning, a non-capturing programmatic update. These are
+      //    DESTRUCTIVE on the wire: a reset broadcasts a whole-scene delete, so a
+      //    peer loses every element and every image binary.
+      //
+      // STRUCTURAL_ORIGIN is deliberately NOT suppressed: a born-revealed create
+      // is a structural add plus its reveal, and dropping the structural half
+      // would leave peers without the element. The logical-mutation boundary
+      // below is what makes the pair arrive as one message.
+      if (origin === REMOTE_ORIGIN || origin === EPHEMERAL_ORIGIN) {
         return;
       }
       if (this.logicalBoundaryDepth > 0) {

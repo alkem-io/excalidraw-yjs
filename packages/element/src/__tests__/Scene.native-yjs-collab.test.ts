@@ -274,8 +274,19 @@ describe("native-yjs Scene collaboration: two replicas converge on one doc", () 
     const heldByB = b.getElement("gone")!;
     expect(heldByB).not.toBeNull();
 
-    // B structurally removes "gone" (drop from a non-recording replace).
-    b.replaceAllElements([b.getElement("keep")!], { recordHistory: false });
+    // B structurally removes "gone".
+    //
+    // This uses a RECORDING replace. It previously used `recordHistory: false`,
+    // which is EPHEMERAL — and EPHEMERAL writes are deliberately not broadcast
+    // (scene load/init, reset and prune are local bookkeeping; broadcasting a
+    // reset pushes destructive whole-scene deletes to the room). The bundled
+    // collaboration client has always filtered them; `Scene.onDocUpdate` used to
+    // disagree, which is the defect fixed alongside this change. See
+    // `Scene.originPolicy.test.ts`.
+    //
+    // The invariant under test is unchanged: a structural remove converges, and a
+    // held reference does not resurrect the element.
+    b.replaceAllElements([b.getElement("keep")!]);
     link.flush();
 
     // Both replicas drop it from the doc + the derived views.
