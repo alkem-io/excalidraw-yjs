@@ -18,13 +18,10 @@ const liveIds = () =>
 /**
  * Reappearance after a destructive replace converges — locally and at a peer.
  *
- * NOTE ON SCOPE: these do NOT cover INV-REVEAL. That invariant is about the
- * version the Scene reseeds for an element whose `meta` was lost, needing to
- * land strictly above the `isDeleted:true` tombstone the editor Store synthesized
- * at `version + 1`. Sabotage proves this path does not exercise it: pinning the
- * reseed to a constant, or to a value equal to the tombstone, leaves both cases
- * green. The element returns by a route that does not depend on the high-water
- * mark, so a reproduction for INV-REVEAL still has to be found.
+ * INV-REVEAL lives in the STORE case below, not in the Scene or peer cases. The
+ * Scene and a peer converge regardless of the reseeded version, so asserting on
+ * them cannot detect a version-seeding defect at all — only the Store applies the
+ * `prevElement.version < nextElement.version` gate that the reseed has to clear.
  */
 describe("reappearance after a destructive replace converges", () => {
   it("undoing a destructive replace makes the element visible again", async () => {
@@ -59,6 +56,45 @@ describe("reappearance after a destructive replace converges", () => {
 
     // The element must be BACK — observable state, not a version counter.
     expect(liveIds()).toEqual(["dropped", "keep"]);
+  });
+
+  it("the STORE re-detects the reappearing element, not just the Scene", async () => {
+    // The Store is the observation surface that matters here. On a destructive
+    // removal it synthesizes an `isDeleted:true` tombstone at `version + 1` and
+    // RETAINS it in `store.elements` (store.ts:924). On reappearance it accepts
+    // the element only when `prevElement.version < nextElement.version`
+    // (store.ts:937) — so an equal version leaves the Store holding the
+    // tombstone while the Scene and any peer look perfectly correct.
+    await render(<Excalidraw />);
+
+    act(() => {
+      h.app.updateScene({
+        elements: [
+          API.createElement({ type: "rectangle", id: "keep" }),
+          API.createElement({ type: "rectangle", id: "dropped" }),
+        ],
+        captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+      });
+    });
+    act(() => {
+      h.app.updateScene({
+        elements: [API.createElement({ type: "rectangle", id: "keep" })],
+        captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+      });
+    });
+
+    // GUARD: the Store really is holding a tombstone for it, or the assertion
+    // below proves nothing.
+    expect(h.store.snapshot.elements.get("dropped")?.isDeleted).toBe(true);
+
+    act(() => {
+      h.app.actionManager.executeAction(
+        h.app.actionManager.actions.undo as never,
+      );
+    });
+
+    // The Store must agree the element is live again.
+    expect(h.store.snapshot.elements.get("dropped")?.isDeleted).toBe(false);
   });
 
   it("a peer converges on the restored element", async () => {
