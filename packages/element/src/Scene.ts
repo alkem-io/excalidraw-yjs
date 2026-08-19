@@ -1638,6 +1638,79 @@ export class Scene {
   }
 
   /**
+   * Reclaim deleted elements and the binaries only they still referenced
+   * (FR-006, INV-BOUNDED). Without this the doc grows monotonically under
+   * paste/delete churn, and a raw full-state encode ships every
+   * pasted-then-deleted element — and its image — to each new joiner.
+   *
+   * **The caller supplies the eligible ids; this method does not judge age.**
+   * That split is forced by the schema, not a preference: `updated` is in
+   * {@link RECONCILE_META_KEYS} and is deliberately NEVER written to the doc, so
+   * `isDeleted && updated <= now - DELETED_ELEMENT_TIMEOUT` is not computable
+   * from `yElements` at all. The clock and the timeout policy therefore live with
+   * the caller, which holds the in-memory elements that still carry `updated`.
+   * See the FR-006 note in tasks.md: judging expiry for a deletion this replica
+   * never observed (a cold join) needs a timestamp that survives the encode, and
+   * that is still an open design decision.
+   *
+   * What this method DOES own is the part that is easy to get wrong:
+   *
+   * **Files.** A binary is dropped only when NO remaining element references it —
+   * counting live elements AND retained tombstones. A soft-deleted image inside
+   * the grace window is still undoable, so dropping its binary because no *live*
+   * element points at it would restore the element without its image. Files are
+   * therefore reclaimed against what SURVIVES the element sweep.
+   *
+   * **Origin** is {@link STRUCTURAL_ORIGIN}, in ONE transaction:
+   *  - not `LOCAL_ORIGIN` — the `UndoManager` tracks that, so a sweep would enter
+   *    the undo stack and Ctrl+Z would resurrect reclaimed tombstones;
+   *  - not `EPHEMERAL_ORIGIN` — the wire policy suppresses that, so peers would
+   *    keep the content forever and re-seed it to the next joiner.
+   *  Structural is untracked by undo AND published, which is what maintenance
+   *  needs. Every writable replica may sweep: `Y.Map` deletes commute, so a
+   *  replica that receives another's sweep simply has nothing left to delete —
+   *  no leader election, lease or consensus.
+   *
+   * Nothing to reclaim means NO transaction, hence no wire traffic at all.
+   */
+  collectGarbage(options: { expiredElementIds: ReadonlySet<string> }): {
+    elements: number;
+    files: number;
+  } {
+    const expired = [...options.expiredElementIds].filter((id) =>
+      this.yElements.has(id),
+    );
+
+    const expiredSet = new Set(expired);
+    const referenced = new Set<string>();
+    for (const [id, record] of this.yElements.entries()) {
+      if (expiredSet.has(id) || !(record instanceof Y.Map)) {
+        continue;
+      }
+      const fileId = record.get("fileId");
+      if (typeof fileId === "string") {
+        referenced.add(fileId);
+      }
+    }
+    const orphans = [...this.yFiles.keys()].filter((id) => !referenced.has(id));
+
+    if (expired.length === 0 && orphans.length === 0) {
+      return { elements: 0, files: 0 };
+    }
+
+    this.doc.transact(() => {
+      for (const id of expired) {
+        this.yElements.delete(id);
+      }
+      for (const id of orphans) {
+        this.yFiles.delete(id);
+      }
+    }, STRUCTURAL_ORIGIN);
+
+    return { elements: expired.length, files: orphans.length };
+  }
+
+  /**
    * Write the persistable appState subset (the `APPSTATE_ALLOW_LIST` keys —
    * background + name) into the doc's `yAppState`. Only those keys are
    * considered; every other appState field is local-only and ignored here (it
