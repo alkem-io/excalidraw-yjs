@@ -184,4 +184,75 @@ describe("INV-WRITE-INTENT — a write touches only the declared keys", () => {
 
     scene.destroy();
   });
+
+  it("applies a declared write whose value equals the HELD copy but not the doc", () => {
+    // Found by independent review of the first cut of FR-009, and pre-existing
+    // before it. The unchanged-value checks in `mutateElement` compare against
+    // the caller's element, which may be behind the doc — so setting a property
+    // back to the value the stale copy already shows looked like a no-op and was
+    // dropped, even though it is a real declared change to the document.
+    const scene = new Scene();
+    scene.replaceAllElements([rect("a", { x: 0 })]);
+    const held = scene.getElement("a")!; // x = 0
+
+    const ymap = scene.yElements.get("a") as Y.Map<unknown>;
+    scene.doc.transact(() => ymap.set("x", 10)); // another writer moves it
+
+    scene.mutateElement(held, { x: 0 }); // deliberately back to 0
+
+    expect(ymap.get("x")).toBe(0);
+    scene.destroy();
+  });
+
+  it("does not bump the version when the doc already holds the declared value", () => {
+    // The dual of the above: deciding "did anything change" from the stale
+    // scratch object is unsound in both directions. Here the scratch DOES change
+    // (0 -> 10) so its version bumps, but the doc already held 10, so nothing
+    // was written. Recording that bump would advance the element's version with
+    // no corresponding change and the Store would report a phantom modification.
+    const scene = new Scene();
+    scene.replaceAllElements([rect("a", { x: 0 })]);
+    const held = scene.getElement("a")!;
+
+    const ymap = scene.yElements.get("a") as Y.Map<unknown>;
+    scene.doc.transact(() => ymap.set("x", 10));
+
+    const versionBefore = scene.getElement("a")!.version;
+    scene.mutateElement(held, { x: 10 }); // doc already 10
+
+    expect(scene.getElement("a")!.version).toBe(versionBefore);
+    scene.destroy();
+  });
+});
+
+describe("INV-VERSION-MONOTONIC — meta.version never regresses", () => {
+  // SKIPPED — confirmed defect, deliberately not yet fixed. See spec 002 FR-011
+  // task T014b and the matching comment in `Scene.replaceAllElements`. Both the
+  // blanket and the narrowed fix shift version values that the Store, history
+  // deltas and ~64 existing tests depend on; it needs doing as its own change,
+  // not as a patch tacked onto FR-009.
+  it.skip("a stale-versioned bulk write still out-versions the previous meta", () => {
+    // FR-011 was first applied only to `mutateElement`. `replaceAllElements` took
+    // the caller's version verbatim, so a stale action array carrying a low
+    // version could move meta BACKWARDS after undo/remote applies had raised it —
+    // and the Store detects a change only when `prev.version < next.version`, so
+    // a genuine edit was silently dropped from the change set.
+    const scene = new Scene();
+    scene.replaceAllElements([rect("a", { x: 0 })]);
+
+    const base = scene.getElement("a")!;
+    scene.replaceAllElements([{ ...base, x: 42 } as ExcalidrawElement]);
+    const vHigh = scene.getElement("a")!.version;
+
+    const lowVersioned = {
+      ...base,
+      x: 99,
+      version: 1,
+    } as ExcalidrawElement;
+    scene.replaceAllElements([lowVersioned]);
+
+    expect(scene.getElement("a")!.x).toBe(99);
+    expect(scene.getElement("a")!.version).toBeGreaterThan(vHigh);
+    scene.destroy();
+  });
 });

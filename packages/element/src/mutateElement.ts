@@ -93,6 +93,16 @@ export const mutateElement = <TElement extends Mutable<ExcalidrawElement>>(
   for (const key in updates) {
     const value = (updates as any)[key];
     if (typeof value !== "undefined") {
+      // INTENT is recorded HERE — before the unchanged-value checks below.
+      //
+      // Those checks compare against `element`, which may be a snapshot held
+      // across frames and therefore BEHIND the doc. A caller setting a property
+      // back to the value its stale copy already shows (held `x:0`, doc moved to
+      // `x:10` by a peer, caller asks for `x:0`) is making a real, declared
+      // change to the document — but the comparison sees `0 === 0`, skips, and
+      // the intent would be lost. Whether a write is a genuine no-op can only be
+      // decided against the DOC, which `writeChangedKeys` does.
+      changedKeys?.add(key);
       if (
         (element as any)[key] === value &&
         // if object, always update because its attrs could have changed
@@ -135,7 +145,6 @@ export const mutateElement = <TElement extends Mutable<ExcalidrawElement>>(
       }
 
       (element as any)[key] = value;
-      changedKeys?.add(key);
       didChange = true;
     }
   }

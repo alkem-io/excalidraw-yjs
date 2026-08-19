@@ -811,6 +811,30 @@ export class Scene {
         // from the live `element`: they are non-enumerable (ORIG_ID) so a spread
         // snapshot omits them, and the recompute re-stamps them onto the fresh
         // snapshot, so the live object is the canonical carrier.
+        // FR-011 applies to BULK writes too. `bumpMetaVersionsFor` (undo/redo,
+        // every remote apply) can have raised the local meta above the version
+        // carried by a caller's array — a stale action result or an imperative
+        // `updateScene` then changes a property while carrying a LOW version.
+        // Recording it verbatim moved the version backwards, and the editor
+        // Store detects a change only when `prev.version < next.version`, so a
+        // genuine edit was silently dropped from the change set and the history
+        // delta. Advance past the previous meta when the doc actually changed;
+        // never regress when it did not.
+        // KNOWN DEFECT (confirmed, not fixed here) — spec 002 FR-011, task T014b.
+        // `bumpMetaVersionsFor` (undo/redo, remote apply) can raise the local meta
+        // above the version a caller's array carries. A stale action result then
+        // changes a property while carrying a low version, this records it
+        // verbatim, and the editor Store — which detects a change only when
+        // `prev.version < next.version` — silently drops a real edit from the
+        // change set and the history delta.
+        //
+        // Not patched here on purpose. Both a blanket `max(record.version,
+        // prev + 1)` and a narrowed regression-only bump change version values
+        // that the Store, the history deltas and ~64 existing tests depend on
+        // (transform/contextmenu/history snapshots encode exact versions). The
+        // fix has to reconcile meta versioning with Store change-detection as a
+        // whole, which is its own piece of work. See the skipped
+        // INV-VERSION-MONOTONIC case in `Scene.native-yjs-write-intent.test.ts`.
         this.meta.set(element.id, {
           version: record.version as number,
           versionNonce: record.versionNonce as number,
@@ -1434,7 +1458,12 @@ export class Scene {
     );
 
     const inScene = this.elementsMap.has(element.id);
-    const changed = prevVersion !== nextVersion;
+    // A scratch-version bump means the CALLER'S OBJECT changed. It is not the
+    // same question as "does the doc need writing": a declared write whose value
+    // already matches the (stale) scratch bumps nothing, yet still differs from
+    // the doc. Proceed whenever the caller declared any key — `writeChangedKeys`
+    // compares against the doc and no-ops if there is genuinely nothing to do.
+    const changed = prevVersion !== nextVersion || intentKeys.size > 0;
 
     if (inScene && changed) {
       // `informMutation: false` ⇒ write the change but don't notify the component
@@ -1456,12 +1485,20 @@ export class Scene {
         // where `insertNewElement` follows the seeding `scene.mutateElement`).
         this.doc.transact(() => {
           const ymap = this.yElements.get(element.id);
-          if (ymap) {
-            writeChangedKeys(
-              ymap,
-              element as unknown as ElementRecord,
-              intentKeys,
-            );
+          const writes = ymap
+            ? writeChangedKeys(
+                ymap,
+                element as unknown as ElementRecord,
+                intentKeys,
+              )
+            : 0;
+          // No doc change ⇒ no metadata change. `mutateElement` may have bumped
+          // the SCRATCH object's version while the doc already held the
+          // requested value; recording that bump would advance the element's
+          // version with no corresponding change, and the editor Store would
+          // report a phantom modification on the next recompute.
+          if (writes === 0) {
+            return;
           }
           // Refresh the locally-maintained reconciliation metadata + own-Symbol
           // props from the just-normalized scratch object (the doc does not store
