@@ -151,8 +151,12 @@ export class History {
     this.undoStack.push(entry);
 
     if (hasElementChange) {
-      // Seal the element undo step the UndoManager captured for this gesture, so
-      // the next local edit is a separate step (1 entry ↔ 1 StackItem).
+      // Close the UndoManager's current capture window, so a subsequent local
+      // edit starts a new step rather than merging into this one. This states
+      // the mechanism only: it does not establish a bijection between History
+      // entries and UndoManager items, and none is relied on — the two stacks
+      // legitimately differ in size (an appState-only entry has no element item
+      // at all). See INV-HISTORY-LOCKSTEP, which is stated behaviourally.
       this.getScene().stopElementCapture();
       // A new durable element change invalidates the redo branch — both here and
       // on the UndoManager (it drops its redo stack when a fresh edit is tracked).
