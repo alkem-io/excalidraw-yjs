@@ -227,32 +227,31 @@ describe("INV-WRITE-INTENT — a write touches only the declared keys", () => {
 
 describe("INV-VERSION-MONOTONIC — meta.version never regresses", () => {
   // SKIPPED — confirmed defect, deliberately not yet fixed. See spec 002 FR-011
-  // task T014b and the matching comment in `Scene.replaceAllElements`. Both the
-  // blanket and the narrowed fix shift version values that the Store, history
-  // deltas and ~64 existing tests depend on; it needs doing as its own change,
-  // not as a patch tacked onto FR-009.
-  it.skip("a stale-versioned bulk write still out-versions the previous meta", () => {
-    // FR-011 was first applied only to `mutateElement`. `replaceAllElements` took
-    // the caller's version verbatim, so a stale action array carrying a low
-    // version could move meta BACKWARDS after undo/remote applies had raised it —
-    // and the Store detects a change only when `prev.version < next.version`, so
-    // a genuine edit was silently dropped from the change set.
+  // task T014b and the KNOWN DEFECT comment in `Scene.replaceAllElements`.
+  it.skip("a stale-versioned bulk write still out-versions a raised meta", () => {
     const scene = new Scene();
     scene.replaceAllElements([rect("a", { x: 0 })]);
-
     const base = scene.getElement("a")!;
-    scene.replaceAllElements([{ ...base, x: 42 } as ExcalidrawElement]);
-    const vHigh = scene.getElement("a")!.version;
 
-    const lowVersioned = {
-      ...base,
-      x: 99,
-      version: 1,
-    } as ExcalidrawElement;
-    scene.replaceAllElements([lowVersioned]);
+    // Raise the local meta the way undo/redo and a remote apply do: a doc
+    // transaction whose origin is not LOCAL routes through `bumpMetaVersionsFor`.
+    const ymap = scene.yElements.get("a") as Y.Map<unknown>;
+    scene.doc.transact(() => ymap.set("x", 42));
+
+    const raised = scene.getElement("a")!.version;
+    // Guard: if this does not hold the fixture is not exercising the defect at
+    // all, and the assertion below would fail for an unrelated reason.
+    expect(raised).toBeGreaterThan(base.version);
+
+    // A stale action array now changes a property while carrying the OLD version.
+    scene.replaceAllElements([
+      { ...base, x: 99, version: base.version } as ExcalidrawElement,
+    ]);
 
     expect(scene.getElement("a")!.x).toBe(99);
-    expect(scene.getElement("a")!.version).toBeGreaterThan(vHigh);
+    // THE DEFECT: recorded verbatim, so meta regresses below `raised` and
+    // `Store.update`'s `prev.version < next.version` gate drops the edit.
+    expect(scene.getElement("a")!.version).toBeGreaterThan(raised);
     scene.destroy();
   });
 });

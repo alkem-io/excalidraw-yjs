@@ -811,15 +811,6 @@ export class Scene {
         // from the live `element`: they are non-enumerable (ORIG_ID) so a spread
         // snapshot omits them, and the recompute re-stamps them onto the fresh
         // snapshot, so the live object is the canonical carrier.
-        // FR-011 applies to BULK writes too. `bumpMetaVersionsFor` (undo/redo,
-        // every remote apply) can have raised the local meta above the version
-        // carried by a caller's array — a stale action result or an imperative
-        // `updateScene` then changes a property while carrying a LOW version.
-        // Recording it verbatim moved the version backwards, and the editor
-        // Store detects a change only when `prev.version < next.version`, so a
-        // genuine edit was silently dropped from the change set and the history
-        // delta. Advance past the previous meta when the doc actually changed;
-        // never regress when it did not.
         // KNOWN DEFECT (confirmed, not fixed here) — spec 002 FR-011, task T014b.
         // `bumpMetaVersionsFor` (undo/redo, remote apply) can raise the local meta
         // above the version a caller's array carries. A stale action result then
