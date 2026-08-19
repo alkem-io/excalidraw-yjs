@@ -189,6 +189,10 @@ Ctrl+Z after changing the canvas background restores the previous colour — per
 - **FR-013** File binaries MUST NOT be included in any collaboration broadcast on any path. _[R2-#6]_
 - **FR-014** An invalid remote update MUST be rejected without desynchronising or wedging the session. _[R2-#11]_
 - **FR-015** An appState undo/redo MUST write the reverted value back to `yAppState`. _[R2-#7]_
+- **FR-016** Applying an ordinary `ActionResult` MUST NOT use the authoritative whole-set reconcile path. It MUST apply the action's **intent** — added/deleted membership plus changed keys — against the **current** doc, so unrelated keys and ids that changed while the action ran survive. `replaceAllElements` keeps its authoritative "doc = this set" contract for its legitimate callers (load / reset / import / explicit full reconcile); `App.syncActionResult` stops being one of them. _[found while re-scoping T016]_
+  - The action's **base snapshot must be captured at invocation and be a real copy** — `Scene.mutateElement` mutates the passed scratch before re-derivation, so a bare element-array reference is not a stable "before" image.
+  - `ActionFn` may be **async**, so `ActionManager` must preserve that snapshot alongside the promise. Confirmed live instance: `actionCopyElementLink.perform` is async and returns its invocation-time `elements` on both the fallback and `catch` paths, so a remote apply landing during the `await` is reverted wholesale. No helper-site re-read can fix this class. Audit list of async element-returning actions: `actionElementLink.ts`, `actionClipboard.tsx`, `actionExport.tsx`.
+  - A base→result **diff is a sound migration default but is NOT the definition of intent**: "explicitly set key to the value it already had in base" is invisible to a diff yet must still beat an interleaved remote write — the same asymmetry FR-009 fixed one layer down. The durable contract should let an `ActionResult` carry explicit per-id key sets plus membership intent, deriving it only for synchronous actions in the interim.
 
 ## Success Criteria _(mandatory)_
 

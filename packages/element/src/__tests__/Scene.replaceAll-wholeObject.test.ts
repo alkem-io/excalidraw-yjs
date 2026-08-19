@@ -53,10 +53,17 @@ describe("replaceAllElements is whole-object by contract", () => {
 
     scene.replaceAllElements(captured);
 
-    // The write is reverted. NOT a bug — `replaceAllElements` means "make the doc
-    // equal this set". It is the reason a handler must re-read side-effected
-    // elements before returning its array, and why T016 cannot simply delete
-    // those re-reads.
+    // The write is reverted. That is CORRECT for a caller deliberately invoking
+    // an authoritative reconcile (load / reset / import), whose contract really is
+    // "doc = this set", membership deletion included.
+    //
+    // It is NOT correct for the path `App.syncActionResult` takes, which feeds
+    // this API a value computed from an earlier scene snapshot — there the same
+    // outcome is the bug (spec 002 FR-016). This test pins the API's semantics,
+    // not a blessing of that caller.
+    //
+    // It is also why a handler must re-read side-effected elements before
+    // returning its array, and why T016 cannot simply delete those re-reads.
     expect(scene.getElement("a")!.y).toBe(0);
     scene.destroy();
   });

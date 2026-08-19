@@ -29,6 +29,19 @@
 - [ ] T015 Declare intent sets in the side-effecting helpers (`redrawTextBoundingBox`, `updateBoundElements`, `bindOrUnbind`) — see plan R6.
 - [ ] T016 **(PREMISE FALSIFIED — re-scope before doing any of this)** The re-read sites are **not** dead code after FR-009 and must not be bulk-deleted. - **Census correction**: 36 `fresh-snapshot` sites across 17 files (16 literal `*Map.get(id) ?? element` idioms), not the 32/14 first reported. - **Why they survive**: FR-009 scoped `Scene.mutateElement`, but `replaceAllElements` is deliberately unscoped — its contract is "make the doc equal this element set", which is correct for a full reconcile. The stale-read revert class therefore survives at the BULK path: a handler that captures the array, lets a side-effect helper write to the doc, then returns its captured array, reverts that write. Proven by `Scene.replaceAll-wholeObject.test.ts` (with non-vacuity guards on both the staleness of the array and the reality of the doc write). Deleting the re-reads would reintroduce exactly the class `b2f708f5` fixed. - **What the earlier "1/32 done" actually was**: not a bandaid removal. `changeFontSize`'s `editedTextIds` carve-out was an _exception_ to re-reading, removed because the font size became a real doc write — the surrounding re-read stayed. Prior claim withdrawn. - **Re-scope**: removing the re-reads requires first changing the bulk path — either scoping `replaceAllElements` to a declared changed-set, or changing how action handlers return arrays so a stale one never reaches it. That is a new requirement, not a cleanup task, and it interacts with T014b (both are about the bulk write path). Decide the bulk-path design before touching any of the 36 sites.
 
+## Phase 2b — Action-result patch semantics (FR-016) — precedes History lockstep
+
+Two independent findings (T014b's meta regression and T016's surviving revert class) both land on the unscoped bulk write path, so it is the next real work.
+
+- [ ] T016a `ActionManager` captures a real COPY of the element array at invocation and preserves it alongside the promise (`ActionFn` may be async). A bare reference is not a stable "before" image — `Scene.mutateElement` mutates the passed scratch before re-derivation.
+- [ ] T016b `scene.applyElementChanges(base, result, intent?)`: diff result against the invocation snapshot for added/deleted ids and changed keys, apply only those against the CURRENT doc. Order/index is an ordinary explicit key. `replaceAllElements` stays authoritative and keeps its callers (load/reset/import).
+- [ ] T016c Point `App.syncActionResult` at the new path. RED first: a test where a remote apply lands mid-action and must survive the result application.
+- [ ] T016d Audit the async element-returning actions that return their invocation-time array — `actionElementLink.ts` (confirmed live defect on the fallback + catch paths), `actionClipboard.tsx`, `actionExport.tsx`.
+- [ ] T016e Solve **T014b here**: this write path knows exactly which ids produced real doc writes, so it can advance reconciliation versions for those and only those.
+- [ ] T016f Only then revisit the 36 re-read sites, retiring each as patch mode proves it redundant.
+
+**Design note (do not lose):** a base→result diff is a sound migration default but is NOT the definition of intent. "Explicitly set a key to the value it already had in base" is invisible to a diff yet must still beat an interleaved remote write — the same asymmetry FR-009 fixed one layer down. Derive for synchronous actions in the interim; the durable contract carries explicit per-id key sets plus membership intent.
+
 ## Phase 3 — History lockstep (FR-010)
 
 - [ ] T017 A `REMOTE_ORIGIN` apply absorbs into the Store snapshot without contributing a history entry or clearing the redo branch. Green **INV-HISTORY-LOCKSTEP** — and with T013/T014, the re-enabled 34-test block from T002.
