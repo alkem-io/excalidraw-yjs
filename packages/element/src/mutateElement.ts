@@ -43,6 +43,22 @@ export const mutateElement = <TElement extends Mutable<ExcalidrawElement>>(
     isBindingEnabled?: boolean;
     isMidpointSnappingEnabled?: boolean;
   },
+  /**
+   * Out-param: when supplied, receives the exact set of keys this call assigned
+   * to `element` — the caller's INTENT SET (spec 002 / FR-009).
+   *
+   * It is deliberately collected HERE rather than derived from the caller's
+   * `updates`, because `updates` is augmented in-flight: elbow arrows gain
+   * `angle` + recomputed points, and a `points` update gains the derived
+   * `width`/`height`. Those augmentations are genuine parts of the intent and
+   * must reach the doc; a set built from the caller's original `updates` would
+   * silently drop them.
+   *
+   * Keys whose value was unchanged are NOT added — an unchanged key is not part
+   * of the intent, and writing it would reintroduce the clobber this exists to
+   * prevent.
+   */
+  changedKeys?: Set<string>,
 ) => {
   let didChange = false;
 
@@ -119,6 +135,7 @@ export const mutateElement = <TElement extends Mutable<ExcalidrawElement>>(
       }
 
       (element as any)[key] = value;
+      changedKeys?.add(key);
       didChange = true;
     }
   }

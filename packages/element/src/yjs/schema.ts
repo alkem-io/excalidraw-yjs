@@ -331,9 +331,21 @@ export const yMapToElement = (ymap: Y.Map<unknown>): ElementRecord => {
 export const writeChangedKeys = (
   ymap: Y.Map<unknown>,
   element: ElementRecord,
+  /**
+   * The caller's INTENT SET (spec 002 / FR-009). When supplied, ONLY these keys
+   * are considered: a key outside the set is never written, never deleted, and
+   * never compared — so a caller holding a STALE element cannot revert a value
+   * another writer (a peer, an undo, a concurrent local path) put in the doc.
+   *
+   * When omitted the whole object is diffed, which is the correct semantic for
+   * `replaceAllElements` — there the caller genuinely means "make the doc equal
+   * this element". It is the WRONG semantic for a mutation, because a mutation
+   * declares a change to specific keys and says nothing about the rest.
+   */
+  intentKeys?: ReadonlySet<string>,
 ): number => {
   let writes = 0;
-  for (const key of Object.keys(element)) {
+  for (const key of intentKeys ?? Object.keys(element)) {
     if (RECONCILE_META_KEYS.has(key)) {
       continue;
     }
@@ -367,7 +379,12 @@ export const writeChangedKeys = (
   // Keys present on the doc but entirely absent from the element object (the key
   // was dropped, not set to undefined) — clear them too (excluding meta + the
   // element id, which is the map key, not a stored property).
-  for (const key of [...ymap.keys()]) {
+  //
+  // Scoped writes skip this entirely: "absent from the caller's element" carries
+  // no intent to delete when the caller only declared a few keys, and a stale
+  // element is missing exactly the keys a peer just added. Running it would
+  // delete them.
+  for (const key of intentKeys ? [] : [...ymap.keys()]) {
     if (
       key !== "id" &&
       !RECONCILE_META_KEYS.has(key) &&

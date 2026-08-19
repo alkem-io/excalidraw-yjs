@@ -12,9 +12,9 @@ The native-Yjs invariant the epic is built on — _"the editor's element store I
 
 ### Widened 2026-08-19 — a second root cause, inside the editor
 
-A second full adversarial review (max effort, `origin/main...HEAD`, 36 commits / 452 files, 15 findings with executed repros) **corroborated the above from four independent angles** — and found that fixing it is **not sufficient**. A distinct class destroys per-property merge *before the bytes ever reach a boundary*:
+A second full adversarial review (max effort, `origin/main...HEAD`, 36 commits / 452 files, 15 findings with executed repros) **corroborated the above from four independent angles** — and found that fixing it is **not sufficient**. A distinct class destroys per-property merge _before the bytes ever reach a boundary_:
 
-- **The write path flushes whole elements.** `Scene.mutateElement` calls `writeChangedKeys(ymap, element)`, which iterates `Object.keys(element)` — the entire object — and writes back every key differing from the doc. The caller's `updates` intent set is discarded, though bare `mutateElement` tracks `didChange` per key one layer down. A write through a reference held across a frame therefore reverts a peer's concurrent edit to a *different* property, with the doc's lineage perfectly intact. This is the root of the class `b2f708f5` patched with the `freshMap.get(id) ?? element` idiom copy-pasted at **32 sites across 14 files** — each a symptom, each future call site a latent instance. _[R2-#1]_
+- **The write path flushes whole elements.** `Scene.mutateElement` calls `writeChangedKeys(ymap, element)`, which iterates `Object.keys(element)` — the entire object — and writes back every key differing from the doc. The caller's `updates` intent set is discarded, though bare `mutateElement` tracks `didChange` per key one layer down. A write through a reference held across a frame therefore reverts a peer's concurrent edit to a _different_ property, with the doc's lineage perfectly intact. This is the root of the class `b2f708f5` patched with the `freshMap.get(id) ?? element` idiom copy-pasted at **32 sites across 14 files** — each a symptom, each future call site a latent instance. _[R2-#1]_
 - **History is no longer in lockstep with the doc.** The remote-apply path lost `captureUpdate: NEVER`, so a peer's change leaks into the next capturing local increment and `History.undoStack` desynchronises from the Yjs `UndoManager` stack — one Ctrl+Z pops the wrong StackItem and tombstones the user's own shape. _[R2-#4]_ Separately `meta.version` is written unconditionally (the adjacent `versionHighWater` write IS guarded), driving `version` **backwards** so the Store's `prev.version < next.version` gate silently discards a real edit. _[R2-#5]_
 - **The origin taxonomy is asymmetric.** `replaceAllElements` Pass 1 broadcasts a content-bearing `isDeleted:true` tombstone under `STRUCTURAL_ORIGIN` while the paired reveal is `EPHEMERAL_ORIGIN` and is filtered out — peers hold invisible elements until the next resync. _[R2-#2]_ The exported `CollabEngine` filters only `REMOTE_ORIGIN`, so an embedder broadcasts `resetScene`'s destructive deletes to the whole room. _[R2-#10]_
 
@@ -114,7 +114,7 @@ No perpetual redundant saves; no false "already saved" skip of a genuinely-neede
 
 Two people edit the same shape at once. One of them is mid-drag, so the editor is holding a reference to that element captured a frame ago. Neither edit is lost.
 
-**Why P1**: This is US1's guarantee at the layer *below* it. US1 fails at the resync boundary; this fails on every single write, with no boundary involved. Fixing the wire and leaving this in place still loses ~half of concurrent per-property edits.
+**Why P1**: This is US1's guarantee at the layer _below_ it. US1 fails at the resync boundary; this fails on every single write, with no boundary involved. Fixing the wire and leaving this in place still loses ~half of concurrent per-property edits.
 
 **Independent Test**: two Scenes over shared lineage; B edits `strokeColor`; A edits `x` through a reference captured BEFORE B's change arrived; assert both replicas end with A's `x` and B's `strokeColor`. Repeat with `updates` touching a JSON-leaf key (`points`) and a nested key (`boundElements`).
 
@@ -122,7 +122,7 @@ Two people edit the same shape at once. One of them is mid-drag, so the editor i
 
 ### User Story 9 — Undo/redo stays in lockstep while collaborating (Priority: P1)
 
-A peer's edit arrives between two of my gestures. My next Ctrl+Z undoes *my* last action — not someone else's, and not an action two steps back.
+A peer's edit arrives between two of my gestures. My next Ctrl+Z undoes _my_ last action — not someone else's, and not an action two steps back.
 
 **Why P1**: The failure tombstones the user's own work and leaves every later undo/redo off by one. It is also, with US8, what the 34 disabled tests covered — so FR-008's gate cannot pass without it.
 
@@ -166,7 +166,7 @@ A corrupt, truncated, or wrong-format update from any room member is contained: 
 
 Ctrl+Z after changing the canvas background restores the previous colour — permanently, and for peers.
 
-**Why P2**: Narrower than element loss, but it is a *silent self-reverting* undo: the value returns on the next scene update, peers never see the undo, and every save persists the un-undone value.
+**Why P2**: Narrower than element loss, but it is a _silent self-reverting_ undo: the value returns on the next scene update, peers never see the undo, and every save persists the un-undone value.
 
 **Independent Test**: change background, undo, then trigger any subsequent scene update; assert React state AND `yAppState` both hold the pre-change value. Same for the project `name`.
 

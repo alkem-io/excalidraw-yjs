@@ -80,6 +80,7 @@ import type {
   VerticalAlign,
 } from "@excalidraw-yjs/element/types";
 
+import type { Mutable } from "@excalidraw-yjs/common/utility-types";
 import type { Scene } from "@excalidraw-yjs/element";
 
 import type { CaptureUpdateActionType } from "@excalidraw-yjs/element";
@@ -259,10 +260,6 @@ const changeFontSize = (
   fallbackValue?: ExcalidrawTextElement["fontSize"],
 ) => {
   const newFontSizes = new Set<number>();
-  // the edited text elements carry their new fontSize (+ in-place geometry) in
-  // the returned `newElementWith` copy, NOT in the doc — they must be kept as-is
-  // and NOT re-read from the doc (which still holds the old fontSize)
-  const editedTextIds = new Set<string>();
 
   const updatedElements = changeProperty(
     elements,
@@ -271,11 +268,18 @@ const changeFontSize = (
       if (isTextElement(oldElement)) {
         const newFontSize = getNewFontSize(oldElement);
         newFontSizes.add(newFontSize);
-        editedTextIds.add(oldElement.id);
 
-        let newElement: ExcalidrawTextElement = newElementWith(oldElement, {
-          fontSize: newFontSize,
-        });
+        // FR-009: DECLARE the font-size change to the doc. This previously built
+        // a detached `newElementWith` copy and let `redrawTextBoundingBox`'s
+        // whole-object flush carry `fontSize` into the doc as a side effect —
+        // behaviour built on the clobber FR-009 removes. Now that a write only
+        // touches its declared keys, the redraw writes just its geometry and the
+        // font size has to be a write of its own.
+        let newElement: ExcalidrawTextElement = app.scene.mutateElement(
+          oldElement as Mutable<ExcalidrawTextElement>,
+          { fontSize: newFontSize },
+        );
+
         redrawTextBoundingBox(
           newElement,
           app.scene.getContainerElement(oldElement),
@@ -304,17 +308,15 @@ const changeFontSize = (
     }
   });
 
-  // fresh-snapshot: re-read post-mutation (redrawTextBoundingBox wrote the
-  // resized CONTAINER and updateBoundElements wrote the BOUND ARROWS to the doc,
-  // but those are returned stale by `changeProperty`'s array — re-read them live
-  // so the result carries the doc's values instead of reverting them. The edited
-  // text elements are skipped: their new fontSize lives only in the returned
-  // copy, so re-reading them from the doc would revert the font change)
+  // fresh-snapshot: re-read post-mutation. `redrawTextBoundingBox` wrote the
+  // resized CONTAINER and `updateBoundElements` the BOUND ARROWS, which
+  // `changeProperty`'s array returns stale. Under FR-009 the edited text elements
+  // no longer need the exception they used to: their font size is now IN the doc
+  // (declared above) rather than living only in a detached copy, so re-reading
+  // every element is both correct and uniform.
   const freshMap = app.scene.getNonDeletedElementsMap();
-  const freshElements = updatedElements.map((element) =>
-    editedTextIds.has(element.id)
-      ? element
-      : freshMap.get(element.id) ?? element,
+  const freshElements = updatedElements.map(
+    (element) => freshMap.get(element.id) ?? element,
   );
 
   return {

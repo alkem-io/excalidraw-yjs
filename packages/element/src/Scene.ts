@@ -1420,11 +1420,17 @@ export class Scene {
     const elementsMap = this.getNonDeletedElementsMap();
 
     const { version: prevVersion } = element;
+    // FR-009: the exact keys the mutation assigns — collected inside
+    // `mutateElement` so in-flight augmentations (elbow-arrow points/angle, the
+    // width/height derived from `points`) are included, which a set built from
+    // `updates` here would miss.
+    const intentKeys = new Set<string>();
     const { version: nextVersion } = mutateElement(
       element,
       elementsMap,
       updates,
       options,
+      intentKeys,
     );
 
     const inScene = this.elementsMap.has(element.id);
@@ -1451,13 +1457,31 @@ export class Scene {
         this.doc.transact(() => {
           const ymap = this.yElements.get(element.id);
           if (ymap) {
-            writeChangedKeys(ymap, element as unknown as ElementRecord);
+            writeChangedKeys(
+              ymap,
+              element as unknown as ElementRecord,
+              intentKeys,
+            );
           }
           // Refresh the locally-maintained reconciliation metadata + own-Symbol
           // props from the just-normalized scratch object (the doc does not store
           // them); the recompute re-attaches them to the fresh snapshot.
+          // FR-011: `meta.version` must never REGRESS. `bumpMetaVersionsFor`
+          // (undo/redo, every `applyRemoteUpdate`) raises the doc's meta version
+          // without touching the caller's scratch object, so a mutation through a
+          // held reference arrives with a version BEHIND the doc's. Storing it
+          // verbatim moved the version backwards, and the editor Store's
+          // `prev.version < next.version` gate then silently discarded a write
+          // that genuinely changed the doc. Take the strictly-greater of the two
+          // so a real change is always observable. (The adjacent
+          // `versionHighWater` write was already guarded; this one was not.)
+          const prevMetaVersion = this.meta.get(element.id)?.version ?? 0;
+          const nextMetaVersion = Math.max(
+            element.version,
+            prevMetaVersion + 1,
+          );
           this.meta.set(element.id, {
-            version: element.version,
+            version: nextMetaVersion,
             versionNonce: element.versionNonce,
             updated: element.updated,
             symbols: captureOwnSymbols(element),
@@ -1465,8 +1489,8 @@ export class Scene {
               element as unknown as ElementRecord,
             ),
           });
-          if (element.version > this.versionHighWater) {
-            this.versionHighWater = element.version;
+          if (nextMetaVersion > this.versionHighWater) {
+            this.versionHighWater = nextMetaVersion;
           }
         }, writeOrigin);
       } finally {

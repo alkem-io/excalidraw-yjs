@@ -76,21 +76,21 @@
 
 Self-check, re-run after the 2026-08-19 widening. Every FR maps to a task and an invariant test:
 
-| FR | Task | Invariant | Story |
-|---|---|---|---|
-| FR-001/002 | T018/T019 | INV-CONVERGE | US1 |
-| FR-003 | T021 | INV-PERSIST-MERGE | US3 |
-| FR-004 | T020 | INV-COLD-LOAD-LINEAGE | US4 |
-| FR-005 | T024 | INV-REVEAL | US5 |
-| FR-006 | T025 | INV-BOUNDED | US6 |
-| FR-007 | T026 | INV-SAVE-SKIP | US7 |
-| FR-008 | T001/T002/T012 | non-vacuity ledger | — |
-| FR-009 | T013/T015/T016 | INV-WRITE-INTENT | US8 |
-| FR-010 | T017 | INV-HISTORY-LOCKSTEP | US9 |
-| FR-011 | T014 | INV-VERSION-MONOTONIC | US9 |
-| FR-012 | T022 | INV-ORIGIN | US10 |
-| FR-013 | T023 | INV-NO-BINARY-WIRE | US11 |
-| FR-014 | T027 | INV-WIRE-ROBUST | US12 |
-| FR-015 | T028 | INV-APPSTATE-UNDO | US13 |
+| FR         | Task           | Invariant             | Story |
+| ---------- | -------------- | --------------------- | ----- |
+| FR-001/002 | T018/T019      | INV-CONVERGE          | US1   |
+| FR-003     | T021           | INV-PERSIST-MERGE     | US3   |
+| FR-004     | T020           | INV-COLD-LOAD-LINEAGE | US4   |
+| FR-005     | T024           | INV-REVEAL            | US5   |
+| FR-006     | T025           | INV-BOUNDED           | US6   |
+| FR-007     | T026           | INV-SAVE-SKIP         | US7   |
+| FR-008     | T001/T002/T012 | non-vacuity ledger    | —     |
+| FR-009     | T013/T015/T016 | INV-WRITE-INTENT      | US8   |
+| FR-010     | T017           | INV-HISTORY-LOCKSTEP  | US9   |
+| FR-011     | T014           | INV-VERSION-MONOTONIC | US9   |
+| FR-012     | T022           | INV-ORIGIN            | US10  |
+| FR-013     | T023           | INV-NO-BINARY-WIRE    | US11  |
+| FR-014     | T027           | INV-WIRE-ROBUST       | US12  |
+| FR-015     | T028           | INV-APPSTATE-UNDO     | US13  |
 
 Every SC has a gate: SC-001→T001, SC-002→T002 (now satisfied by Phases 2–3, not Phase 4), SC-003→T030, SC-004→T029, SC-005→T016 (bandaid census reaches zero), SC-006→T009, SC-007→T010. No orphan tasks, no uncovered FR/SC. **Consistent — clear to implement.**
