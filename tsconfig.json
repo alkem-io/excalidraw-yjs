@@ -31,9 +31,7 @@
       "@excalidraw-yjs/math/*": ["./packages/math/src/*"],
       "@excalidraw-yjs/utils": ["./packages/utils/src/index.ts"],
       "@excalidraw-yjs/utils/*": ["./packages/utils/src/*"],
-      "@excalidraw-yjs/excalidraw": ["./packages/excalidraw/index.tsx"],
-      "@excalidraw-yjs/excalidraw/element/*": ["./packages/element/src/*"],
-      "@excalidraw-yjs/excalidraw/*": ["./packages/excalidraw/*"]
+      "@excalidraw-yjs/excalidraw/element/*": ["./packages/element/src/*"]
     }
   },
   "include": ["packages", "excalidraw-app"],
