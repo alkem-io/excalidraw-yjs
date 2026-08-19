@@ -31,7 +31,11 @@ const mk = (
     ...extra,
   } as ExcalidrawElement);
 
-/** Canonical content fingerprint — id → the properties that must converge. */
+/**
+ * Canonical content fingerprint over the fields this workload mutates: id, x, y
+ * and isDeleted. This is SEMANTIC convergence, not Yjs byte equality and not all
+ * Excalidraw properties — do not read it as either.
+ */
 const content = (scene: Scene) =>
   JSON.stringify(
     scene
@@ -48,7 +52,13 @@ const liveIds = (scene: Scene) =>
     .sort();
 
 /**
- * INV-CONVERGE / INV-NO-RESURRECT (SC-001), over the real `Scene` wire path.
+ * INV-CONVERGE / INV-NO-RESURRECT over the `Scene` wire path.
+ *
+ * SCOPE: this is the Scene-level half of SC-001. It passes on current code and
+ * fails only when the (already correct) Scene encoder is sabotaged. The app's
+ * INIT/resync still rebuilds through `encodeSyncableSceneAsUpdate`, and this
+ * test does not exercise that path — SC-001 is not satisfied until T032 routes
+ * it through the live-doc encode and this property covers it.
  *
  * For any interleaving of concurrent edits across N replicas, mixed with
  * arbitrary FULL-STATE resyncs, every replica must end byte-equal with no edit
@@ -122,7 +132,14 @@ describe("INV-CONVERGE / INV-NO-RESURRECT — N-replica property", () => {
 
       // Exchange in a random order, sometimes as a FULL-STATE resync rather than
       // an incremental delta — the ordering the invariant must survive.
-      const order = scenes.map((_, i) => i).sort(() => rand() - 0.5);
+      // Fisher–Yates. A random comparator (`sort(() => rand() - 0.5)`) violates
+      // sort's contract: the comparison sequence is engine-dependent, so the
+      // fixed seed would not actually reproduce the same ordering.
+      const order = scenes.map((_, i) => i);
+      for (let i = order.length - 1; i > 0; i--) {
+        const j = Math.floor(rand() * (i + 1));
+        [order[i], order[j]] = [order[j], order[i]];
+      }
       for (const from of order) {
         for (const to of order) {
           if (from === to) {
@@ -176,7 +193,7 @@ describe("INV-CONVERGE / INV-NO-RESURRECT — N-replica property", () => {
     expect(r.resyncs).toBeGreaterThan(0);
     expect(r.live[0].length).toBeGreaterThan(0);
 
-    // INV-CONVERGE: every replica byte-equal on content.
+    // INV-CONVERGE: identical canonical content fingerprints.
     for (const c of r.contents) {
       expect(c).toBe(r.contents[0]);
     }

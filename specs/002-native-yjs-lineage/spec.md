@@ -200,7 +200,7 @@ Ctrl+Z after changing the canvas background restores the previous colour — per
 
 ## Success Criteria _(mandatory)_
 
-- **SC-001** INV-CONVERGE + INV-NO-RESURRECT proven by a non-vacuous N-replica property test: it FAILS on current HEAD (the throwaway-clientID resync) and PASSES after the redesign.
+- **SC-001** INV-CONVERGE + INV-NO-RESURRECT proven by a non-vacuous N-replica property test over the path the app actually uses. **Two halves**: the Scene-level gate exists and is sharp (it fails when the Scene encoder is made to rebuild through a throwaway `clientID`), but it passes on current code because the Scene encoder is already correct. SC-001 is NOT satisfied until the app's INIT/resync stops rebuilding through `encodeSyncableSceneAsUpdate` and is covered by that same property. **Gated by T001 + T032, not T001 alone.**
 - **SC-002** The 34-test `multiplayer undo/redo` block (`history.test.tsx`) is re-enabled and green, and the removed `collab.test.tsx` cases are restored and green.
 - **SC-003** A full adversarial re-review of the redesigned seam returns **ZERO findings of any kind** — defects AND observations. _(the done-gate)_
 - **SC-004** `pnpm run test:typecheck`, lint (`--max-warnings=0`), and all touched suites green.
