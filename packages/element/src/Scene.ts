@@ -65,6 +65,16 @@ import {
 
 import type { AppState } from "../../excalidraw/types";
 
+type ElementPlan = {
+  readonly add: readonly { record: ElementRecord; keys: ReadonlySet<string> }[];
+  readonly remove: readonly string[];
+  readonly write: ReadonlyMap<
+    string,
+    { record: ElementRecord; keys: ReadonlySet<string> }
+  >;
+  readonly recordHistory: boolean;
+};
+
 type SceneStateCallback = () => void;
 type SceneStateCallbackRemover = () => void;
 
@@ -359,6 +369,22 @@ export class Scene {
    * skipped, exactly as the pre-rewrite in-place path did.
    */
   private suppressTrigger = false;
+
+  /**
+   * Subscribers to {@link onDocUpdate}, dispatched by ONE internal doc handler
+   * per format rather than each subscriber attaching its own — so a logical
+   * mutation can withhold delivery and emit a single aggregate delta instead of
+   * one per Yjs transaction (spec 002 FR-017).
+   */
+  private docUpdateSubs: Array<{
+    format: "v1" | "v2";
+    cb: (update: Uint8Array) => void;
+  }> = [];
+
+  /** >0 while a logical mutation is open; per-transaction delivery is withheld. */
+  private logicalBoundaryDepth = 0;
+
+  private internalDocHandlers: Array<[string, (...a: never[]) => void]> = [];
 
   /**
    * Set by the `observeDeep` handler each time it runs, so a write path can tell
@@ -660,6 +686,170 @@ export class Scene {
     ymap.set("isDeleted", true);
     this.yElements.set(record.id as string, ymap);
     return ymap;
+  }
+
+  /**
+   * A fully-normalized, validated description of one logical mutation
+   * (spec 002 FR-016). Encodes only what is already required: membership
+   * add/remove, per-id declared key writes, and the existing history choice.
+   * Planners produce it; {@link commitPlan} is the only thing that executes it.
+   */
+  private static assertDisjoint(plan: ElementPlan): void {
+    const seen = new Set<string>();
+    const claim = (id: string, where: string) => {
+      if (seen.has(id)) {
+        throw new Error(`commitPlan: id ${id} appears twice (${where})`);
+      }
+      seen.add(id);
+    };
+    for (const a of plan.add) {
+      claim(a.record.id as string, "add");
+    }
+    for (const id of plan.remove) {
+      claim(id, "remove");
+    }
+    for (const id of plan.write.keys()) {
+      claim(id, "write");
+    }
+  }
+
+  private writePlanMeta(id: string, record: ElementRecord): void {
+    this.meta.set(id, {
+      version: record.version as number,
+      versionNonce: record.versionNonce as number,
+      updated: record.updated as number,
+      symbols: captureOwnSymbols(record),
+      boundElementsEmpty: isEmptyBoundElements(record),
+    });
+    if ((record.version as number) > this.versionHighWater) {
+      this.versionHighWater = record.version as number;
+    }
+  }
+
+  /**
+   * PRIVATE shared machinery — NOT a third supported write API. The two semantic
+   * planners are the supported surface; both funnel here so the transaction,
+   * origin, broadcast and metadata rules exist once and cannot drift.
+   *
+   * Guarantees (spec 002 §T016b contract):
+   * - G1 at most one untracked STRUCTURAL prelude, for genuinely absent adds only
+   * - G2 exactly one action transaction (remove, write, reveal-last), tracked iff LOCAL
+   * - G3 metadata written inside it; returns the ids that ACTUALLY changed the doc
+   * - G4 at most one notification — none when nothing changed
+   * - G5 at most one transport delta, from the pre-plan state vector
+   * - G6 validated before the prelude; on a post-prelude throw the finally still
+   *      publishes the committed state, then rethrows (no rollback machinery —
+   *      Yjs already committed what preceded the throw, and publishing preserves
+   *      convergence)
+   * - G7 a collided add is a scoped write, never a structural replacement
+   */
+  private commitPlan(plan: ElementPlan): { changedIds: ReadonlySet<string> } {
+    Scene.assertDisjoint(plan);
+
+    const absent: Array<{ record: ElementRecord; keys: ReadonlySet<string> }> =
+      [];
+    const collided: Array<{
+      record: ElementRecord;
+      keys: ReadonlySet<string>;
+    }> = [];
+    for (const a of plan.add) {
+      (this.yElements.has(a.record.id as string) ? collided : absent).push(a);
+    }
+
+    const before = Y.encodeStateVector(this.doc);
+    const changedIds = new Set<string>();
+    const writeOrigin = plan.recordHistory ? LOCAL_ORIGIN : EPHEMERAL_ORIGIN;
+
+    const scopedWrite = (
+      entry: { record: ElementRecord; keys: ReadonlySet<string> },
+      countAsChange = true,
+    ) => {
+      const id = entry.record.id as string;
+      const ymap = this.yElements.get(id);
+      if (!ymap) {
+        return;
+      }
+      const writes = writeChangedKeys(ymap, entry.record, entry.keys);
+      if (writes > 0 || countAsChange) {
+        this.writePlanMeta(id, entry.record);
+      }
+      if (writes > 0) {
+        changedIds.add(id);
+      }
+    };
+
+    const prevSuppress = this.suppressTrigger;
+    this.logicalBoundaryDepth++;
+    this.suppressTrigger = true;
+    try {
+      // G1 — structural prelude, absent adds only, born-tombstoned.
+      if (absent.length > 0) {
+        this.doc.transact(() => {
+          for (const a of absent) {
+            this.materializeNewEntry(a.record);
+          }
+        }, STRUCTURAL_ORIGIN);
+      }
+
+      // G2 — one action transaction.
+      this.doc.transact(() => {
+        for (const id of plan.remove) {
+          if (this.yElements.has(id)) {
+            this.yElements.delete(id);
+            this.meta.delete(id);
+            changedIds.add(id);
+          }
+        }
+        for (const [, entry] of plan.write) {
+          scopedWrite(entry, false);
+        }
+        // G7 — an add that already exists is a scoped write, not a replacement.
+        for (const a of collided) {
+          scopedWrite(a, false);
+        }
+        // Reveal LAST: an element is never live before its record is complete.
+        for (const a of absent) {
+          scopedWrite(a);
+          changedIds.add(a.record.id as string);
+        }
+      }, writeOrigin);
+    } finally {
+      this.suppressTrigger = prevSuppress;
+      this.logicalBoundaryDepth--;
+      this.publishLogicalDelta(before);
+    }
+
+    // G4 — one notification, and only if the doc actually changed.
+    if (changedIds.size > 0) {
+      this.triggerUpdate();
+    }
+    return { changedIds };
+  }
+
+  /** G5 — emit the whole logical mutation as ONE delta, or nothing if the doc
+   * did not change. Runs in a `finally`, so a post-prelude throw still publishes
+   * what Yjs committed. */
+  private publishLogicalDelta(beforeStateVector: Uint8Array): void {
+    if (this.logicalBoundaryDepth > 0 || this.docUpdateSubs.length === 0) {
+      return;
+    }
+    const after = Y.encodeStateVector(this.doc);
+    if (
+      after.length === beforeStateVector.length &&
+      after.every((b, i) => b === beforeStateVector[i])
+    ) {
+      return; // no-op: zero transport activity
+    }
+    for (const format of ["v1", "v2"] as const) {
+      if (!this.docUpdateSubs.some((sub) => sub.format === format)) {
+        continue;
+      }
+      const delta =
+        format === "v2"
+          ? Y.encodeStateAsUpdateV2(this.doc, beforeStateVector)
+          : Y.encodeStateAsUpdate(this.doc, beforeStateVector);
+      this.dispatchDocUpdate(format, delta);
+    }
   }
 
   /**
@@ -1103,21 +1293,48 @@ export class Scene {
     cb: (update: Uint8Array) => void,
     format: "v1" | "v2" = "v1",
   ): () => void {
+    this.ensureInternalDocHandler(format);
+    const entry = { format, cb };
+    this.docUpdateSubs.push(entry);
+    return () => {
+      const i = this.docUpdateSubs.indexOf(entry);
+      if (i !== -1) {
+        this.docUpdateSubs.splice(i, 1);
+      }
+    };
+  }
+
+  /**
+   * One internal `doc.on(...)` per format, dispatching to {@link docUpdateSubs}.
+   * Withholds delivery while a logical mutation is open — {@link commitPlan} emits
+   * the aggregate delta instead, so one logical mutation is one transport message
+   * even though a creation needs two Yjs transactions under two origins.
+   */
+  private ensureInternalDocHandler(format: "v1" | "v2"): void {
     const event = format === "v2" ? "updateV2" : "update";
-    const handler = (
-      update: Uint8Array,
-      origin: unknown,
-      _doc: Y.Doc,
-      _tr: Y.Transaction,
-    ) => {
+    if (this.internalDocHandlers.some(([e]) => e === event)) {
+      return;
+    }
+    const handler = (update: Uint8Array, origin: unknown) => {
       // Do not re-broadcast a remote apply — only updates this replica originated.
       if (origin === REMOTE_ORIGIN) {
         return;
       }
-      cb(update);
+      if (this.logicalBoundaryDepth > 0) {
+        return;
+      }
+      this.dispatchDocUpdate(format, update);
     };
-    this.doc.on(event, handler);
-    return () => this.doc.off(event, handler);
+    this.doc.on(event, handler as never);
+    this.internalDocHandlers.push([event, handler as never]);
+  }
+
+  private dispatchDocUpdate(format: "v1" | "v2", update: Uint8Array): void {
+    for (const sub of [...this.docUpdateSubs]) {
+      if (sub.format === format) {
+        sub.cb(update);
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
