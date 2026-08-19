@@ -26,6 +26,16 @@ import type { BoundElement } from "../types";
 export const ELEMENTS = "elements" as const;
 export const FILES = "files" as const;
 export const APPSTATE = "appState" as const;
+/**
+ * Deletion timestamps for soft-deleted elements, keyed by element id
+ * (data-model §1). NOT an Excalidraw element property and never surfaced as one:
+ * it is native-CRDT lifecycle metadata that must survive the encode so any
+ * replica — including one that joined long after the deletion — can judge age
+ * for GC (FR-006). The element's own `updated` cannot serve: it is in
+ * {@link RECONCILE_META_KEYS}, deliberately never synced, and re-syncing it
+ * would entangle GC with per-peer reconciliation, undo and Store invalidation.
+ */
+export const ELEMENT_DELETIONS = "elementDeletions" as const;
 
 /**
  * The `appState` allow-list synced through the `APPSTATE` `Y.Map` (OPEN-2
@@ -604,10 +614,19 @@ export const buildSnapshotDoc = (snapshot: WhiteboardSnapshot): Y.Doc => {
   const yElements = doc.getMap<Y.Map<unknown>>(ELEMENTS);
   const yFiles = doc.getMap<unknown>(FILES);
   const yAppState = doc.getMap<unknown>(APPSTATE);
+  const yDeletions = doc.getMap<number>(ELEMENT_DELETIONS);
   doc.transact(() => {
     for (const element of snapshot.elements) {
       const id = element.id as string;
       yElements.set(id, elementToYMap(element as ElementRecord));
+      // Forward conversion from plain Excalidraw JSON: an element that arrives
+      // ALREADY soft-deleted has no marker yet, and its `updated` is the only
+      // record of when that happened — seed from it, or a converted scene would
+      // hold tombstones no replica could ever age out.
+      if (element.isDeleted === true) {
+        const updated = element.updated;
+        yDeletions.set(id, typeof updated === "number" ? updated : 0);
+      }
     }
     writeFiles(yFiles, snapshot.files, { prune: false });
     writeAppState(yAppState, snapshot.appState);

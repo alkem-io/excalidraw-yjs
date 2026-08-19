@@ -54,6 +54,7 @@ import {
   EPHEMERAL_ORIGIN,
   REMOTE_ORIGIN,
   elementToYMap,
+  ELEMENT_DELETIONS,
   yMapToElement,
   writeChangedKeys,
   computeElementIntent,
@@ -394,6 +395,14 @@ export class Scene {
    * {@link getPersistedAppState}.
    */
   public readonly yAppState: Y.Map<unknown>;
+  /**
+   * Deletion timestamps for soft-deleted elements, keyed by id
+   * ({@link ELEMENT_DELETIONS}). Lifecycle metadata that rides the doc so ANY
+   * replica can judge age for GC — including one that joined after the deletion,
+   * which the per-peer `updated` field cannot serve. Never exposed as an element
+   * property; {@link collectGarbage} is its only consumer.
+   */
+  public readonly yElementDeletions: Y.Map<number>;
 
   /**
    * Native element history (native-Yjs core, M2).
@@ -579,16 +588,25 @@ export class Scene {
     // when a pre-decoded doc is adopted these resolve to its existing maps.
     this.yFiles = this.doc.getMap<unknown>(FILES);
     this.yAppState = this.doc.getMap<unknown>(APPSTATE);
+    this.yElementDeletions = this.doc.getMap<number>(ELEMENT_DELETIONS);
 
     // Native element history (M2): track only LOCAL_ORIGIN, so undo/redo revert
     // exclusively this replica's edits — a remote / system-origin transaction is
     // never captured nor reverted (the origin-scope M3 collaboration depends on).
     // Boundaries between undo steps are set explicitly via `stopElementCapture`
     // (see field doc), so `captureTimeout` is effectively disabled by being huge.
-    this.undoManager = new Y.UndoManager(this.yElements, {
-      trackedOrigins: new Set([LOCAL_ORIGIN]),
-      captureTimeout: Number.MAX_SAFE_INTEGER,
-    });
+    // Scope covers the deletion sidecar as well as the elements: both are written
+    // in the SAME transaction, so one undo reverts the `isDeleted` flip and its
+    // marker together. Leaving the sidecar unscoped would let an undo restore a
+    // live element while its deletion marker persisted — and GC would then
+    // reclaim a live element once the cutoff passed.
+    this.undoManager = new Y.UndoManager(
+      [this.yElements, this.yElementDeletions],
+      {
+        trackedOrigins: new Set([LOCAL_ORIGIN]),
+        captureTimeout: Number.MAX_SAFE_INTEGER,
+      },
+    );
 
     // Recompute the derived caches whenever the doc's elements change — our own
     // writes (LOCAL_ORIGIN), undo/redo, AND remote applies (REMOTE_ORIGIN, M3)
@@ -789,6 +807,37 @@ export class Scene {
     ymap.set("isDeleted", true);
     this.yElements.set(record.id as string, ymap);
     return ymap;
+  }
+
+  /**
+   * Bring the deletion marker for one element in line with its CURRENT state in
+   * the doc. MUST be called inside the write transaction, so the marker and the
+   * `isDeleted` value it describes commit together.
+   *
+   * The timestamp is the element's own `updated` — the same value Excalidraw
+   * already treats as "when this last changed", and the same one the forward
+   * converter seeds from. This deliberately introduces no second clock.
+   */
+  private syncDeletionMarker(record: ElementRecord): void {
+    const id = record.id as string;
+    const ymap = this.yElements.get(id);
+    if (!ymap) {
+      this.yElementDeletions.delete(id);
+      return;
+    }
+    if (ymap.get("isDeleted") === true) {
+      // Set only on the transition: re-stamping on every later write to an
+      // already-deleted element would keep pushing its expiry into the future.
+      if (!this.yElementDeletions.has(id)) {
+        const updated = (record as Record<string, unknown>).updated;
+        this.yElementDeletions.set(
+          id,
+          typeof updated === "number" ? updated : 0,
+        );
+      }
+    } else if (this.yElementDeletions.has(id)) {
+      this.yElementDeletions.delete(id);
+    }
   }
 
   /**
@@ -1000,6 +1049,14 @@ export class Scene {
         for (const a of absent) {
           scopedWrite(a);
           changedIds.add(a.record.id as string);
+        }
+        // Deletion markers, in this SAME transaction so a marker and its
+        // `isDeleted` are one atomic step for undo/redo and for peers.
+        for (const id of plan.remove) {
+          this.yElementDeletions.delete(id);
+        }
+        for (const entry of [...plan.write.values(), ...collided, ...absent]) {
+          this.syncDeletionMarker(entry.record);
         }
       }, writeOrigin);
     } finally {
@@ -1215,6 +1272,9 @@ export class Scene {
         for (const id of removedIds) {
           this.yElements.delete(id);
           this.meta.delete(id);
+          // The element is gone; its deletion marker must go with it, in this
+          // same transaction (see {@link syncDeletionMarker}).
+          this.yElementDeletions.delete(id);
         }
         for (const element of ordered) {
           // Write from the pre-write snapshot, not the live object — see the
@@ -1257,6 +1317,9 @@ export class Scene {
           if ((record.version as number) > this.versionHighWater) {
             this.versionHighWater = record.version as number;
           }
+          // Deletion marker, in this SAME transaction so it and the `isDeleted`
+          // it describes are one atomic step for undo/redo and for peers.
+          this.syncDeletionMarker(record);
         }
       }, revealOrigin);
 
@@ -1640,22 +1703,18 @@ export class Scene {
   /**
    * Reclaim deleted elements and the binaries only they still referenced
    * (FR-006, INV-BOUNDED). Without this the doc grows monotonically under
-   * paste/delete churn, and a raw full-state encode ships every
-   * pasted-then-deleted element — and its image — to each new joiner.
+   * paste/delete churn, and a full-state encode ships every pasted-then-deleted
+   * element — and its image — to each new joiner.
    *
-   * **The caller supplies the eligible ids; this method does not judge age.**
-   * That split is forced by the schema, not a preference: `updated` is in
-   * {@link RECONCILE_META_KEYS} and is deliberately NEVER written to the doc, so
-   * `isDeleted && updated <= now - DELETED_ELEMENT_TIMEOUT` is not computable
-   * from `yElements` at all. The clock and the timeout policy therefore live with
-   * the caller, which holds the in-memory elements that still carry `updated`.
-   * See the FR-006 note in tasks.md: judging expiry for a deletion this replica
-   * never observed (a cold join) needs a timestamp that survives the encode, and
-   * that is still an open design decision.
+   * The caller supplies POLICY only (`deletedBefore`, normally
+   * `Date.now() - DELETED_ELEMENT_TIMEOUT`); the doc is the single authority on
+   * which ids are old enough. Age comes from {@link yElementDeletions}, written
+   * atomically with the `isDeleted` flip, so it survives the encode and a replica
+   * that joined after the deletion can still judge it. Each candidate is
+   * re-checked against the element's CURRENT state, so an element that was
+   * un-deleted is never reclaimed on the strength of a stale marker.
    *
-   * What this method DOES own is the part that is easy to get wrong:
-   *
-   * **Files.** A binary is dropped only when NO remaining element references it —
+   * **Files**: a binary is dropped only when NO remaining element references it —
    * counting live elements AND retained tombstones. A soft-deleted image inside
    * the grace window is still undoable, so dropping its binary because no *live*
    * element points at it would restore the element without its image. Files are
@@ -1663,7 +1722,7 @@ export class Scene {
    *
    * **Origin** is {@link STRUCTURAL_ORIGIN}, in ONE transaction:
    *  - not `LOCAL_ORIGIN` — the `UndoManager` tracks that, so a sweep would enter
-   *    the undo stack and Ctrl+Z would resurrect reclaimed tombstones;
+   *    the undo stack and Ctrl+Z would resurrect reclaimed content;
    *  - not `EPHEMERAL_ORIGIN` — the wire policy suppresses that, so peers would
    *    keep the content forever and re-seed it to the next joiner.
    *  Structural is untracked by undo AND published, which is what maintenance
@@ -1673,13 +1732,22 @@ export class Scene {
    *
    * Nothing to reclaim means NO transaction, hence no wire traffic at all.
    */
-  collectGarbage(options: { expiredElementIds: ReadonlySet<string> }): {
+  collectGarbage(options: { deletedBefore: number }): {
     elements: number;
     files: number;
   } {
-    const expired = [...options.expiredElementIds].filter((id) =>
-      this.yElements.has(id),
-    );
+    const expired: string[] = [];
+    for (const [id, deletedAt] of this.yElementDeletions.entries()) {
+      if (typeof deletedAt !== "number" || deletedAt >= options.deletedBefore) {
+        continue;
+      }
+      const ymap = this.yElements.get(id);
+      // Re-check the CURRENT state: a marker left by a since-undone deletion
+      // must never reclaim a live element.
+      if (ymap instanceof Y.Map && ymap.get("isDeleted") === true) {
+        expired.push(id);
+      }
+    }
 
     const expiredSet = new Set(expired);
     const referenced = new Set<string>();
@@ -1701,6 +1769,8 @@ export class Scene {
     this.doc.transact(() => {
       for (const id of expired) {
         this.yElements.delete(id);
+        this.yElementDeletions.delete(id);
+        this.meta.delete(id);
       }
       for (const id of orphans) {
         this.yFiles.delete(id);

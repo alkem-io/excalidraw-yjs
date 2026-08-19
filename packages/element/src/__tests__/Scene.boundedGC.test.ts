@@ -2,18 +2,30 @@ import * as Y from "yjs";
 
 import { newElement } from "../newElement";
 import { Scene } from "../Scene";
-import { ELEMENTS, FILES } from "../yjs/schema";
+import { ELEMENT_DELETIONS, ELEMENTS, FILES } from "../yjs/schema";
 
 import type { ExcalidrawElement } from "../types";
 
-const NOW = 1_000 * 60 * 60 * 1000;
+const HOUR = 60 * 60 * 1000;
+const TIMEOUT = 24 * HOUR;
+const NOW = 1_000_000 * HOUR;
+const CUTOFF = NOW - TIMEOUT; // `deletedBefore`
+
+const AGED = NOW - TIMEOUT - HOUR; // deleted long enough ago to reclaim
+const RECENT = NOW - HOUR; // still inside the grace window
 
 /**
- * Build an element record. `newElement` forces `isDeleted: false` and drops
- * image-only fields, so deleted/image fixtures are spread on afterwards — the
- * doc write derives keys from the live object, so both carry.
+ * Element fixtures.
+ *
+ * NOTE on timestamps: `getUpdatedTimestamp()` returns a constant `1` under test,
+ * and `syncInvalidIndices` re-stamps `updated` (via `mutateElement`) for any
+ * element whose fractional index is invalid — which is every freshly-built one.
+ * So an `updated` passed straight to `replaceAllElements` is discarded. Elements
+ * read BACK from the scene already carry valid indices, so {@link softDelete}
+ * seeds live elements first and then deletes them, which both preserves the
+ * timestamp and exercises the real edit path rather than a shortcut.
  */
-const el = (
+const mk = (
   id: string,
   extra: Record<string, unknown> = {},
 ): ExcalidrawElement =>
@@ -30,11 +42,39 @@ const el = (
     ...extra,
   } as ExcalidrawElement);
 
-const img = (id: string, fileId: string, extra: Record<string, unknown> = {}) =>
-  el(id, { type: "image", fileId, ...extra });
+const mkImg = (id: string, fileId: string) => mk(id, { type: "image", fileId });
 
-const dead = (id: string, extra: Record<string, unknown> = {}) =>
-  el(id, { isDeleted: true, ...extra });
+/** Seed live elements and return them as the scene derived them (indexed). */
+const seed = (scene: Scene, elements: ExcalidrawElement[]) => {
+  scene.replaceAllElements(elements);
+  scene.stopElementCapture();
+};
+
+/** Soft-delete `id` as of `at`, through the ordinary write path. */
+const softDelete = (scene: Scene, id: string, at: number) => {
+  scene.replaceAllElements(
+    scene
+      .getElementsIncludingDeleted()
+      .map((e) =>
+        e.id === id
+          ? ({ ...e, isDeleted: true, updated: at } as ExcalidrawElement)
+          : e,
+      ),
+  );
+};
+
+/** Bring `id` back to life through the ordinary write path. */
+const revive = (scene: Scene, id: string, at: number) => {
+  scene.replaceAllElements(
+    scene
+      .getElementsIncludingDeleted()
+      .map((e) =>
+        e.id === id
+          ? ({ ...e, isDeleted: false, updated: at } as ExcalidrawElement)
+          : e,
+      ),
+  );
+};
 
 const BINARY = "A".repeat(512);
 const file = (id: string) => ({
@@ -45,98 +85,270 @@ const file = (id: string) => ({
 });
 
 const docKeys = (scene: Scene) => [...scene.yElements.keys()].sort();
+const decode = (bytes: Uint8Array) =>
+  new TextDecoder("utf-8", { fatal: false }).decode(bytes);
 
 /**
  * INV-BOUNDED (FR-006) — reclamation bounds storage under churn and keeps an
  * aged deleted element's binary off the wire to a new joiner.
  *
- * `Scene.collectGarbage` takes the eligible ids from the caller: `updated` is in
- * RECONCILE_META_KEYS and is never written to the doc, so age is not computable
- * here. These tests pin the doc mechanics and the file-reference rule.
+ * Age lives in the `elementDeletions` sidecar, written atomically with the
+ * `isDeleted` flip, so it survives the encode and a replica that joined after
+ * the deletion can still judge it. The caller supplies only `deletedBefore`.
  */
 describe("INV-BOUNDED — bounded GC + privacy", () => {
+  it("records a deletion marker on the transition, and clears it on revival", () => {
+    const scene = new Scene();
+    seed(scene, [mk("a")]);
+    expect(scene.yElementDeletions.has("a")).toBe(false);
+
+    softDelete(scene, "a", RECENT);
+    expect(scene.yElementDeletions.get("a")).toBe(RECENT);
+
+    // Revived -> the marker must go, or GC would later reclaim a live element.
+    revive(scene, "a", NOW);
+    expect(scene.yElementDeletions.has("a")).toBe(false);
+    scene.destroy();
+  });
+
+  it("does not push expiry forward when an already-deleted element is written again", () => {
+    const scene = new Scene();
+    seed(scene, [mk("a"), mk("keep")]);
+    softDelete(scene, "a", AGED);
+    expect(scene.yElementDeletions.get("a")).toBe(AGED);
+
+    // A later write touching the same tombstone must NOT re-stamp it; otherwise
+    // a periodically-rewritten tombstone would never age out.
+    scene.replaceAllElements(
+      scene
+        .getElementsIncludingDeleted()
+        .map((e) =>
+          e.id === "a" ? ({ ...e, x: 99, updated: NOW } as typeof e) : e,
+        ),
+    );
+    expect(scene.yElementDeletions.get("a")).toBe(AGED);
+    scene.destroy();
+  });
+
   it("reclaims an expired deleted element and its now-orphaned binary", () => {
     const scene = new Scene();
     scene.setFiles({ f1: file("f1"), f2: file("f2") });
-    scene.replaceAllElements([
-      img("live", "f1"),
-      img("gone", "f2", { isDeleted: true }),
-    ]);
+    seed(scene, [mkImg("live", "f1"), mkImg("gone", "f2")]);
+    softDelete(scene, "gone", AGED);
 
-    const removed = scene.collectGarbage({
-      expiredElementIds: new Set(["gone"]),
-    });
+    const removed = scene.collectGarbage({ deletedBefore: CUTOFF });
 
     expect(docKeys(scene)).toEqual(["live"]);
     expect(Object.keys(scene.getFiles()).sort()).toEqual(["f1"]);
     expect(removed).toEqual({ elements: 1, files: 1 });
+    // the sidecar entry is reclaimed with it — no perpetually growing marker map
+    expect(scene.yElementDeletions.has("gone")).toBe(false);
     scene.destroy();
   });
 
-  it("keeps a RETAINED tombstone's file, so undo restores a complete image", () => {
+  it("does NOT reclaim a deletion still inside the window", () => {
+    const scene = new Scene();
+    scene.setFiles({ f1: file("f1") });
+    seed(scene, [mkImg("recent", "f1"), mk("other")]);
+    softDelete(scene, "recent", RECENT);
+
+    expect(scene.collectGarbage({ deletedBefore: CUTOFF })).toEqual({
+      elements: 0,
+      files: 0,
+    });
+    expect(docKeys(scene)).toEqual(["other", "recent"]);
+    // ...and its binary stays, so an undo restores a COMPLETE image.
+    expect(Object.keys(scene.getFiles())).toEqual(["f1"]);
+    scene.destroy();
+  });
+
+  it("keeps a file that a RETAINED element or tombstone still references", () => {
     const scene = new Scene();
     scene.setFiles({ shared: file("shared"), solo: file("solo") });
-    scene.replaceAllElements([
-      img("liveImg", "shared"),
-      img("agedShared", "shared", { isDeleted: true }),
-      img("recentSolo", "solo", { isDeleted: true }),
+    seed(scene, [
+      mkImg("liveImg", "shared"),
+      mkImg("agedShared", "shared"),
+      mkImg("recentSolo", "solo"),
     ]);
+    softDelete(scene, "agedShared", AGED);
+    softDelete(scene, "recentSolo", RECENT);
 
-    // Only `agedShared` is eligible; `recentSolo` is still inside the window.
-    const removed = scene.collectGarbage({
-      expiredElementIds: new Set(["agedShared"]),
-    });
+    const removed = scene.collectGarbage({ deletedBefore: CUTOFF });
 
     expect(docKeys(scene)).toEqual(["liveImg", "recentSolo"]);
-    // `shared` is held by a live element, `solo` by a RETAINED tombstone. A file
-    // dropped here would restore an image element without its image.
+    // `shared` held by a live element, `solo` by a RETAINED tombstone.
     expect(Object.keys(scene.getFiles()).sort()).toEqual(["shared", "solo"]);
     expect(removed.files).toBe(0);
     scene.destroy();
   });
 
-  it("PRIVACY: an expired deleted image is not transmitted to a new joiner", () => {
+  it("PRIVACY: an expired deleted image reaches a new joiner in no form", () => {
     const host = new Scene();
     host.setFiles({ secret: file("secret") });
-    host.replaceAllElements([
-      el("live"),
-      img("pasted-then-deleted", "secret", { isDeleted: true }),
-    ]);
+    seed(host, [mk("live"), mkImg("pasted-then-deleted", "secret")]);
+    softDelete(host, "pasted-then-deleted", AGED);
 
     // Non-vacuity: the binary IS on the wire before the sweep.
-    expect(
-      new TextDecoder("utf-8", { fatal: false }).decode(
-        host.encodeStateAsUpdate(),
-      ),
-    ).toContain(BINARY);
+    expect(decode(host.encodeStateAsUpdate())).toContain(BINARY);
 
-    host.collectGarbage({
-      expiredElementIds: new Set(["pasted-then-deleted"]),
-    });
+    host.collectGarbage({ deletedBefore: CUTOFF });
 
     const joiner = new Y.Doc();
     Y.applyUpdate(joiner, host.encodeStateAsUpdate());
 
-    // Absent from the decoded structures, not merely hidden behind a getter.
+    // Absent from the decoded structures, not merely hidden behind a getter...
     expect([...joiner.getMap<Y.Map<unknown>>(ELEMENTS).keys()]).toEqual([
       "live",
     ]);
     expect([...joiner.getMap<unknown>(FILES).keys()]).toEqual([]);
-    expect(
-      new TextDecoder("utf-8", { fatal: false }).decode(
-        host.encodeStateAsUpdate(),
-      ),
-    ).not.toContain(BINARY);
+    // ...including the deletion marker itself.
+    expect([...joiner.getMap<number>(ELEMENT_DELETIONS).keys()]).toEqual([]);
+    expect(decode(host.encodeStateAsUpdate())).not.toContain(BINARY);
     host.destroy();
   });
 
+  it("UNDO: a reverted deletion is not reclaimed once the cutoff passes", () => {
+    const scene = new Scene();
+    seed(scene, [mk("a"), mk("keep")]);
+    softDelete(scene, "a", AGED);
+    expect(scene.yElementDeletions.get("a")).toBe(AGED); // guard: marker written
+
+    expect(scene.canUndoElements()).toBe(true);
+    expect(scene.undoElements()).toBe(true);
+
+    // The marker must have been reverted in the SAME undo step. If it survived,
+    // this sweep would reclaim an element the user just restored.
+    expect(scene.yElementDeletions.has("a")).toBe(false);
+    expect(scene.collectGarbage({ deletedBefore: CUTOFF })).toEqual({
+      elements: 0,
+      files: 0,
+    });
+    expect(docKeys(scene)).toEqual(["a", "keep"]);
+    scene.destroy();
+  });
+
+  it("REDO: re-applying the deletion restores a marker and stays convergent", () => {
+    const a = new Scene();
+    seed(a, [mk("x"), mk("keep")]);
+    softDelete(a, "x", AGED);
+    a.undoElements();
+    expect(a.yElementDeletions.has("x")).toBe(false); // guard
+
+    expect(a.redoElements()).toBe(true);
+    expect(a.yElementDeletions.get("x")).toBe(AGED);
+
+    // A peer replaying the same updates converges on the same marker state.
+    const b = new Scene(undefined, { doc: new Y.Doc() });
+    b.applyRemoteUpdate(a.encodeStateAsUpdate());
+    expect(b.yElementDeletions.get("x")).toBe(AGED);
+    expect(docKeys(b)).toEqual(docKeys(a));
+    a.destroy();
+    b.destroy();
+  });
+
+  it("a STALE marker on a live element never reclaims it", () => {
+    // The marker and `isDeleted` are separate map entries with no causal link, so
+    // a concurrent merge can land a deletion marker from one replica alongside a
+    // surviving `isDeleted:false` from another. Yjs resolves the two keys
+    // independently — which replica wins is a per-key LWW race — so the state is
+    // reachable but not deterministically constructible. It is written directly
+    // here to pin the defence: GC re-reads the element's CURRENT state and must
+    // refuse to reclaim a live one, marker notwithstanding.
+    const scene = new Scene();
+    seed(scene, [mk("x"), mk("keep")]);
+    expect(scene.yElements.get("x")?.get("isDeleted")).toBe(false); // guard
+
+    scene.doc.transact(() => {
+      scene.yElementDeletions.set("x", AGED);
+    });
+    expect(scene.yElementDeletions.get("x")).toBe(AGED); // guard: marker is stale
+
+    expect(scene.collectGarbage({ deletedBefore: CUTOFF })).toEqual({
+      elements: 0,
+      files: 0,
+    });
+    expect(docKeys(scene)).toEqual(["keep", "x"]);
+    scene.destroy();
+  });
+
+  it("the sweep is NOT undoable — Ctrl+Z cannot resurrect reclaimed content", () => {
+    const scene = new Scene();
+    seed(scene, [mk("live"), mk("gone")]);
+    softDelete(scene, "gone", AGED);
+
+    scene.collectGarbage({ deletedBefore: CUTOFF });
+    expect(docKeys(scene)).toEqual(["live"]);
+
+    // Maintenance, not user intent. Under LOCAL_ORIGIN the UndoManager would
+    // track the sweep and this loop would bring the reclaimed element back.
+    while (scene.canUndoElements()) {
+      scene.undoElements();
+    }
+    expect(docKeys(scene)).not.toContain("gone");
+    expect(scene.yElements.get("gone")).toBeUndefined();
+    expect(scene.yElementDeletions.has("gone")).toBe(false);
+    scene.destroy();
+  });
+
+  it("one sweep is ONE logical update; a no-op sweep emits ZERO", () => {
+    const scene = new Scene();
+    seed(scene, [mk("live"), mk("a"), mk("b")]);
+    softDelete(scene, "a", AGED);
+    softDelete(scene, "b", AGED);
+
+    const updates: Uint8Array[] = [];
+    const detach = scene.onDocUpdate((u) => updates.push(u));
+
+    const first = scene.collectGarbage({ deletedBefore: CUTOFF });
+    expect(first.elements).toBe(2); // non-vacuity: it really swept
+    expect(updates).toHaveLength(1); // ...as ONE message, not one per element
+
+    const second = scene.collectGarbage({ deletedBefore: CUTOFF });
+    expect(second).toEqual({ elements: 0, files: 0 });
+    expect(updates).toHaveLength(1); // no transaction at all
+
+    detach();
+    scene.destroy();
+  });
+
+  it("CONCURRENCY: two replicas sweeping the same ids converge, no echo loop", () => {
+    const a = new Scene();
+    seed(a, [mk("live"), mk("aged")]);
+    softDelete(a, "aged", AGED);
+    const b = new Scene(undefined, { doc: new Y.Doc() });
+    b.applyRemoteUpdate(a.encodeStateAsUpdate());
+    expect(b.yElementDeletions.get("aged")).toBe(AGED); // marker crossed the wire
+
+    const updates: Uint8Array[] = [];
+    const detach = a.onDocUpdate((u) => updates.push(u));
+    a.collectGarbage({ deletedBefore: CUTOFF });
+    detach();
+
+    // The sweep MUST reach peers, or B keeps the tombstone and re-seeds it to
+    // the next joiner — the privacy hole reopens one hop away.
+    expect(updates.length).toBeGreaterThan(0);
+    for (const u of updates) {
+      b.applyRemoteUpdate(u);
+    }
+
+    // B now sweeps the same ids independently: deletes commute, nothing is left.
+    const bEcho: Uint8Array[] = [];
+    const detachB = b.onDocUpdate((u) => bEcho.push(u));
+    const bRemoved = b.collectGarbage({ deletedBefore: CUTOFF });
+    detachB();
+
+    expect(bRemoved).toEqual({ elements: 0, files: 0 });
+    expect(bEcho).toHaveLength(0);
+    expect(docKeys(b)).toEqual(docKeys(a));
+    a.destroy();
+    b.destroy();
+  });
+
   it("storage growth under churn is INDEPENDENT of payload size", () => {
-    // The real bounded-storage property. An earlier version asserted "growth <
-    // 512 bytes", which is an arbitrary threshold that says nothing: measured,
-    // 5 paste/delete cycles leave ~2KB of residue REGARDLESS of payload size
-    // (2023 bytes with a 512B binary, 2021 bytes with a 4096B one). That residue
-    // is Yjs delete-set + struct-id overhead, not retained content — so the
-    // invariant worth pinning is that growth does not scale with the payload.
+    // The real bounded-storage property. A byte threshold would pass or fail for
+    // reasons unrelated to reclamation: measured, 5 cycles leave ~2KB of residue
+    // REGARDLESS of payload size, which is Yjs delete-set/struct-id overhead and
+    // is expected to be monotone. What must not scale is retained user payload.
     const churn = (payloadLen: number) => {
       const binary = "A".repeat(payloadLen);
       const scene = new Scene();
@@ -151,17 +363,12 @@ describe("INV-BOUNDED — bounded GC + privacy", () => {
             created: NOW,
           },
         } as Parameters<Scene["setFiles"]>[0]);
-        scene.replaceAllElements([el("live"), img(`img${cycle}`, fid)]);
-        scene.replaceAllElements([
-          el("live"),
-          img(`img${cycle}`, fid, { isDeleted: true }),
-        ]);
-        scene.collectGarbage({ expiredElementIds: new Set([`img${cycle}`]) });
+        seed(scene, [mk("live"), mkImg(`img${cycle}`, fid)]);
+        softDelete(scene, `img${cycle}`, AGED);
+        scene.collectGarbage({ deletedBefore: CUTOFF });
         sizes.push(scene.encodeStateAsUpdate().byteLength);
       }
-      const encoded = new TextDecoder("utf-8", { fatal: false }).decode(
-        scene.encodeStateAsUpdate(),
-      );
+      const encoded = decode(scene.encodeStateAsUpdate());
       scene.destroy();
       return {
         growth: sizes[4] - sizes[0],
@@ -172,84 +379,10 @@ describe("INV-BOUNDED — bounded GC + privacy", () => {
     const small = churn(512);
     const large = churn(4096);
 
-    // No payload is retained at all...
     expect(small.retainsPayload).toBe(false);
     expect(large.retainsPayload).toBe(false);
-    // ...and an 8x larger binary does not make the doc grow measurably more.
     expect(small.growth).toBeGreaterThan(0); // non-vacuity: churn really ran
     expect(Math.abs(large.growth - small.growth)).toBeLessThan(256);
-    // Sanity: an unreclaimed 4096B binary per cycle would blow past this.
     expect(large.growth).toBeLessThan(4096);
-  });
-
-  it("the sweep is NOT undoable — Ctrl+Z cannot resurrect reclaimed content", () => {
-    const scene = new Scene();
-    scene.replaceAllElements([el("live"), dead("gone")]);
-
-    scene.collectGarbage({ expiredElementIds: new Set(["gone"]) });
-    expect(docKeys(scene)).toEqual(["live"]);
-
-    // Maintenance, not user intent. Under LOCAL_ORIGIN the UndoManager would
-    // track the sweep and this loop would bring the reclaimed element back.
-    while (scene.canUndoElements()) {
-      scene.undoElements();
-    }
-    expect(docKeys(scene)).not.toContain("gone");
-    expect(scene.yElements.get("gone")).toBeUndefined();
-    scene.destroy();
-  });
-
-  it("one sweep is ONE logical update; a no-op sweep emits ZERO", () => {
-    const scene = new Scene();
-    scene.replaceAllElements([el("live"), dead("a"), dead("b")]);
-
-    const updates: Uint8Array[] = [];
-    const detach = scene.onDocUpdate((u) => updates.push(u));
-
-    const first = scene.collectGarbage({
-      expiredElementIds: new Set(["a", "b"]),
-    });
-    expect(first.elements).toBe(2); // non-vacuity: it really swept
-    expect(updates).toHaveLength(1); // ...as ONE message, not one per element
-
-    const second = scene.collectGarbage({
-      expiredElementIds: new Set(["a", "b"]),
-    });
-    expect(second).toEqual({ elements: 0, files: 0 });
-    expect(updates).toHaveLength(1); // no transaction at all
-
-    detach();
-    scene.destroy();
-  });
-
-  it("CONCURRENCY: two replicas sweeping the same ids converge, no echo loop", () => {
-    const a = new Scene();
-    a.replaceAllElements([el("live"), dead("aged")]);
-    const b = new Scene(undefined, { doc: new Y.Doc() });
-    b.applyRemoteUpdate(a.encodeStateAsUpdate());
-
-    const updates: Uint8Array[] = [];
-    const detach = a.onDocUpdate((u) => updates.push(u));
-    a.collectGarbage({ expiredElementIds: new Set(["aged"]) });
-    detach();
-
-    // The sweep MUST reach peers, or B keeps the tombstone and re-seeds it to
-    // the next joiner — the privacy hole reopens one hop away.
-    expect(updates.length).toBeGreaterThan(0);
-    for (const u of updates) {
-      b.applyRemoteUpdate(u);
-    }
-
-    // B now sweeps the same ids independently: deletes commute, nothing is left.
-    const bEcho: Uint8Array[] = [];
-    const detachB = b.onDocUpdate((u) => bEcho.push(u));
-    const bRemoved = b.collectGarbage({ expiredElementIds: new Set(["aged"]) });
-    detachB();
-
-    expect(bRemoved).toEqual({ elements: 0, files: 0 });
-    expect(bEcho).toHaveLength(0);
-    expect(docKeys(b)).toEqual(docKeys(a));
-    a.destroy();
-    b.destroy();
   });
 });
