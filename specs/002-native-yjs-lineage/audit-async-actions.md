@@ -1,35 +1,43 @@
 # Async action audit (T016k prerequisite)
 
-**Method**: enumerate every `perform: async` DEFINITION, then trace post-`await` transitive effects. Not a text scan for `scene.mutateElement` — that would certify `actionPaste` falsely, because its element insertion is delegated out-of-band.
+**Method**: enumerate every `perform: async` DEFINITION, then trace transitive effects across each `await`. Not a text scan for `scene.mutateElement` — that certifies `actionPaste` falsely, since its insertion is delegated out-of-band.
 
-**Correction to my earlier claim of "three async element-mutating actions": there are EIGHT async `perform` definitions.** I had counted files, not definitions.
+**Correction**: my earlier "three async element-mutating actions" counted FILES. There are **eight** definitions.
 
-| Action | file:line | awaits | post-await transitive effect | element authority | boundary |
-| --- | --- | --- | --- | --- | --- |
-| `actionCopy` | Clipboard:28 | `copyToClipboard` | none (0 element writes) | none — returns no `elements` | unchanged; never drafts |
-| `actionPaste` | Clipboard:59 | `readSystemClipboard()` | **`app.pasteFromClipboard(createPasteEvent({types}))`** (line 92) | **delegated out-of-band** — inserts elements without returning them | **own commit boundary at the paste/import site**; must NOT be classified as safe derived-fallback |
-| `actionCopyAsSvg` | Clipboard:129 | `exportCanvas` | none | passthrough of input `elements` | unchanged; never drafts |
-| `actionCopyAsPng` | Clipboard:197 | `exportCanvas` | none | passthrough of input `elements` | unchanged; never drafts |
-| `actionSaveToActiveFile` | Export:321 | `resaveAsImageWithScene` / `saveAsJSON` | file I/O only | none | unchanged; never drafts |
-| `actionSaveFileToDisk` | Export:390 | `saveAsJSON` | file I/O only | none | unchanged; never drafts |
-| `actionLoadScene` | Export:458 | `loadFromJSON` | **`app.addElementsFromPasteOrLibrary({...})`** | **delegated out-of-band** | **own commit boundary at the import site** |
-| `actionCopyElementLink` | ElementLink:21 | `copyTextToSystemClipboard` | none | returns invocation-time `elements` on fallback + `catch` | unchanged; never drafts |
+## Write semantics, classified
 
-**Also audited, and it is why function-level labels are insufficient**: `actionCut` (Clipboard:112) has a **synchronous** `perform` that calls `actionCopy.perform(...)` **without awaiting** — a detached async continuation — then returns `actionDeleteSelected.perform(...)`. Verified `actionCopy` performs zero element writes, so the detached continuation is safe and `actionCut` may draft on the strength of its synchronous `actionDeleteSelected` result.
+The classes matter more than the count. "Never drafts" is mechanism wording and proves nothing about writes, so each row states what the action actually does.
 
-## Consequence: the async fallback mechanism is DELETED, not designed
+| Action | file:line | sync prefix writes | class | after `await` |
+| --- | --- | --- | --- | --- |
+| `actionCopy` | Clipboard:28 | 0 | **no element effect** | clipboard only |
+| `actionCopyAsSvg` | Clipboard:129 | 0 | **no element effect**; returns input `elements` unchanged | `exportCanvas` |
+| `actionCopyAsPng` | Clipboard:197 | 0 | **no element effect**; returns input `elements` unchanged | `exportCanvas` |
+| `actionSaveToActiveFile` | Export:321 | 0 | **no element effect** | file I/O |
+| `actionSaveFileToDisk` | Export:390 | 0 | **no element effect** | file I/O |
+| `actionCopyElementLink` | ElementLink:21 | 0 | **returns STALE invocation `elements`** on the fallback and `catch` paths — handled by base/result planning, not by a write | clipboard only |
+| `actionPaste` | Clipboard:59 | 0 | **DELEGATES A WRITE AFTER `await`** — `app.pasteFromClipboard(createPasteEvent({types}))` (line 92) | inserts elements without returning them |
+| `actionLoadScene` | Export:458 | 0 | **DELEGATES A WRITE AFTER `await`, THEN RETURNS A SECOND ActionResult** — `app.addElementsFromPasteOrLibrary({...})`, then `return { elements: app.scene.getNonDeletedElements() }` | membership applied twice (see T016n) |
 
-Applying "try to delete it": no async action needs the draft. Four touch no elements at all; two pass their input through unchanged; two (`actionPaste`, `actionLoadScene`) delegate insertion out-of-band to paths that already own their own commit. **There is no reachable state in which an async action needs to enter and then leave a draft.**
+**Measured precondition**: all eight have **zero element writes in their synchronous prefix** (checked from the `perform` body to the first `await`). This is what makes "discard an _empty_ draft on a promise-like result" valid.
 
-So there is no discard-and-fallback, no post-hoc thenable handling, and no orphaned-promise hazard to guard — the mechanism that would have needed all three does not exist.
+## `actionCut` — why function-level labels are insufficient
 
-Discrimination is **before invocation** and structural, not a mode or a list:
+`actionCut` (Clipboard:112) has a **synchronous** `perform` that calls `actionCopy.perform(...)` **without awaiting** — a detached async continuation — then returns `actionDeleteSelected.perform(...)`. `actionCopy` performs zero element writes, so the detached continuation is harmless and `actionCut` may draft on its synchronous result. But a sync/async label on the function would have told us nothing.
 
-```ts
-const isAsyncPerform = (fn: Function) =>
-  fn.constructor.name === "AsyncFunction";
-```
+## What paste/import actually do today — NOT an atomic boundary
 
-All eight are declared `perform: async`, so this covers every current case, and it is evaluated without calling anything.
+I previously wrote that paste/import "own their own commit boundary". **That was false and described something that does not exist.** Verified:
 
-**Honest limit**: a `perform` declared sync that returns a thenable would not be detected. None exists today. Per the standing rule this is NOT guarded speculatively — this table is the gate, and a new async element-mutating action must be added here.
+- `App.addElementsFromPasteOrLibrary` calls `this.scene.replaceAllElements(nextElements)` — the authoritative whole-scene path T016 is replacing — and then `redrawTextBoundingBox(...)`, which mutates Scene again.
+- Other paste branches call `insertNewElements`, which chunks by `frameId` and calls `scene.insertElementsAtIndex` **once per chunk** — several logical writes.
+
+Keeping `actionPaste`/`actionLoadScene` out of the action draft is reasonable. Claiming they already commit atomically is not. Tracked as **T016m**: a real RED integration test at the paste/import commit site, then migrate it.
+
+**T016n**: `actionLoadScene` applies membership twice — once via `addElementsFromPasteOrLibrary`, once via the `ActionResult` it returns afterwards. One application is redundant and must be **deleted**, not reconciled.
+
+## Consequence for the draft mechanism
+
+No async action needs the draft, so there is no fallback machinery to build: on a promise-like result the draft is discarded (provably empty) and the existing path continues untouched. Discrimination is behavioural and follows the declared `ActionResult | Promise<ActionResult>` union — no constructor-name reflection, no mode, no list, no registration API.
+
+**Honest limit, deliberately unguarded**: a `perform` declared sync that returns a thenable would enter the draft and then be discarded on the same rule — which is correct behaviour, not a hazard, precisely because the discard requires no cleanup. This table remains the gate for any new async element-mutating action.

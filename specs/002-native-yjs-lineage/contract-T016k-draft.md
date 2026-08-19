@@ -1,10 +1,12 @@
 # T016k contract — the action draft boundary
 
-**Status**: revision 2 — five structural corrections from review, each verified against the code before accepting. GO to implement. **Spec**: FR-016, FR-017. **Blocks**: the caller migration.
+**Status**: revision 3 — REWRITTEN wholesale, not patched. **Spec**: FR-016, FR-017.
+
+> Revision 2 was patched in place and three edits silently failed, leaving the file internally contradictory (an `ElementPlan` return alongside the corrected partial intent; a "removes derived fallback for every migrated caller" claim I had said was withdrawn; a G-D4 still naming "three async actions" and post-hoc registration rejection). I had verified by asserting the NEW strings appeared, never that the OLD ones were gone. Rewritten in full so reconciliation is structural rather than a matter of my checking carefully enough.
 
 ## Why this exists
 
-RED, measured on the real action with sender and receiver linked before `executeAction`:
+Measured on the real action, sender and receiver linked before `executeAction`:
 
 ```
 senderUpdates:         4     (contract: at most 1)
@@ -13,73 +15,68 @@ danglingContainerRefs: [ 'state#0: text-1 -> missing id2',
                          'state#1: text-1 -> missing id2' ]
 ```
 
-`wrapTextInContainer` writes to the doc during `perform`. Those are committed, broadcast `LOCAL` transactions before `syncActionResult` ever runs, so `commitPlan` cannot make the action atomic retroactively.
+`wrapTextInContainer` writes during `perform`. Those are committed, broadcast `LOCAL` transactions before `syncActionResult` runs, so `commitPlan` cannot make the action atomic retroactively.
 
-## The load-bearing structural fact
+## The structural fact that makes this small
 
-Scene's reads are **already a materialized view**. Five private caches — `elements`, `elementsMap`, `nonDeletedElements`, `nonDeletedElementsMap`, `frames` — are rebuilt wholesale by `recomputeFromDoc()`, and all six public accessors (`getElementsIncludingDeleted`, `getElementsMapIncludingDeleted`, `getNonDeletedElements`, `getNonDeletedElementsMap`, `getNonDeletedElement`, `getFramesIncludingDeleted`) just return them.
-
-So a draft does **not** need an overlay in the accessors, and no caller changes. It changes _what materializes the caches_: `doc` becomes `doc + draft`. My earlier "214 call sites" framing was the blast radius of getting it wrong, not the edit — the edit is one materialization function.
+Scene's reads are already a materialized view: five private caches (`elements`, `elementsMap`, `nonDeletedElements`, `nonDeletedElementsMap`, `frames`) rebuilt by `recomputeFromDoc()`, with all six accessors returning them. A draft changes _what materializes the caches_, from `doc` to `doc + draft`. No accessor overlay, no caller changes.
 
 ## Interface
 
 ```ts
-// sync path only. Returns PARTIAL declared intent — deliberately NOT an ElementPlan.
+// Returns PARTIAL declared intent — deliberately NOT an ElementPlan.
 runAsLogicalMutation<T>(
   fn: () => T,
 ): { result: T; declaredKeysById: ReadonlyMap<string, ReadonlySet<string>> };
 ```
 
-**It cannot return a complete plan, and must not pretend to.** `Scene.mutateElement` observes per-key writes to EXISTING elements only. Membership encoded solely in the `ActionResult` array is invisible to it: a new element may never pass through Scene at all, and a removal may be nothing more than an id absent from `result`. So `draft.added` / `draft.removed` have no sound producer and are **removed from draft state**.
+It **cannot** return a complete plan. `Scene.mutateElement` observes per-key writes to EXISTING elements only; membership encoded solely in the `ActionResult` array is invisible to it — a new element may never pass through Scene, and a removal may be nothing but an id absent from `result`. `applyElementChanges` stays the single planner: it compares invocation base against result for membership and the bare-mutate fallback, merges the Scene-declared keys, validates, and builds the one plan. `commitPlan` stays private.
 
-`applyElementChanges` stays the single planner. It compares invocation base against result for membership and for the bare-mutate fallback, merges in the Scene-declared keys, validates, and builds the one `ElementPlan`. No second planner, and `commitPlan` stays private.
+- **begin** — throws if a draft is open. Nesting is rejected, not merged.
+- **run** — `fn()` executes; `Scene.mutateElement` behaves as callers expect.
+- **end** — returns `{ result, declaredKeysById }`.
+- **discard** — on throw, or `fn` returning `false`: drop the draft, rebuild views from committed doc + meta.
 
-Internally:
+### Promise results
 
-```ts
-private draft: {
-  records: Map<string, ElementRecord>;   // drafted state of EXISTING ids only
-  keysById: Map<string, Set<string>>;    // keys declared via Scene.mutateElement
-} | null = null;
-```
+`ActionFn` genuinely declares `ActionResult | Promise<ActionResult>` and eight actions exercise the Promise branch. So: invoke under the draft; if the result is promise-like, **discard the (empty) draft and hand the existing Promise to the existing derived path**. Never throw at it, never cancel it — by then the async function is already running and its continuation would proceed regardless.
 
-- **begin** — throws if a draft is already open. Nesting/reentrancy is rejected, not merged.
-- **run** — `fn()` executes; `Scene.mutateElement` is live and behaves as callers expect.
-- **end** — returns the accumulated `ElementPlan`; the caller passes it to `applyElementChanges`.
-- **discard** — on throw, or on `fn` returning `false`: drop the draft, `recomputeFromDoc()`.
+The load-bearing precondition is measured, not assumed: **all eight async `perform`s have zero element writes in their synchronous prefix** (see `audit-async-actions.md`), so the draft being discarded is always empty. If a future async prefix is not empty, that is a finding to fix at that action — not a reason for a mode, a list, or a registration API.
+
+No `fn.constructor.name === "AsyncFunction"` reflection: it depends on emitted function shape, still misses a sync function returning a promise, and is not needed when the declared runtime union already tells us what to branch on.
 
 ## `Scene.mutateElement` while a draft is open
 
-1. Mutates the passed object in place, exactly as now (callers depend on this).
-2. **Only for ids already in the Scene.** `Scene.mutateElement` on an absent id is a no-op today — "create via mutate" falls through the `inScene` guard, and membership arrives via the create path. The draft must NOT make an absent id appear in the caches merely because `mutateElement` touched it; that would change existing semantics.
-3. Writes the resulting record into `draft.records` and the assigned keys into `draft.keysById` (the T016a out-param).
-4. Rebuilds the cache views through a **NEW pure materializer**, not `recomputeFromDoc`. That function is not a pure cache builder: it does `version: ++this.versionHighWater`, `this.meta.set(id, …)` and `this.meta.delete(id)`. Reusing it for a draft would mutate COMMITTED reconciliation state, and discard could not restore the old versions/nonces/high-water — the doc would be byte-identical while Scene's change-detection state was not. Factor `materializeViews(records, metaView)` returning the five caches; `recomputeFromDoc` becomes one caller of it.
-5. During a draft: committed `meta` and `versionHighWater` are untouched, draft reconciliation metadata is a separate overlay, and there is **no** `triggerUpdate`, `sceneNonce` change, callback, or Store scheduling. `selectedElementsCache` invalidation/identity is handled for draft reads without being published externally.
-6. Performs **zero** `yElements` transactions, zero notifications, zero broadcasts.
+1. Mutates the passed object in place, exactly as now.
+2. **Existing ids only.** `mutateElement` on an absent id is a no-op today — "create via mutate" falls through the `inScene` guard. The draft must not make an absent id appear in the caches; membership comes from base/result planning.
+3. Records the resulting record and the assigned keys (the T016a out-param).
+4. Rebuilds views through a **new pure materializer**, not `recomputeFromDoc` — which does `version: ++this.versionHighWater`, `this.meta.set(id, …)` and `this.meta.delete(id)`. Drafting through it would mutate COMMITTED reconciliation state that discard could not restore: doc byte-identical, change-detection state silently wrong. Factor `materializeViews(records, metaView)`; `recomputeFromDoc` becomes one caller.
+5. Committed `meta` and `versionHighWater` untouched; draft reconciliation metadata is a separate overlay; no `triggerUpdate`, `sceneNonce` change, callback or Store scheduling; `selectedElementsCache` handled without publishing.
+6. Zero `yElements` transactions, zero notifications, zero broadcasts.
 
-`declaredIntent` therefore falls out of the draft rather than being derived — which removes the derived-diff fallback for every migrated caller, including the same-value-assignment case a diff cannot see.
+`declaredKeysById` covers **Scene-routed key writes only** — including the same-value assignment no diff can see. Membership, and any bare `mutateElement` not routed through Scene, remain derived until their own bounded audit.
 
 ## Guarantees
 
-- **G-D1** No `yElements` transaction occurs during `fn`; one `applyElementChanges` commit follows. **Scoped to elements, NOT the whole document.** `actionChangeViewBackgroundColor` and `actionChangeProjectName` call `scene.setAppState` during `perform`, which transacts on `yAppState` immediately — so whole-document atomicity is false however good element drafting is. Those two either route through the post-action commit boundary (the cleaner root direction) or are explicitly audited as out-of-scope direct writers. This contract does not claim to cover them.
-- **G-D2** An action that throws leaves **`yElements`** byte-identical — _by construction, not by cleanup_: the element draft never wrote, so there is no rollback machinery to get wrong. Same element-only scoping as G-D1.
-- **G-D3** Nesting throws. A second `runAsLogicalMutation` while one is open is a caller bug.
-- **G-D4** A `perform` returning a thenable **discards the draft and falls back to the existing Promise/derived path** — it does NOT throw. By the time `fn` has returned a Promise the async function is already running; throwing cancels nothing, and its continuation would still mutate Scene after `ActionManager` believed the action failed. Prerequisite: audit the three async element-mutating actions (`actionElementLink`, `actionClipboard`, `actionExport`) and prove zero Scene/`Y.Doc` element writes in BOTH the synchronous prefix and the continuation. A future async action that does write must be rejected by the registration/type contract **before invocation**, never discovered afterward.
-- **G-D5** No temp `Y.Doc`, no readback adapter, no public API. `runAsLogicalMutation` is internal to the action path.
+- **G-D1** No `yElements` transaction during `fn`; one `applyElementChanges` commit follows. **Element-scoped, NOT whole-document**: `actionChangeViewBackgroundColor` and `actionChangeProjectName` call `scene.setAppState` during `perform`, transacting on `yAppState` immediately. Those two either route through the post-action commit boundary or are explicitly out of scope. This contract does not claim to cover them.
+- **G-D2** An action that throws leaves `yElements` byte-identical — by construction, not cleanup: the draft never wrote. Same element-only scoping.
+- **G-D3** Nesting throws.
+- **G-D4** A promise-like result discards an empty draft and continues on the existing derived path. No throw, no cancellation, no registration API.
+- **G-D5** No temp `Y.Doc`, no readback adapter, no public API.
 
-## Out of scope, deliberately
+## Out of scope, and honestly named
 
-Bare `mutateElement` calls not routed through `Scene` are invisible to the draft and stay on the derived-diff fallback. They need auditing for the same-value explicit-intent case, tracked separately rather than folded in here.
+- Bare `mutateElement` not routed through Scene: invisible to the draft, stays derived, tracked separately.
+- **Paste / import do NOT have their own atomic boundary today.** `App.addElementsFromPasteOrLibrary` calls `this.scene.replaceAllElements(nextElements)` — the authoritative whole-scene path T016 is replacing — and then `redrawTextBoundingBox`, which mutates Scene again. Other paste branches call `insertNewElements`, which chunks by `frameId` and calls `insertElementsAtIndex` once per chunk: several logical writes. Keeping `actionPaste`/`actionLoadScene` out of the action draft is fine; claiming they already commit atomically is not. Tracked as **T016m** with its own RED integration test at the real paste/import commit site.
+- **Double application (T016n)**: `actionLoadScene` calls `app.addElementsFromPasteOrLibrary(...)` and then returns `elements: app.scene.getNonDeletedElements()`, so `syncActionResult` plans and applies the same membership a second time. One of the two applications is redundant and must be deleted, not reconciled.
 
 ## Acceptance
 
-The skipped real-action test un-skips and passes: one sender update, one receiver notification, zero dangling states, container immediately below its text, one undo item restoring the whole action.
+The skipped real-action test un-skips and passes: one sender update, one receiver notification, zero dangling states, container immediately below its text, one undo item restoring the whole action. Plus:
 
-Plus, because the current assertions would pass over a violation:
-
-- **zero sender Scene callbacks DURING `perform`**, not merely one wire update after the commit;
-- on throw AND on a `false` result: `yElements` bytes, committed meta / version / high-water observable behaviour, cache contents and callback count all unchanged;
-- an async-fallback test proving an already-started Promise is neither orphaned nor rejected by post-hoc detection;
+- **zero sender Scene callbacks DURING `perform`**, not merely one wire update after commit;
+- on throw AND on `false`: `yElements` bytes, committed meta / version / high-water observable behaviour, cache contents and callback count all unchanged;
+- a promise-result test proving an already-started Promise is neither orphaned nor rejected, and that the discarded draft was empty;
 - a membership test proving a new `ActionResult` element is added even when no `Scene.mutateElement` call touched it.
 
-No extra concurrency machinery is required: begin, run and commit occur within one synchronous JS turn, so no remote update can interleave.
+Begin, run and commit occur in one synchronous JS turn, so no remote update can interleave and no extra concurrency machinery is needed.
