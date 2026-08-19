@@ -16,6 +16,7 @@ import { getElementsInGroup } from "@excalidraw-yjs/element";
 
 import {
   syncInvalidIndices,
+  isWellFormedIndex,
   syncMovedIndices,
   validateFractionalIndices,
   orderByFractionalIndex,
@@ -736,6 +737,38 @@ export class Scene {
     const declared =
       options.declaredIntent ?? computeElementIntent(base, result);
     assertIntentAgainstResult(declared, resultById);
+
+    // T016j — validate ONLY the records this mutation affects: creations, and
+    // existing ids whose declared keys include `index`. A property edit that does
+    // not declare `index` triggers no validation and no repair, and an element
+    // absent from `result` is never inspected — its index is not this mutation's
+    // business, and a concurrent element must survive untouched.
+    //
+    // Format only: present and parseable. NOT neighbour-relative — a relational
+    // tie is classified at the caller that knows the intended array order, not
+    // repaired or rejected here. (Whether the two measured tied action results
+    // are correct as-is is NOT established: today `replaceAllElements`
+    // canonicalizes them via `syncInvalidIndices` before persistence, so
+    // accept-as-is has never been observed.)
+    //
+    // Nothing is repaired. A malformed affected record is a caller bug, and the
+    // caller is the only place that knows the insertion/reorder intent.
+    const affected = new Set<string>([
+      ...declared.addedIds,
+      ...[...declared.keysById]
+        .filter(([, keys]) => keys.has("index"))
+        .map(([id]) => id),
+    ]);
+    for (const id of affected) {
+      const record = resultById.get(id)!;
+      if (!isWellFormedIndex(record.index as ExcalidrawElement["index"])) {
+        throw new Error(
+          `applyElementChanges: element ${id} has a missing or malformed fractional index (${String(
+            record.index,
+          )})`,
+        );
+      }
+    }
 
     const add: Array<{ record: ElementRecord; keys: ReadonlySet<string> }> = [];
     for (const id of declared.addedIds) {
