@@ -101,7 +101,7 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
 ## Phase 7 — Origin policy + binaries off the wire (FR-012, FR-013)
 
 - [x] T022 **(done)** The origin→wire policy has exactly ONE implementation, in `Scene.onDocUpdate`. No shared lookup table: with a single call site it would be indirection, not deduplication. Pairing a structural tombstone with its reveal is the logical-mutation boundary's job, not the origin table's. **Still open**: INV-ORIGIN as a table-driven suite (T010).
-- [ ] T023 **(now sequenced BEFORE/with T032 — it gates the wire slice)** Keep binary bytes off the wire. Measured: a raw live-doc encode contains a live image's dataURL verbatim, so this cannot be a broadcast-time filter over a full-state encode — Yjs encodes the whole document and dropping root structs risks receiver clock gaps. Decide the files boundary at the root (binaries out of the collaborative document, or separate authoritative wire/persistence shapes). Green **INV-NO-BINARY-WIRE**.
+- [ ] T023 **(gates T032; evidence in `audit-files-boundary.md`)** Keep binary bytes off the wire. Measured: a raw live-doc encode contains a live image's dataURL verbatim, so this cannot be a broadcast-time filter over a full-state encode — Yjs encodes the whole document and dropping root structs risks receiver clock gaps. Decide the files boundary at the root (binaries out of the collaborative document, or separate authoritative wire/persistence shapes). Green **INV-NO-BINARY-WIRE**.
 
 ## Phase 8 — Editor-Store reveal (FR-005, [3])
 
