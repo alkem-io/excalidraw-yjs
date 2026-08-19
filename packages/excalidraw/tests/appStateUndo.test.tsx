@@ -2,6 +2,10 @@ import * as Y from "yjs";
 
 import { Scene } from "@excalidraw-yjs/element";
 
+import { CaptureUpdateAction } from "@excalidraw-yjs/element";
+
+import { actionChangeProjectName } from "../actions/actionExport";
+
 import { Excalidraw } from "../index";
 
 import { API } from "./helpers/api";
@@ -41,11 +45,7 @@ describe("INV-APPSTATE-UNDO", () => {
       );
     });
 
-  // SKIPPED — asserts the DESIRED contract, which currently fails. Measured with
-  // a live peer: after undo, react=#111111 doc=#222222 peer=#222222 (2 updates
-  // delivered, so the link is real). Deliberately not rewritten to assert today's
-  // divergence, which would turn a live defect green.
-  it.skip("undo reverts the background for the editor, the doc AND a peer", async () => {
+  it("undo reverts the background for the editor, the doc AND a peer", async () => {
     await render(<Excalidraw />);
     API.setElements([API.createElement({ type: "rectangle", id: "a" })]);
 
@@ -101,5 +101,91 @@ describe("INV-APPSTATE-UNDO", () => {
       detach();
       peer.destroy();
     }
+  });
+
+  it("REDO re-applies the background for the editor, the doc AND a peer", async () => {
+    await render(<Excalidraw />);
+    API.setElements([API.createElement({ type: "rectangle", id: "a" })]);
+    const { peer, detach, count } = linkPeer();
+    try {
+      setBackground("#111111");
+      setBackground("#222222");
+      expect(count()).toBeGreaterThan(0); // non-vacuity
+
+      act(() => {
+        h.app.actionManager.executeAction(
+          h.app.actionManager.actions.undo as never,
+        );
+      });
+      expect(h.scene.getPersistedAppState().viewBackgroundColor).toBe(
+        "#111111",
+      );
+
+      act(() => {
+        h.app.actionManager.executeAction(
+          h.app.actionManager.actions.redo as never,
+        );
+      });
+
+      expect(h.state.viewBackgroundColor).toBe("#222222");
+      expect(h.scene.getPersistedAppState().viewBackgroundColor).toBe(
+        "#222222",
+      );
+      expect(peer.getPersistedAppState().viewBackgroundColor).toBe("#222222");
+    } finally {
+      detach();
+      peer.destroy();
+    }
+  });
+
+  it("`name` is not independently undoable, so nothing writes through for it", () => {
+    // Evidence for narrowing the claim rather than covering it: the
+    // `changeProjectName` action returns `CaptureUpdateAction.EVENTUALLY`, so a
+    // name change never becomes its own history entry and there is no name undo
+    // to propagate. The write-through is keyed off the delta, so it handles
+    // `name` if an entry ever carries it — but no action produces one today.
+    const result = actionChangeProjectName.perform(
+      [] as never,
+      { name: "x" } as never,
+      "y" as never,
+      { scene: { setAppState: () => {} }, getName: () => "y" } as never,
+    ) as { captureUpdate: unknown };
+    expect(result.captureUpdate).toBe(CaptureUpdateAction.EVENTUALLY);
+  });
+
+  it("an element-only undo emits NO appState change", async () => {
+    // The write-through must be scoped to what the history entry actually
+    // reverted. Writing the whole subset would publish the background on every
+    // element undo, and would introduce appState into a doc that never had any.
+    await render(<Excalidraw />);
+    API.setElements([API.createElement({ type: "rectangle", id: "a" })]);
+    setBackground("#111111");
+
+    // A history-RECORDING element change. `API.setElements` assigns `h.elements`
+    // directly and records nothing, so an undo after it would pop the BACKGROUND
+    // entry and this test would measure the wrong thing.
+    act(() => {
+      h.app.updateScene({
+        elements: [
+          API.createElement({ type: "rectangle", id: "a" }),
+          API.createElement({ type: "rectangle", id: "b" }),
+        ],
+        captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+      });
+    });
+
+    const before = JSON.stringify(h.scene.getPersistedAppState());
+    expect(before).toContain("#111111"); // guard: the background IS set
+    act(() => {
+      h.app.actionManager.executeAction(
+        h.app.actionManager.actions.undo as never,
+      );
+    });
+
+    // The element undo happened...
+    expect(h.scene.getElementsIncludingDeleted().length).toBeGreaterThan(0);
+    // ...and the collaborative appState is byte-identical, so nothing about it
+    // went on the wire.
+    expect(JSON.stringify(h.scene.getPersistedAppState())).toBe(before);
   });
 });

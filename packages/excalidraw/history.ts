@@ -8,6 +8,8 @@ import type { Store, StoreDelta } from "@excalidraw-yjs/element";
 
 import type { SceneElementsMap } from "@excalidraw-yjs/element/types";
 
+import type { ObservedStandaloneAppState } from "./types";
+
 import type { AppState } from "./types";
 
 /**
@@ -223,6 +225,29 @@ export class History {
           const [appliedAppState, appStateVisibleChange] =
             entry.appState.applyTo(nextAppState, nextElements);
           nextAppState = appliedAppState;
+
+          // The collaborative appState subset (background, name) lives on the
+          // doc, and only the actions that change it write through — undo/redo
+          // does not go through them. Without this the doc keeps the pre-undo
+          // value, the appState mirror pushes it back into React state on the
+          // next scene update, and peers never see the revert.
+          //
+          // Write ONLY the keys this entry actually reverted, taken from the
+          // delta. Writing the whole current subset instead would publish the
+          // background on every element-only undo, and would introduce appState
+          // into a doc that never had any.
+          const revertedKeys = entry.appState.delta
+            .inserted as Partial<ObservedStandaloneAppState>;
+          const writeThrough: Partial<ObservedStandaloneAppState> = {};
+          if ("viewBackgroundColor" in revertedKeys) {
+            writeThrough.viewBackgroundColor = nextAppState.viewBackgroundColor;
+          }
+          if ("name" in revertedKeys) {
+            writeThrough.name = nextAppState.name;
+          }
+          if (Object.keys(writeThrough).length) {
+            scene.setAppState(writeThrough);
+          }
 
           containsVisibleChange =
             elementsVisibleChange || appStateVisibleChange;
