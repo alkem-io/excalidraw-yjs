@@ -1694,20 +1694,18 @@ export class Scene {
    * Merge `files` into the doc's `yFiles` (`doc.getMap(FILES)`). Append-mostly:
    * an existing file is left in place unless its bytes changed (Excalidraw never
    * removes an image's binary on element delete), so this never drops a file a
-   * peer just added. Pass `recordHistory: false` for a load / programmatic write
-   * (non-undoable). No-op (no transaction) when nothing changed.
+   * peer just added. No-op (no transaction) when nothing changed.
+   *
+   * Always `LOCAL_ORIGIN`. The former `recordHistory: false` option had zero
+   * callers in production or tests, and it existed to request the one thing an
+   * origin cannot deliver for a shared-document write: invisibility to peers
+   * (see T031). The load path is the constructor / adopted doc, not a
+   * non-recording write.
    */
-  setFiles(
-    files: Readonly<Record<string, FileRecord>>,
-    options?: { recordHistory?: boolean },
-  ): void {
-    const origin =
-      options?.recordHistory === false ? EPHEMERAL_ORIGIN : LOCAL_ORIGIN;
-    let wrote = 0;
+  setFiles(files: Readonly<Record<string, FileRecord>>): void {
     this.doc.transact(() => {
-      wrote = writeFiles(this.yFiles, files, { prune: false });
-    }, origin);
-    void wrote;
+      writeFiles(this.yFiles, files, { prune: false });
+    }, LOCAL_ORIGIN);
   }
 
   /** The scene's files as a plain `Record<fileId, BinaryFileData>`, read out of
@@ -1826,17 +1824,18 @@ export class Scene {
    * Write the persistable appState subset (the `APPSTATE_ALLOW_LIST` keys —
    * background + name) into the doc's `yAppState`. Only those keys are
    * considered; every other appState field is local-only and ignored here (it
-   * must not persist or collaborate). Pass `recordHistory: false` for a load.
+   * must not persist or collaborate).
+   *
+   * Always `LOCAL_ORIGIN` — see the note on {@link setFiles}; the
+   * `recordHistory: false` option had zero callers and requested an
+   * unachievable guarantee.
    */
   setAppState(
     appState: Readonly<Partial<Record<AppStateAllowKey, unknown>>>,
-    options?: { recordHistory?: boolean },
   ): void {
-    const origin =
-      options?.recordHistory === false ? EPHEMERAL_ORIGIN : LOCAL_ORIGIN;
     this.doc.transact(() => {
       writeAppState(this.yAppState, appState);
-    }, origin);
+    }, LOCAL_ORIGIN);
   }
 
   /** The persisted appState subset (the allow-list keys present) from the doc. */
