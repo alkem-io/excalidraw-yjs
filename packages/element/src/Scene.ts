@@ -830,10 +830,17 @@ export class Scene {
       // already-deleted element would keep pushing its expiry into the future.
       if (!this.yElementDeletions.has(id)) {
         const updated = (record as Record<string, unknown>).updated;
-        this.yElementDeletions.set(
-          id,
-          typeof updated === "number" ? updated : 0,
-        );
+        if (typeof updated !== "number") {
+          // FAIL LOUD. `updated` is required on ExcalidrawElement and is what
+          // dates the deletion. Defaulting it (to 0, say) would mark the record
+          // deleted at the epoch — instantly expired — so the next sweep would
+          // reclaim content that should have had its full grace window, and
+          // malformed input would surface as data loss rather than as an error.
+          throw new Error(
+            `Scene: cannot record a deletion for "${id}" — 'updated' is ${typeof updated}, expected a number.`,
+          );
+        }
+        this.yElementDeletions.set(id, updated);
       }
     } else if (this.yElementDeletions.has(id)) {
       this.yElementDeletions.delete(id);

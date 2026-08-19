@@ -130,6 +130,40 @@ describe("INV-BOUNDED — bounded GC + privacy", () => {
     scene.destroy();
   });
 
+  it("FAILS LOUD when a deleted record carries no usable `updated`", () => {
+    const scene = new Scene();
+    seed(scene, [mk("a"), mk("keep")]);
+
+    // `updated` is required on ExcalidrawElement and is what dates the deletion.
+    // Defaulting it would date the deletion to the epoch — instantly expired —
+    // so the next sweep would reclaim content that should have had its full
+    // grace window, turning malformed input into silent data loss.
+    expect(() =>
+      scene.replaceAllElements(
+        scene.getElementsIncludingDeleted().map((e) =>
+          e.id === "a"
+            ? ({
+                ...e,
+                isDeleted: true,
+                updated: undefined,
+              } as unknown as ExcalidrawElement)
+            : e,
+        ),
+      ),
+    ).toThrow(/'updated' is undefined/);
+
+    scene.destroy();
+  });
+
+  it("non-vacuity: the SAME write with a valid `updated` is accepted", () => {
+    // Guards the case above against passing for an unrelated reason.
+    const scene = new Scene();
+    seed(scene, [mk("a"), mk("keep")]);
+    expect(() => softDelete(scene, "a", AGED)).not.toThrow();
+    expect(scene.yElementDeletions.get("a")).toBe(AGED);
+    scene.destroy();
+  });
+
   it("reclaims an expired deleted element and its now-orphaned binary", () => {
     const scene = new Scene();
     scene.setFiles({ f1: file("f1"), f2: file("f2") });

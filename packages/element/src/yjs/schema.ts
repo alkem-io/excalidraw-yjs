@@ -625,7 +625,15 @@ export const buildSnapshotDoc = (snapshot: WhiteboardSnapshot): Y.Doc => {
       // hold tombstones no replica could ever age out.
       if (element.isDeleted === true) {
         const updated = element.updated;
-        yDeletions.set(id, typeof updated === "number" ? updated : 0);
+        if (typeof updated !== "number") {
+          // FAIL LOUD — see the same guard in `Scene.syncDeletionMarker`.
+          // Defaulting would date the deletion to the epoch, making it instantly
+          // expired and reclaimable on the next sweep.
+          throw new Error(
+            `buildSnapshotDoc: deleted element "${id}" has no numeric 'updated'; cannot date its deletion.`,
+          );
+        }
+        yDeletions.set(id, updated);
       }
     }
     writeFiles(yFiles, snapshot.files, { prune: false });
@@ -668,9 +676,10 @@ export const encodeSnapshot = (snapshot: WhiteboardSnapshot): Uint8Array =>
  * (`elements` ordered by fractional index, `files`, persistable `appState`) —
  * the inverse of {@link encodeSnapshot}. The decoded `elements` carry no
  * reconciliation metadata (the doc never stores it); a live `Scene` re-derives
- * it on adoption. `version`/`versionNonce`/`updated` are seeded here so the
+ * it on adoption. `version`/`versionNonce`/`updated` are re-seeded here so the
  * snapshot is a valid standalone element set (the app's `restoreElements`
- * normalizes them anyway).
+ * normalizes them anyway) — a DELETED element takes its `updated` from the
+ * deletion sidecar, so its age survives a decode -> re-encode round trip.
  */
 export const decodeSnapshot = (bytes: Uint8Array): WhiteboardSnapshot => {
   const doc = new Y.Doc();
@@ -679,10 +688,36 @@ export const decodeSnapshot = (bytes: Uint8Array): WhiteboardSnapshot => {
   const yFiles = doc.getMap<unknown>(FILES);
   const yAppState = doc.getMap<unknown>(APPSTATE);
 
+  const yDeletions = doc.getMap<number>(ELEMENT_DELETIONS);
   const elements: Record<string, unknown>[] = [];
   for (const [id, ymap] of yElements.entries()) {
     const record = yMapToElement(ymap);
     record.id = id;
+    // Re-seed the reconciliation metadata the doc deliberately does not store
+    // (RECONCILE_META_KEYS), so the result is a VALID standalone element set —
+    // `ExcalidrawElement` requires all three. This was documented but never
+    // actually done, so decoded elements silently violated the type and a
+    // decode -> merge -> re-encode round trip (the persistence path) produced
+    // deleted elements with no `updated` at all.
+    //
+    // For a DELETED element the sidecar holds the real deletion time, so seeding
+    // from it keeps that time lossless across the round trip — otherwise every
+    // save would reset the grace window and aged tombstones would never expire.
+    if (record.isDeleted === true) {
+      const deletedAt = yDeletions.get(id);
+      if (typeof deletedAt !== "number") {
+        throw new Error(
+          `decodeSnapshot: deleted element "${id}" has no deletion timestamp; the snapshot is malformed.`,
+        );
+      }
+      record.updated = deletedAt;
+    } else {
+      // A live element's `updated` is genuinely not recorded anywhere; the app's
+      // `restoreElements` normalizes it. Any stable value is correct here.
+      record.updated = 1;
+    }
+    record.version = 1;
+    record.versionNonce = 0;
     elements.push(record);
   }
   elements.sort((a, b) => {
