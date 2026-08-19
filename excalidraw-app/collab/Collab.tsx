@@ -694,9 +694,15 @@ class Collab extends PureComponent<CollabProps, CollabState> {
           case WS_SUBTYPES.INIT: {
             if (!this.portal.socketInitialized) {
               this.initializeRoom({ fetchScene: false });
-              // Native-Yjs core (M3): INIT carries the full scene-doc state
-              // (`encodeStateAsUpdate`) as bytes. Apply it to our doc; Yjs merges
-              // it with whatever we already hold.
+              // INIT carries a full-scene seed as Yjs bytes; apply it to our doc
+              // and Yjs merges it with whatever we already hold.
+              //
+              // NOTE: the sender builds that seed with `encodeSyncableSceneAsUpdate`,
+              // which REBUILDS the scene through a throwaway doc rather than encoding
+              // the live one — so the seed does not carry the sender's lineage, and
+              // merging it can resurrect deletions and lose concurrent edits. That is
+              // the known T018 defect; the receive path here is already correct and
+              // needs no change when the sender is fixed.
               const update = new Uint8Array(decryptedData.payload.update);
               this.applyRemoteSceneUpdate(update);
               // The doc now holds the merged state — resolve with the current

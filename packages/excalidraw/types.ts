@@ -979,20 +979,6 @@ export interface ExcalidrawImperativeAPI {
     typeof App
   >["getSceneElementsMapIncludingDeleted"];
   /**
-   * The scene's `Y.Doc` — the native-Yjs element store.
-   *
-   * The doc is MUTABLE and handing it out bypasses the editor's write boundary:
-   * writing to it directly skips intent scoping, origin tagging and
-   * logical-mutation batching, so such writes are not what the editor would have
-   * produced and may not be broadcast correctly.
-   *
-   * A consumer subscribing for collaboration must implement the origin policy
-   * itself — filter `REMOTE_ORIGIN` so a peer's update is never echoed back, and
-   * treat a structural prelude and its reveal as ONE logical mutation. The only
-   * current consumer doing this is the bundled collaboration client
-   * (`excalidraw-app/collab/Collab.tsx`), which filters origins explicitly.
-   */
-  /**
    * Collaboration transport, carrying the editor's origin policy. Use these rather
    * than subscribing to a raw `Y.Doc`.
    */

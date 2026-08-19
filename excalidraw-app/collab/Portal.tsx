@@ -171,9 +171,13 @@ class Portal {
    * one-time first-in-room seed) but always applies UPDATE. A full-state Yjs
    * update is a valid, idempotent `REMOTE_ORIGIN` merge (Yjs dedups what the peer
    * already holds), so this converges a peer that dropped an incremental update
-   * without disturbing one that is already up to date. Wire stays V1-consistent:
-   * `encodeSceneAsUpdate()` is `Y.encodeStateAsUpdate` (V1), matching the
-   * incremental UPDATE bytes already on the wire.
+   * without disturbing one that is already up to date. Wire stays V1-consistent,
+   * matching the incremental UPDATE bytes already on the wire.
+   *
+   * NOTE: `collab.encodeSceneAsUpdate()` is NOT `Y.encodeStateAsUpdate(doc)` — it
+   * rebuilds the scene through a throwaway doc (`encodeSyncableSceneAsUpdate`), so
+   * the resync payload carries no lineage and the "idempotent merge" claim above
+   * holds only for the bytes, not for CRDT history. Known T018 defect.
    */
   broadcastSceneResync = async () => {
     await this.broadcastSceneUpdate(

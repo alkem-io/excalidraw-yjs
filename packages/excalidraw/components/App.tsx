@@ -2485,16 +2485,6 @@ class App extends React.Component<AppProps, AppState> {
   };
 
   /**
-   * The scene's `Y.Doc` — the native-Yjs element store (native-Yjs core, M3).
-   *
-   * Collaboration and persistence operate on this doc directly: a collab provider
-   * exchanges Yjs updates on it (local edits broadcast via `scene.onDocUpdate`,
-   * remote updates apply via `scene.applyRemoteUpdate` under a REMOTE origin), and
-   * persistence encodes/decodes its bytes. There is no scene-array broadcast and
-   * no JSON reconciliation — Yjs converges per-property natively. Exposed so the
-   * app's collab layer can attach a transport to the one source of truth.
-   */
-  /**
    * Subscribe to LOCAL logical updates, for a collaboration transport.
    *
    * The supported way to attach a provider. It carries the editor's ONE origin
