@@ -1996,20 +1996,11 @@ export class Scene {
       isDragging: boolean;
       isBindingEnabled?: boolean;
       isMidpointSnappingEnabled?: boolean;
-      /**
-       * Whether this mutation is an undoable local edit (default `true`). Pass
-       * `false` for `CaptureUpdateAction.NEVER` mutations so the doc changes but
-       * no undo step is produced. Written under {@link STRUCTURAL_ORIGIN}:
-       * untracked by undo, but still published to peers.
-       */
-      recordHistory?: boolean;
     } = {
       informMutation: true,
       isDragging: false,
     },
   ): TElement {
-    const writeOrigin =
-      options.recordHistory === false ? STRUCTURAL_ORIGIN : LOCAL_ORIGIN;
     const elementsMap = this.getNonDeletedElementsMap();
 
     const { version: prevVersion } = element;
@@ -2098,7 +2089,7 @@ export class Scene {
           if (nextMetaVersion > this.versionHighWater) {
             this.versionHighWater = nextMetaVersion;
           }
-        }, writeOrigin);
+        }, LOCAL_ORIGIN);
       } finally {
         this.suppressTrigger = prevSuppress;
       }
