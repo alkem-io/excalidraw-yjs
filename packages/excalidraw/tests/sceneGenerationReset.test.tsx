@@ -183,7 +183,7 @@ describe("resetScene replaces the Scene generation", () => {
 
     expect(liveIds(h.scene)).toEqual([]);
     expect(Object.keys(h.app.files)).toEqual([]);
-    expect(h.scene.getFiles()).toEqual({});
+    expect(h.scene.getAssetLocators()).toEqual({});
     // appState returns to its defaults, on the doc and in the editor
     expect(h.scene.getPersistedAppState()).toEqual({});
     expect(h.state.viewBackgroundColor).toBe(

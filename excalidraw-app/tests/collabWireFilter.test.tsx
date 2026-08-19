@@ -5,7 +5,6 @@ import type {
   FileId,
   OrderedExcalidrawElement,
 } from "@excalidraw-yjs/element/types";
-import type { BinaryFiles } from "@excalidraw-yjs/excalidraw/types";
 
 import { DELETED_ELEMENT_TIMEOUT } from "../app_constants";
 import {
@@ -54,15 +53,6 @@ const imageEl = (
   return el;
 };
 
-const fileRecord = (id: string, dataURL: string) => ({
-  mimeType: "image/png",
-  id,
-  dataURL,
-  created: 1_700_000_000_000,
-  lastRetrieved: 1_700_000_000_500,
-  version: 1,
-});
-
 const APP_STATE = { viewBackgroundColor: "#ffffff", name: "board" };
 
 /**
@@ -77,7 +67,7 @@ const applyToFreshScene = (update: Uint8Array) => {
       .getElementsIncludingDeleted()
       .map((e) => e.id)
       .sort(),
-    files: scene.getFiles(),
+    assets: scene.getAssetLocators(),
     appState: scene.getPersistedAppState(),
   };
   scene.destroy();
@@ -95,15 +85,15 @@ describe("collaboration wire seed: deleted-content + orphaned-file filtering", (
     expect(referenced.has(fileId("f-deleted"))).toBe(false);
   });
 
-  it("filterReferencedFiles drops a pasted-then-deleted image's binary", () => {
+  it("filterReferencedFiles drops a pasted-then-deleted image's reference", () => {
     const live = imageEl("live", "f-live");
     const deleted = imageEl("deleted", "f-deleted", { isDeleted: true });
-    const files: BinaryFiles = {
-      "f-live": fileRecord("f-live", "data:,LIVE") as never,
-      "f-deleted": fileRecord("f-deleted", "data:,SECRET") as never,
+    const refs = {
+      "f-live": "asset://f-live",
+      "f-deleted": "asset://f-deleted",
     };
 
-    const filtered = filterReferencedFiles(files, [live, deleted]);
+    const filtered = filterReferencedFiles(refs, [live, deleted]);
 
     expect(Object.keys(filtered)).toEqual(["f-live"]);
     expect(filtered["f-deleted"]).toBeUndefined();
@@ -116,23 +106,23 @@ describe("collaboration wire seed: deleted-content + orphaned-file filtering", (
       isDeleted: true,
       updated: Date.now(),
     });
-    const files: BinaryFiles = {
-      "f-live": fileRecord("f-live", "data:,LIVE") as never,
-      "f-deleted": fileRecord("f-deleted", "data:,SECRET-BYTES") as never,
+    const assets = {
+      "f-live": "asset://f-live",
+      "f-deleted": "asset://f-deleted",
     };
 
     const update = encodeSyncableSceneAsUpdate(
       [live, deleted],
-      files,
+      assets,
       APP_STATE,
     );
     const decoded = applyToFreshScene(update);
 
-    // …but the deleted image's BINARY is gone from the wire.
-    expect(Object.keys(decoded.files).sort()).toEqual(["f-live"]);
-    expect(decoded.files["f-deleted"]).toBeUndefined();
-    // the surviving file's bytes are intact.
-    expect(decoded.files["f-live"].dataURL).toBe("data:,LIVE");
+    // …and the deleted image's REFERENCE is gone from the wire. Bytes are not
+    // on the wire at all any more — the document cannot carry them.
+    expect(Object.keys(decoded.assets).sort()).toEqual(["f-live"]);
+    expect(decoded.assets["f-deleted"]).toBeUndefined();
+    expect(decoded.assets["f-live"]).toBe("asset://f-live");
   });
 
   it("FINDING #3: an over-timeout tombstone is GC'd from the wire, a fresh one survives (convergence)", () => {

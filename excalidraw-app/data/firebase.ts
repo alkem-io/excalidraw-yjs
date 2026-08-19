@@ -31,7 +31,6 @@ import type {
   AppState,
   BinaryFileData,
   BinaryFileMetadata,
-  BinaryFiles,
   DataURL,
 } from "@excalidraw-yjs/excalidraw/types";
 

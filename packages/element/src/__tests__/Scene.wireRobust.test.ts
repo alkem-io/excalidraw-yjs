@@ -62,9 +62,7 @@ describe("remote-update robustness — measured behaviour", () => {
     // means carrying on with a partially-applied, internally inconsistent one.
     const source = new Scene();
     source.replaceAllElements([mk("a"), mk("b")]);
-    source.setFiles({
-      f1: { id: "f1", mimeType: "image/png", dataURL: "X".repeat(200) },
-    } as Parameters<Scene["setFiles"]>[0]);
+    source.setAssetLocators({ f1: "asset://f1" });
 
     // A peer produces a rich delta: several new elements, an edit, a new file.
     const peer = new Scene(undefined, { doc: new Y.Doc() });
@@ -75,9 +73,7 @@ describe("remote-update robustness — measured behaviour", () => {
       mk("d"),
       mk("e"),
     ]);
-    peer.setFiles({
-      f2: { id: "f2", mimeType: "image/png", dataURL: "Z".repeat(300) },
-    } as Parameters<Scene["setFiles"]>[0]);
+    peer.setAssetLocators({ f2: "asset://f2" });
     const delta = Y.encodeStateAsUpdate(
       peer.doc,
       Y.encodeStateVector(source.doc),
@@ -89,9 +85,7 @@ describe("remote-update robustness — measured behaviour", () => {
     for (let cut = 1; cut < delta.byteLength; cut++) {
       const target = new Scene();
       target.replaceAllElements([mk("a"), mk("b")]);
-      target.setFiles({
-        f1: { id: "f1", mimeType: "image/png", dataURL: "X".repeat(200) },
-      } as Parameters<Scene["setFiles"]>[0]);
+      target.setAssetLocators({ f1: "asset://f1" });
       const before = fingerprint(target);
       let threw = false;
       try {

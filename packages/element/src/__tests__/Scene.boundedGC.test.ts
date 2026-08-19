@@ -76,17 +76,10 @@ const revive = (scene: Scene, id: string, at: number) => {
   );
 };
 
-const BINARY = "A".repeat(512);
-const file = (id: string) => ({
-  id,
-  mimeType: "image/png" as const,
-  dataURL: `data:image/png;base64,${BINARY}`,
-  created: NOW,
-});
+/** An opaque host locator. Bytes never enter the document. */
+const locator = (id: string) => `asset://${id}`;
 
 const docKeys = (scene: Scene) => [...scene.yElements.keys()].sort();
-const decode = (bytes: Uint8Array) =>
-  new TextDecoder("utf-8", { fatal: false }).decode(bytes);
 
 /**
  * INV-BOUNDED (FR-006) — reclamation bounds storage under churn and keeps an
@@ -166,14 +159,14 @@ describe("INV-BOUNDED — bounded GC + privacy", () => {
 
   it("reclaims an expired deleted element and its now-orphaned binary", () => {
     const scene = new Scene();
-    scene.setFiles({ f1: file("f1"), f2: file("f2") });
+    scene.setAssetLocators({ f1: locator("f1"), f2: locator("f2") });
     seed(scene, [mkImg("live", "f1"), mkImg("gone", "f2")]);
     softDelete(scene, "gone", AGED);
 
     const removed = scene.collectGarbage({ deletedBefore: CUTOFF });
 
     expect(docKeys(scene)).toEqual(["live"]);
-    expect(Object.keys(scene.getFiles()).sort()).toEqual(["f1"]);
+    expect(Object.keys(scene.getAssetLocators()).sort()).toEqual(["f1"]);
     expect(removed).toEqual({ elements: 1, files: 1 });
     // the sidecar entry is reclaimed with it — no perpetually growing marker map
     expect(scene.yElementDeletions.has("gone")).toBe(false);
@@ -182,7 +175,7 @@ describe("INV-BOUNDED — bounded GC + privacy", () => {
 
   it("does NOT reclaim a deletion still inside the window", () => {
     const scene = new Scene();
-    scene.setFiles({ f1: file("f1") });
+    scene.setAssetLocators({ f1: locator("f1") });
     seed(scene, [mkImg("recent", "f1"), mk("other")]);
     softDelete(scene, "recent", RECENT);
 
@@ -192,13 +185,16 @@ describe("INV-BOUNDED — bounded GC + privacy", () => {
     });
     expect(docKeys(scene)).toEqual(["other", "recent"]);
     // ...and its binary stays, so an undo restores a COMPLETE image.
-    expect(Object.keys(scene.getFiles())).toEqual(["f1"]);
+    expect(Object.keys(scene.getAssetLocators())).toEqual(["f1"]);
     scene.destroy();
   });
 
   it("keeps a file that a RETAINED element or tombstone still references", () => {
     const scene = new Scene();
-    scene.setFiles({ shared: file("shared"), solo: file("solo") });
+    scene.setAssetLocators({
+      shared: locator("shared"),
+      solo: locator("solo"),
+    });
     seed(scene, [
       mkImg("liveImg", "shared"),
       mkImg("agedShared", "shared"),
@@ -211,33 +207,44 @@ describe("INV-BOUNDED — bounded GC + privacy", () => {
 
     expect(docKeys(scene)).toEqual(["liveImg", "recentSolo"]);
     // `shared` held by a live element, `solo` by a RETAINED tombstone.
-    expect(Object.keys(scene.getFiles()).sort()).toEqual(["shared", "solo"]);
+    expect(Object.keys(scene.getAssetLocators()).sort()).toEqual([
+      "shared",
+      "solo",
+    ]);
     expect(removed.files).toBe(0);
     scene.destroy();
   });
 
-  it("PRIVACY: an expired deleted image reaches a new joiner in no form", () => {
+  it("PRIVACY: a joiner receives no bytes at all, and no stale reference", () => {
+    // Stronger than it used to be. The document cannot carry bytes, so the
+    // question is no longer "were the bytes reclaimed" but "is a byte-shaped
+    // value ever present" — plus, does an expired element's reference go with it.
     const host = new Scene();
-    host.setFiles({ secret: file("secret") });
     seed(host, [mk("live"), mkImg("pasted-then-deleted", "secret")]);
+    host.setAssetLocators({ secret: locator("secret") });
     softDelete(host, "pasted-then-deleted", AGED);
 
-    // Non-vacuity: the binary IS on the wire before the sweep.
-    expect(decode(host.encodeStateAsUpdate())).toContain(BINARY);
+    // GUARD: the reference really is in the document before the sweep.
+    expect(host.getAssetLocators().secret).toBe(locator("secret"));
 
     host.collectGarbage({ deletedBefore: CUTOFF });
 
     const joiner = new Y.Doc();
     Y.applyUpdate(joiner, host.encodeStateAsUpdate());
 
-    // Absent from the decoded structures, not merely hidden behind a getter...
     expect([...joiner.getMap<Y.Map<unknown>>(ELEMENTS).keys()]).toEqual([
       "live",
     ]);
+    // the reference is reclaimed with its element...
     expect([...joiner.getMap<unknown>(FILES).keys()]).toEqual([]);
-    // ...including the deletion marker itself.
     expect([...joiner.getMap<number>(ELEMENT_DELETIONS).keys()]).toEqual([]);
-    expect(decode(host.encodeStateAsUpdate())).not.toContain(BINARY);
+
+    // ...and nothing byte-shaped was ever encodable in the first place: every
+    // value under the assets root is an opaque locator string.
+    for (const value of host.yAssets.values()) {
+      expect(typeof value).toBe("string");
+      expect(String(value)).not.toContain("data:");
+    }
     host.destroy();
   });
 
@@ -440,45 +447,27 @@ describe("INV-BOUNDED — bounded GC + privacy", () => {
     b.destroy();
   });
 
-  it("storage growth under churn is INDEPENDENT of payload size", () => {
-    // The real bounded-storage property. A byte threshold would pass or fail for
-    // reasons unrelated to reclamation: measured, 5 cycles leave ~2KB of residue
-    // REGARDLESS of payload size, which is Yjs delete-set/struct-id overhead and
-    // is expected to be monotone. What must not scale is retained user payload.
-    const churn = (payloadLen: number) => {
-      const binary = "A".repeat(payloadLen);
-      const scene = new Scene();
-      const sizes: number[] = [];
-      for (let cycle = 0; cycle < 5; cycle++) {
-        const fid = `f${cycle}`;
-        scene.setFiles({
-          [fid]: {
-            id: fid,
-            mimeType: "image/png",
-            dataURL: `data:image/png;base64,${binary}`,
-            created: NOW,
-          },
-        } as Parameters<Scene["setFiles"]>[0]);
-        seed(scene, [mk("live"), mkImg(`img${cycle}`, fid)]);
-        softDelete(scene, `img${cycle}`, AGED);
-        scene.collectGarbage({ deletedBefore: CUTOFF });
-        sizes.push(scene.encodeStateAsUpdate().byteLength);
-      }
-      const encoded = decode(scene.encodeStateAsUpdate());
-      scene.destroy();
-      return {
-        growth: sizes[4] - sizes[0],
-        retainsPayload: encoded.includes(binary),
-      };
-    };
+  it("storage growth under churn stays bounded and byte-free", () => {
+    // Payload-independence used to be the interesting property, because bytes
+    // were in the document and had to be shown not to accumulate. They cannot be
+    // now, so what is left to check is that churn does not accumulate references
+    // and that nothing byte-shaped appears.
+    const scene = new Scene();
+    const sizes: number[] = [];
 
-    const small = churn(512);
-    const large = churn(4096);
+    for (let cycle = 0; cycle < 5; cycle++) {
+      const fid = `f${cycle}`;
+      scene.setAssetLocators({ [fid]: locator(fid) });
+      seed(scene, [mk("live"), mkImg(`img${cycle}`, fid)]);
+      softDelete(scene, `img${cycle}`, AGED);
+      scene.collectGarbage({ deletedBefore: CUTOFF });
+      sizes.push(scene.encodeStateAsUpdate().byteLength);
+    }
 
-    expect(small.retainsPayload).toBe(false);
-    expect(large.retainsPayload).toBe(false);
-    expect(small.growth).toBeGreaterThan(0); // non-vacuity: churn really ran
-    expect(Math.abs(large.growth - small.growth)).toBeLessThan(256);
-    expect(large.growth).toBeLessThan(4096);
+    expect(sizes[0]).toBeGreaterThan(0); // non-vacuity: churn really ran
+    // References are reclaimed each cycle, so nothing accumulates.
+    expect(Object.keys(scene.getAssetLocators())).toEqual([]);
+    expect(sizes[4] - sizes[0]).toBeLessThan(4096);
+    scene.destroy();
   });
 });

@@ -9,7 +9,6 @@ import {
   RECONCILE_META_KEYS,
   encodeSnapshot,
   decodeSnapshot,
-  type FileRecord,
 } from "../yjs";
 
 import type { ExcalidrawElement } from "../types";
@@ -57,15 +56,8 @@ const imageEl = (id: string, fileId: string): ExcalidrawElement =>
     status: "saved",
   } as Parameters<typeof newImageElement>[0]) as unknown as ExcalidrawElement;
 
-/** A flat BinaryFileData-shaped record (the value the doc stores whole). */
-const file = (id: string, dataURL: string): FileRecord => ({
-  mimeType: "image/png",
-  id,
-  dataURL,
-  created: 1_700_000_000_000,
-  lastRetrieved: 1_700_000_000_500,
-  version: 1,
-});
+/** An opaque host locator — what the document stores in place of bytes. */
+const locator = (id: string) => `asset://${id}`;
 
 /** The doc does NOT store reconciliation metadata; compare element content
  * modulo those keys (`RECONCILE_META_KEYS`, OPEN-3). */
@@ -90,7 +82,7 @@ describe("native-yjs Scene persistence: the doc IS the persistence unit", () => 
       rect("a", { x: 5, strokeColor: "#f00" }),
       imageEl("img", "file-1"),
     ]);
-    scene.setFiles({ "file-1": file("file-1", "data:image/png;base64,AAAA") });
+    scene.setAssetLocators({ "file-1": locator("file-1") });
     scene.setAppState({ viewBackgroundColor: "#abcdef", name: "My board" });
 
     // SAVE: encode the whole doc (elements + files + appState) to Yjs V2 bytes.
@@ -121,8 +113,8 @@ describe("native-yjs Scene persistence: the doc IS the persistence unit", () => 
     expect(restored.getElement("a")!.x).toBe(5);
 
     // --- files match (the whole BinaryFileData round-trips byte-stable) ---
-    expect(restored.getFiles()).toEqual({
-      "file-1": file("file-1", "data:image/png;base64,AAAA"),
+    expect(restored.getAssetLocators()).toEqual({
+      "file-1": locator("file-1"),
     });
 
     // --- persisted appState matches (only the allow-list subset) ---
@@ -137,7 +129,7 @@ describe("native-yjs Scene persistence: the doc IS the persistence unit", () => 
 
   it("the persisted doc uses the server's getMap('elements'/'files'/'appState') convention", () => {
     const scene = new Scene([imageEl("img", "f1")]);
-    scene.setFiles({ f1: file("f1", "data:image/png;base64,BBBB") });
+    scene.setAssetLocators({ f1: locator("f1") });
     scene.setAppState({ viewBackgroundColor: "#123456", name: "n" });
 
     const bytes = scene.encodeStateAsUpdate("v2");
@@ -157,7 +149,7 @@ describe("native-yjs Scene persistence: the doc IS the persistence unit", () => 
 
     // files live under "files", keyed by fileId, value = the whole BinaryFileData.
     expect([...yFiles.keys()]).toEqual(["f1"]);
-    expect(yFiles.get("f1")).toEqual(file("f1", "data:image/png;base64,BBBB"));
+    expect(yFiles.get("f1")).toEqual(locator("f1"));
 
     // appState lives under "appState", only the allow-list keys.
     expect(yAppState.get("viewBackgroundColor")).toBe("#123456");
@@ -206,16 +198,19 @@ describe("native-yjs Scene persistence: the doc IS the persistence unit", () => 
 
   it("setFiles MERGES (append-mostly) — a later file does not drop an earlier one", () => {
     const scene = new Scene([rect("a")]);
-    scene.setFiles({ f1: file("f1", "data:,1") });
-    scene.setFiles({ f2: file("f2", "data:,2") });
+    scene.setAssetLocators({ f1: locator("f1") });
+    scene.setAssetLocators({ f2: locator("f2") });
 
-    // both files present (Excalidraw never removes a binary on element delete).
-    expect(Object.keys(scene.getFiles()).sort()).toEqual(["f1", "f2"]);
+    // both references present (a reference is not removed on element delete;
+    // reclaiming one is `collectGarbage`'s job).
+    expect(Object.keys(scene.getAssetLocators()).sort()).toEqual(["f1", "f2"]);
 
-    // re-setting an unchanged file is a no-op; updating its bytes replaces it.
-    scene.setFiles({ f1: file("f1", "data:,1-updated") });
-    expect(scene.getFiles().f1.dataURL).toBe("data:,1-updated");
-    expect(Object.keys(scene.getFiles()).sort()).toEqual(["f1", "f2"]);
+    // re-setting an unchanged reference is a no-op; a changed locator replaces it.
+    scene.setAssetLocators({ f1: locator("f1") });
+    expect(scene.getAssetLocators().f1).toBe(locator("f1"));
+    scene.setAssetLocators({ f1: "asset://f1-moved" });
+    expect(scene.getAssetLocators().f1).toBe("asset://f1-moved");
+    expect(Object.keys(scene.getAssetLocators()).sort()).toEqual(["f1", "f2"]);
 
     scene.destroy();
   });
@@ -227,7 +222,7 @@ describe("native-yjs Scene persistence: the doc IS the persistence unit", () => 
     const b = imageEl("img", "f1");
     const snapshot = {
       elements: [a, b] as unknown as readonly Record<string, unknown>[],
-      files: { f1: file("f1", "data:image/png;base64,CCCC") },
+      assets: { f1: locator("f1") },
       appState: { viewBackgroundColor: "#0f0", name: "snap" },
     };
 
@@ -242,8 +237,8 @@ describe("native-yjs Scene persistence: the doc IS the persistence unit", () => 
     expect(decoded.elements[1].fileId).toBe("f1");
 
     // files + appState survive exactly.
-    expect(decoded.files).toEqual({
-      f1: file("f1", "data:image/png;base64,CCCC"),
+    expect(decoded.assets).toEqual({
+      f1: locator("f1"),
     });
     expect(decoded.appState).toEqual({
       viewBackgroundColor: "#0f0",
@@ -260,7 +255,7 @@ describe("native-yjs Scene persistence: the doc IS the persistence unit", () => 
     })();
 
     expect(restored.getElementsIncludingDeleted()).toEqual([]);
-    expect(restored.getFiles()).toEqual({});
+    expect(restored.getAssetLocators()).toEqual({});
     expect(restored.getPersistedAppState()).toEqual({});
 
     scene.destroy();
@@ -274,13 +269,13 @@ describe("native-yjs Scene persistence: the doc IS the persistence unit", () => 
     const a = new Scene([rect("a")]);
     const b = new Scene();
 
-    a.setFiles({ f1: file("f1", "data:,x") });
+    a.setAssetLocators({ f1: locator("f1") });
     a.setAppState({ viewBackgroundColor: "#777", name: "shared" });
 
     // B catches up via the full doc state (the initial-sync path).
     b.applyRemoteUpdate(a.encodeStateAsUpdate("v2"), "v2");
 
-    expect(b.getFiles()).toEqual({ f1: file("f1", "data:,x") });
+    expect(b.getAssetLocators()).toEqual({ f1: locator("f1") });
     expect(b.getPersistedAppState()).toEqual({
       viewBackgroundColor: "#777",
       name: "shared",

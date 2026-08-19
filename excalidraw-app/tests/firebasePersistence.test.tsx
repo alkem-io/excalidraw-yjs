@@ -6,7 +6,7 @@ import type {
   ExcalidrawElement,
   OrderedExcalidrawElement,
 } from "@excalidraw-yjs/element/types";
-import type { AppState, BinaryFiles } from "@excalidraw-yjs/excalidraw/types";
+import type { AppState } from "@excalidraw-yjs/excalidraw/types";
 
 import type { SyncableExcalidrawElement } from "../data";
 import type Portal from "../collab/Portal";
@@ -133,16 +133,6 @@ const imageEl = (id: string, fileId: string) =>
     fileId: fileId as ExcalidrawElement["id"] as never,
     status: "saved",
   } as Parameters<typeof newImageElement>[0]) as unknown as SyncableExcalidrawElement;
-
-const fileRecord = (id: string, dataURL: string) =>
-  ({
-    mimeType: "image/png",
-    id,
-    dataURL,
-    created: 1_700_000_000_000,
-    lastRetrieved: 1_700_000_000_500,
-    version: 1,
-  } as unknown as BinaryFiles[string]);
 
 const appStateWith = (over: Partial<AppState>): AppState =>
   ({ viewBackgroundColor: "#ffffff", name: "untitled", ...over } as AppState);
@@ -304,17 +294,23 @@ describe("firebase persistence boundary", () => {
     (deleted as unknown as { isDeleted: boolean }).isDeleted = true;
     (deleted as unknown as { updated: number }).updated = Date.now();
 
-    const files: BinaryFiles = {
-      "f-live": fileRecord("f-live", "data:,LIVE"),
-      "f-deleted": fileRecord("f-deleted", "data:,SECRET-BYTES"),
+    const assets: Record<string, string> = {
+      "f-live": "asset://f-live",
+      "f-deleted": "asset://f-deleted",
     };
 
-    await saveToFirebase(portalFor(), [live, deleted], appStateWith({}), files);
+    await saveToFirebase(
+      portalFor(),
+      [live, deleted],
+      appStateWith({}),
+      assets,
+    );
 
     const loaded = await loadFromFirebase(ROOM, KEY, null);
-    // the orphaned (deleted-image) binary never reached the store.
-    expect(Object.keys(loaded!.files).sort()).toEqual(["f-live"]);
-    expect(loaded!.files["f-deleted"]).toBeUndefined();
+    // the orphaned image's REFERENCE never reached the store (and bytes were
+    // never in the document to begin with).
+    expect(Object.keys(loaded!.assets).sort()).toEqual(["f-live"]);
+    expect(loaded!.assets["f-deleted"]).toBeUndefined();
   });
 
   it("FINDING #4: persisted viewBackgroundColor + name survive a cold load", async () => {
