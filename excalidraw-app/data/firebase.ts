@@ -199,8 +199,8 @@ const mergeStoredElements = (
  * The stored scene document is the WHOLE doc — elements + files + persistable
  * appState in the one doc, `getMap("elements"/"files"/"appState")` — encoded via
  * `encodeStateAsUpdateV2`, NOT a `JSON.stringify(elements)` element snapshot. This
- * is byte-identical to the format the Alkemio server / collab-service stores, so
- * a doc the editor persists is exactly what the backend stores. The encryption
+ * is byte-identical to the canonical persistence format, so a doc the editor
+ * persists is exactly what a storage or collaboration backend holds. The encryption
  * envelope is unchanged; only the plaintext is now Yjs bytes instead of JSON.
  *
  * Two boundary guarantees the raw-doc encode lacked:
