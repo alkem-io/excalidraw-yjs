@@ -59,6 +59,14 @@ Core defines asset-reference semantics and calls a host-supplied adapter to stor
 4. Clone/copy semantics (**stated, not designed**): core rewrites only the small references and **delegates any physical copy or de-duplication to the host adapter** — whether bytes are duplicated, shared or content-addressed is a host property, not a core contract. (The Alkemio adapter can, for instance, mint a new row pointing at the same content-addressed blob.) **OPEN.**
 5. Rollout is atomic across this package and its consumers, with no alias or dual mode. **OPEN — requires the owner's call**, since it deletes a shape client-web currently depends on.
 
+## Clone / archive encodes carry FRESH lineage — deliberately
+
+A clone or a portable archive builds a NEW document: no shared history with the source, element ids preserved. Encoding it with fresh lineage is therefore CORRECT, and must not be confused with the defect this spec exists to remove.
+
+The defect is re-encoding a **live collaborative** document through a throwaway doc with a fresh `clientID`, which silently loses concurrent edits and resurrects deletions. A clone has no concurrent peers to lose edits from, so the same mechanism is the requirement rather than the failure.
+
+Stated here because a downstream consumer is building a clone against this contract, and the two cases look identical at the call site. Any clone/archive converter should say so where it encodes, or a later reader will "fix" it into carrying lineage it must not have.
+
 ## What is NOT decided here
 
 The exact shared reference fields; (a) vs (b); the adapter's operation list; the clone model; and the cross-repo migration. Those are marked OPEN above and need the repo owner's decision before any implementation.
