@@ -985,6 +985,7 @@ export interface ExcalidrawImperativeAPI {
   onLocalSceneUpdate: InstanceType<typeof App>["onLocalSceneUpdate"];
   applyRemoteSceneUpdate: InstanceType<typeof App>["applyRemoteSceneUpdate"];
   encodeSceneAsUpdate: InstanceType<typeof App>["encodeSceneAsUpdate"];
+  encodeSceneStateVector: InstanceType<typeof App>["encodeSceneStateVector"];
   history: {
     clear: InstanceType<typeof App>["resetHistory"];
   };

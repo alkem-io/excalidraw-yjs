@@ -42,7 +42,11 @@ Rewriting is only meaningful when copying across an OWNERSHIP boundary (a board 
 | `encodeSnapshotAsUpdate` → save | `data/index.ts:128` | **Changes.** Same split. |
 | `Scene.collectGarbage` file branch | `Scene.ts` | **Simplifies.** GC reclaims small references, not binaries; the privacy argument weakens to metadata only. |
 
-## Minimal adapter surface actually demanded
+## Transport surface (separate from the asset adapter)
+
+The sync port is a TRANSPORT concern and is now complete, independent of the files decision: `encodeSceneStateVector()`, `encodeSceneAsUpdate(format, targetStateVector?)`, `applyRemoteSceneUpdate(update, format)` and `onLocalSceneUpdate(cb, format)`. These are not asset-adapter operations and carry no files semantics.
+
+## Minimal ASSET adapter surface actually demanded
 
 Only what the two current consumers need — no speculative operations:
 
@@ -55,7 +59,8 @@ Only what the two current consumers need — no speculative operations:
 
 | Consumer | Status |
 | --- | --- |
-| **client-web** `useWhiteboardFilesManager` | **UNVERIFIED and unresolved.** Reported to mix `{url, dataURL}` in the shared record and to fall back to publishing `dataURL` on upload failure. If accurate, the atomic cutover cannot happen without changing it in the same slice. |
+| **client-web** `useWhiteboardFilesManager` | **VERIFIED, unresolved.** The binary fallback is real and explicit: `:173-174` promises dataURL-only files can be broadcast, `:199-203` inserts the `dataURL` after an upload failure, `:213` logs "using dataURL fallback"; `CollaborativeExcalidrawWrapper.onChange` calls `getUploadedFiles`. Must be deleted in the SAME slice — on failure the image stays local/pending and enters the existing retry state, never shared as bytes. |
+| **client-web** `useCollab.ts:137` + `ExcalidrawWrapper.tsx:114` | **VERIFIED, now unblocked.** Both consumed the raw `Y.Doc` (`getSceneDoc()` into `UnifiedCollabProvider`; `Y.applyUpdateV2` seeding plus raw-doc dirty tracking). Removing `getSceneDoc` from the public API left them without a port. Closed by adding `encodeSceneStateVector()` and a `targetStateVector` argument to `encodeSceneAsUpdate` — with `onLocalSceneUpdate` and `applyRemoteSceneUpdate` that is the complete four-operation y-protocol sync port, so no raw doc is needed. Awareness identity still needs a provider-owned doc, which is the provider's own concern, not the scene's. |
 | **server** `whiteboard-scene.writer.ts` | **UNVERIFIED.** Reported to drive `Scene.insertElement`; that chain resolves to `replaceAllElements` here, so it is on the authoritative whole-scene path, but its relationship to files is unconfirmed. |
 | Firebase file storage | Resolved — already separate from the scene checkpoint. |
 

@@ -774,6 +774,7 @@ class App extends React.Component<AppProps, AppState> {
       onLocalSceneUpdate: this.onLocalSceneUpdate,
       applyRemoteSceneUpdate: this.applyRemoteSceneUpdate,
       encodeSceneAsUpdate: this.encodeSceneAsUpdate,
+      encodeSceneStateVector: this.encodeSceneStateVector,
       history: {
         clear: this.resetHistory,
       },
@@ -2520,9 +2521,25 @@ class App extends React.Component<AppProps, AppState> {
     format: "v1" | "v2" = "v1",
   ) => this.scene.applyRemoteUpdate(update, format);
 
-  /** Encode current scene state, for an initial sync or a save. */
-  public encodeSceneAsUpdate = (format: "v1" | "v2" = "v1") =>
-    this.scene.encodeStateAsUpdate(format);
+  /**
+   * Encode scene state, for an initial sync or a save. Pass a peer's state
+   * vector to get only the delta they are missing — the reply half of a
+   * y-protocol sync exchange.
+   */
+  public encodeSceneAsUpdate = (
+    format: "v1" | "v2" = "v1",
+    targetStateVector?: Uint8Array,
+  ) => this.scene.encodeStateAsUpdate(format, targetStateVector);
+
+  /**
+   * This replica's state vector — what it already has. A provider sends this so
+   * the other side can reply with just the missing delta.
+   *
+   * With {@link onLocalSceneUpdate}, {@link applyRemoteSceneUpdate} and
+   * {@link encodeSceneAsUpdate} this completes the four operations a y-protocol
+   * sync needs, so a provider never needs the raw `Y.Doc`.
+   */
+  public encodeSceneStateVector = () => this.scene.encodeStateVector();
 
   public getSceneElements = () => {
     return this.scene.getNonDeletedElements();
