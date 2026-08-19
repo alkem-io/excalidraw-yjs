@@ -305,6 +305,68 @@ describe("INV-BOUNDED — bounded GC + privacy", () => {
     scene.destroy();
   });
 
+  it("create -> undo leaves a tombstone that CAN still age out", () => {
+    // A creation is born as an `isDeleted:true` tombstone under STRUCTURAL, then
+    // revealed under LOCAL. Undoing the creation reverts the reveal, so the
+    // element goes back to being a tombstone — and that tombstone needs a
+    // deletion marker, or it is immortal: invisible to the user forever, and
+    // never reclaimable by GC.
+    const scene = new Scene();
+    seed(scene, [mk("keep")]);
+
+    scene.replaceAllElements([
+      ...scene.getElementsIncludingDeleted(),
+      { ...mk("born"), updated: AGED } as ExcalidrawElement,
+    ]);
+    expect(scene.yElements.get("born")?.get("isDeleted")).toBe(false); // guard: live
+
+    expect(scene.undoElements()).toBe(true);
+    expect(scene.yElements.get("born")?.get("isDeleted")).toBe(true); // back to tombstone
+
+    // It must be reclaimable. Without a marker it never expires.
+    expect(scene.collectGarbage({ deletedBefore: CUTOFF })).toEqual({
+      elements: 1,
+      files: 0,
+    });
+    expect(docKeys(scene)).toEqual(["keep"]);
+    scene.destroy();
+  });
+
+  it("a NEW element that is already deleted is markered, not immortal", () => {
+    // Importing a scene containing tombstones, and the post-prelude failure path,
+    // both end with a born tombstone that is never revealed live. It must carry a
+    // marker from the structural prelude or it can never be reclaimed.
+    const scene = new Scene();
+    seed(scene, [mk("keep")]);
+
+    scene.replaceAllElements([
+      ...scene.getElementsIncludingDeleted(),
+      {
+        ...mk("imported-tombstone"),
+        isDeleted: true,
+        updated: AGED,
+      } as ExcalidrawElement,
+    ]);
+
+    expect(scene.yElements.get("imported-tombstone")?.get("isDeleted")).toBe(
+      true,
+    );
+    // The exact value is NOT asserted: a brand-new element has no valid
+    // fractional index, so `syncInvalidIndices` re-stamps its `updated` via
+    // `mutateElement` (a constant under test). What matters is that a marker
+    // exists at all — without one this tombstone could never be reclaimed.
+    expect(typeof scene.yElementDeletions.get("imported-tombstone")).toBe(
+      "number",
+    );
+
+    expect(scene.collectGarbage({ deletedBefore: CUTOFF })).toEqual({
+      elements: 1,
+      files: 0,
+    });
+    expect(docKeys(scene)).toEqual(["keep"]);
+    scene.destroy();
+  });
+
   it("the sweep is NOT undoable — Ctrl+Z cannot resurrect reclaimed content", () => {
     const scene = new Scene();
     seed(scene, [mk("live"), mk("gone")]);

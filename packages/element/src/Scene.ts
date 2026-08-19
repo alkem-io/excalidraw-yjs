@@ -801,11 +801,28 @@ export class Scene {
    * MUST be called inside a `STRUCTURAL_ORIGIN` transaction.
    */
   private materializeNewEntry(record: ElementRecord): Y.Map<unknown> {
+    const id = record.id as string;
     const ymap = elementToYMap(record);
     // Born as a tombstone regardless of the element's real `isDeleted`; the
     // reveal pass flips it to the actual value under LOCAL_ORIGIN.
     ymap.set("isDeleted", true);
-    this.yElements.set(record.id as string, ymap);
+    this.yElements.set(id, ymap);
+    // The born tombstone gets a deletion marker HERE, in the structural prelude,
+    // because it is a real (if momentary) tombstone. Two paths depend on it:
+    //  - a successful reveal deletes the marker under LOCAL, so undoing the
+    //    creation restores BOTH `isDeleted:true` and the marker as one step —
+    //    without this the undone creation is an IMMORTAL tombstone, invisible to
+    //    the user yet never reclaimable, because there is no marker operation in
+    //    the undo item to restore;
+    //  - a prelude that fails before its reveal deliberately leaves the born
+    //    tombstone published, and it must still be able to age out.
+    const updated = (record as Record<string, unknown>).updated;
+    if (typeof updated !== "number") {
+      throw new Error(
+        `Scene: cannot materialize "${id}" — 'updated' is ${typeof updated}, expected a number.`,
+      );
+    }
+    this.yElementDeletions.set(id, updated);
     return ymap;
   }
 

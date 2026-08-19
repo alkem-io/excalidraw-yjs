@@ -1,5 +1,7 @@
 import * as Y from "yjs";
 
+import { getUpdatedTimestamp } from "@excalidraw-yjs/common";
+
 import { LOCAL_ORIGIN } from "./origin";
 
 import type { BoundElement } from "../types";
@@ -712,9 +714,13 @@ export const decodeSnapshot = (bytes: Uint8Array): WhiteboardSnapshot => {
       }
       record.updated = deletedAt;
     } else {
-      // A live element's `updated` is genuinely not recorded anywhere; the app's
-      // `restoreElements` normalizes it. Any stable value is correct here.
-      record.updated = 1;
+      // A live element's `updated` is genuinely not recorded anywhere, so this
+      // seeds "now". It must NOT be a literal placeholder: `restore.ts` fills
+      // only a NULLISH `updated` (`element.updated ?? getUpdatedTimestamp()`),
+      // so any value written here survives normalization and would then be a
+      // fabricated edit time. `getUpdatedTimestamp()` is the same source the
+      // element factories use, and is deterministic under test.
+      record.updated = getUpdatedTimestamp();
     }
     record.version = 1;
     record.versionNonce = 0;
