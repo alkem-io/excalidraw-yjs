@@ -331,4 +331,74 @@ describe("firebase persistence boundary", () => {
     expect(loaded!.appState.viewBackgroundColor).toBe("#123456");
     expect(loaded!.appState.name).toBe("Persisted Board");
   });
+
+  /**
+   * INV-PERSIST-MERGE (T003): `save(A) ∥ save(B)` over shared lineage must store
+   * the native PER-PROPERTY merge of A and B — order-independent and idempotent,
+   * with no value-level whole-element fallback.
+   *
+   * The save path decodes the stored doc, value-merges whole elements
+   * (`mergeStoredElements`) and rebuilds a FRESH doc (`buildSnapshotDoc`), so
+   * two replicas editing DIFFERENT properties of the same element cannot both
+   * survive: the saving replica's whole element replaces the stored one.
+   */
+  describe("INV-PERSIST-MERGE", () => {
+    // SKIPPED — asserts the DESIRED contract, which currently fails: measured,
+    // A's `x` edit is lost when B saves a different property of the same
+    // element. Deliberately not rewritten to assert the lossy behaviour, which
+    // would turn a known defect green. Un-skip when T021 replaces the value
+    // merge with an `applyUpdateV2` fold over shared lineage.
+    it.skip("a concurrent edit to a DIFFERENT property of the same element survives", async () => {
+      const room = "persist-merge";
+
+      // Shared starting point.
+      await saveToFirebase(
+        portalForRoom(room),
+        [rect("e1", { x: 0, y: 0 })],
+        appStateWith({}),
+        {},
+      );
+
+      // A moves it on x; B, from the same starting point, moves it on y.
+      await saveToFirebase(
+        portalForRoom(room),
+        [rect("e1", { x: 100, y: 0 })],
+        appStateWith({}),
+        {},
+      );
+      await saveToFirebase(
+        portalForRoom(room),
+        [rect("e1", { x: 0, y: 200 })],
+        appStateWith({}),
+        {},
+      );
+
+      const loaded = await loadFromFirebase(room, KEY, null);
+      const e1 = (loaded!.elements as readonly OrderedExcalidrawElement[]).find(
+        (e) => e.id === "e1",
+      );
+      expect(e1).toBeDefined();
+      // BOTH edits must survive — that is what per-property merge means.
+      expect(e1!.x).toBe(100);
+      expect(e1!.y).toBe(200);
+    });
+
+    it("is idempotent — saving the same state twice changes nothing", async () => {
+      const room = "persist-idempotent";
+      const elements = [rect("e1", { x: 42, y: 7 })];
+
+      await saveToFirebase(portalForRoom(room), elements, appStateWith({}), {});
+      const first = await loadFromFirebase(room, KEY, null);
+      await saveToFirebase(portalForRoom(room), elements, appStateWith({}), {});
+      const second = await loadFromFirebase(room, KEY, null);
+
+      const shape = (r: typeof first) =>
+        (r!.elements as readonly OrderedExcalidrawElement[])
+          .map((e) => `${e.id}:${e.x},${e.y},${e.isDeleted}`)
+          .sort();
+
+      expect(shape(first)).toEqual(["e1:42,7,false"]); // guard: it saved
+      expect(shape(second)).toEqual(shape(first));
+    });
+  });
 });
