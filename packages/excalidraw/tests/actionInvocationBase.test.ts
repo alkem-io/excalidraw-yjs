@@ -1,4 +1,4 @@
-import { newElement } from "@excalidraw-yjs/element";
+import { newElement, Scene } from "@excalidraw-yjs/element";
 
 import type { OrderedExcalidrawElement } from "@excalidraw-yjs/element/types";
 
@@ -40,7 +40,11 @@ describe("ActionManager captures the invocation base BEFORE perform", () => {
       },
       () => ({} as AppState),
       () => elements,
-      {} as AppClassProperties,
+      // A real `Scene`: `ActionManager` opens a logical mutation around the
+      // synchronous action, so the app it is given must actually have one. A
+      // stub without it would only prove the manager tolerates a shape no
+      // production caller passes.
+      { scene: new Scene() } as AppClassProperties,
     );
 
     const mutatingAction = {

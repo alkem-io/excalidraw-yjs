@@ -40,14 +40,7 @@ describe("one action, one logical mutation", () => {
   // `commitPlan` cannot retroactively make them atomic. See spec 002 T016k.
   // Asserts the CURRENT BROKEN numbers on purpose, so it passes today and FAILS
   // the moment the defect is fixed — flip them to the contract values (1, 1, 0)
-  // then. (`it.fails` says this more directly but is absent from the installed
-  // vitest type surface, and a green suite with a red typecheck is worse.)
-  // SKIPPED — asserts the DESIRED contract, which currently fails: measured
-  // 4 sender updates, 4 observable peer states, and 2 dangling container refs
-  // ('text-1 -> missing id2' in states #0 and #1). Deliberately NOT rewritten to
-  // assert the broken numbers — that would turn a known defect green and force
-  // the fix to "break" the suite. Un-skip when T016k lands.
-  it.skip("wrapTextInContainer is ONE logical mutation for the peer", async () => {
+  it("wrapTextInContainer is ONE logical mutation for the peer", async () => {
     await render(<Excalidraw handleKeyboardGlobally />);
 
     const text = API.createElement({
@@ -93,7 +86,11 @@ describe("one action, one logical mutation", () => {
     expect(h.elements.length).toBeGreaterThan(1);
     expect(senderUpdates.length).toBeGreaterThan(0);
 
-    // THE CONTRACT (FR-016/FR-017). Currently 4 / 4 / 2 — see T016k.
+    // THE CONTRACT (FR-016/FR-017): ONE transport message, so a peer observes
+    // ONE state and never an intermediate one — here, a text element whose
+    // container does not exist yet. This is a TRANSPORT guarantee: the sender's
+    // own Scene/Store callbacks may still fire several times locally, and this
+    // test deliberately does not claim otherwise.
     expect(senderUpdates.length).toBe(1);
     expect(peerStates.length).toBe(1);
     expect(dangling).toEqual([]);

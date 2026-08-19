@@ -163,10 +163,26 @@ export class ActionManager {
     // — `Scene.mutateElement` mutates its argument — and the "invocation base"
     // would equal the result, making the derived intent diff empty.
     const invocationBase = captureElementBase(elements);
-    this.updater(
-      action.perform(elements, appState, value, this.app),
-      invocationBase,
-    );
+    // ONE transport message per action. `perform` and the application of its
+    // result are several Scene writes — a side-effect helper's mutation, the
+    // structural prelude for a created element, the result application — and a
+    // peer that sees them separately observes intermediate states, including
+    // elements referencing a container that does not exist yet.
+    //
+    // Only the SYNCHRONOUS span is wrapped. For an async action the updater
+    // registers a promise continuation and returns, so this `finally` closes the
+    // boundary before the result lands — the buffer is never held across an
+    // `await`. The `finally` also guarantees that a throw mid-action still
+    // publishes whatever Yjs already committed.
+    this.app.scene.beginLogicalMutation();
+    try {
+      this.updater(
+        action.perform(elements, appState, value, this.app),
+        invocationBase,
+      );
+    } finally {
+      this.app.scene.endLogicalMutation();
+    }
   }
 
   /**

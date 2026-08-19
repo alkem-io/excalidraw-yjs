@@ -477,6 +477,9 @@ export class Scene {
    * peer diverges forever. Merging what was actually emitted also carries no
    * historical delete-set baggage, and yields nothing at all for a true no-op.
    */
+  /** Depth of open logical mutations; only the outermost close publishes. */
+  private logicalDepth = 0;
+
   private logicalBuffer: { v1: Uint8Array[]; v2: Uint8Array[] } | null = null;
 
   private internalDocHandlers: Array<[string, (...a: never[]) => void]> = [];
@@ -1092,22 +1095,46 @@ export class Scene {
    * not delete-set advancement, so a recomputed delta silently drops deletions.
    */
   private openLogicalMutation(): void {
-    if (this.logicalBuffer !== null) {
-      // Nesting is unsupported: the only openers are `commitPlan` and
-      // `replaceAllElements`, and neither calls the other. A nested open is a
-      // programming error, not a mode to fold two mutations into one message.
-      throw new Error("Scene: a logical mutation is already open.");
+    // Boundaries JOIN. An inner open appends to the buffer the outer one already
+    // holds, so only the OUTERMOST close publishes. That is what lets a caller
+    // that spans several Scene writes — an editor action running `perform` and
+    // then applying its result — reach a peer as ONE message, without the Scene
+    // knowing anything about actions.
+    this.logicalDepth++;
+    if (this.logicalBuffer === null) {
+      this.logicalBuffer = { v1: [], v2: [] };
     }
-    this.logicalBuffer = { v1: [], v2: [] };
   }
 
   private closeLogicalMutation(): void {
-    if (this.logicalBuffer === null) {
+    if (this.logicalDepth === 0) {
       throw new Error("Scene: no logical mutation is open.");
+    }
+    this.logicalDepth--;
+    if (this.logicalDepth > 0) {
+      return;
     }
     const buffered = this.logicalBuffer;
     this.logicalBuffer = null;
     this.publishBuffered(buffered);
+  }
+
+  /**
+   * Open a logical mutation spanning several Scene writes, so they reach a peer
+   * as ONE message. Every call MUST be balanced by {@link endLogicalMutation} in
+   * a `finally`: on a throw, whatever Yjs already committed is published rather
+   * than dropped, because those writes are in the document and withholding them
+   * would diverge the peer permanently.
+   *
+   * Deliberately narrow — the editor's action layer is the only caller. This is
+   * not a general mode; see {@link openLogicalMutation} for the join rule.
+   */
+  beginLogicalMutation(): void {
+    this.openLogicalMutation();
+  }
+
+  endLogicalMutation(): void {
+    this.closeLogicalMutation();
   }
 
   private publishBuffered(
