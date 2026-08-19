@@ -4738,6 +4738,68 @@ class App extends React.Component<AppProps, AppState> {
     },
   );
 
+  /** Ids whose `store` is in flight, so concurrent calls do not double-upload. */
+  private assetStoresInFlight = new Set<string>();
+
+  /**
+   * Publish a reference for every cached file that does not have one yet.
+   *
+   * Reconciling cache against references — rather than publishing whatever was
+   * just added — is what makes a failed upload retryable: the file simply still
+   * has no locator, so the next publish picks it up again. A failure leaves the
+   * image local and pending and is never downgraded to sharing bytes.
+   */
+  private publishUnreferencedAssets = async () => {
+    const adapter = this.props.assetAdapter;
+    if (!adapter) {
+      return;
+    }
+    const published = this.scene.getAssetLocators();
+    const pending = Object.values(this.files).filter(
+      (file) => !published[file.id] && !this.assetStoresInFlight.has(file.id),
+    );
+    if (!pending.length) {
+      return;
+    }
+
+    const locators: Record<string, string> = {};
+    await Promise.all(
+      pending.map(async (file) => {
+        this.assetStoresInFlight.add(file.id);
+        try {
+          locators[file.id] = await adapter.store(file);
+        } catch (error) {
+          // Local and retryable: no locator is written, so the next publish
+          // tries again. Never a byte fallback.
+          console.error(`assetAdapter.store failed for ${file.id}`, error);
+        } finally {
+          this.assetStoresInFlight.delete(file.id);
+        }
+      }),
+    );
+
+    if (Object.keys(locators).length && !this.unmounted) {
+      this.scene.setAssetLocators(locators);
+    }
+  };
+
+  /** Insert bytes into the local cache WITHOUT publishing a reference. */
+  private cacheResolvedFiles = (files: BinaryFileData[]) => {
+    const next = { ...this.files };
+    let changed = false;
+    for (const file of files) {
+      if (!next[file.id]) {
+        next[file.id] = file;
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.files = next;
+      this.clearImageShapeCache();
+      this.triggerRender();
+    }
+  };
+
   private addMissingFiles = (
     files: BinaryFiles | BinaryFileData[],
     replace = false,
@@ -4776,33 +4838,7 @@ class App extends React.Component<AppProps, AppState> {
 
     // Persist the newly-added files into the scene doc (M4): files live in the
     // SAME `Y.Doc` as the elements, so `encodeStateAsUpdateV2(scene.doc)` captures
-    // Publish a REFERENCE per added file, never its bytes. The bytes stay in
-    // `this.files` and go to the host asset store through the adapter; only the
-    // opaque locator it returns is written to the document, so a full-state
-    // encode can never carry image data.
-    //
-    // Without an adapter the editor is local-only for images: bytes remain in the
-    // cache and render normally, but nothing is published, because publishing a
-    // dataURL is exactly what this boundary exists to prevent. There is
-    // deliberately no fallback that shares bytes when storing fails.
-    const adapter = this.props.assetAdapter;
-    if (adapter && Object.keys(addedFiles).length) {
-      void (async () => {
-        const locators: Record<string, string> = {};
-        for (const file of Object.values(addedFiles)) {
-          try {
-            locators[file.id] = await adapter.store(file);
-          } catch (error) {
-            // Local and retryable. The image stays in the cache and is simply
-            // not shared yet; it is never downgraded to a byte broadcast.
-            console.error(`assetAdapter.store failed for ${file.id}`, error);
-          }
-        }
-        if (Object.keys(locators).length && !this.unmounted) {
-          this.scene.setAssetLocators(locators);
-        }
-      })();
-    }
+    void this.publishUnreferencedAssets();
 
     return { addedFiles };
   };
@@ -4913,26 +4949,49 @@ class App extends React.Component<AppProps, AppState> {
       return;
     }
     const missing = Object.entries(this.scene.getAssetLocators()).filter(
-      ([fileId]) => !this.files[fileId as keyof BinaryFiles],
+      ([fileId]) =>
+        !this.files[fileId as keyof BinaryFiles] &&
+        !this.assetResolvesInFlight.has(fileId),
     );
     if (!missing.length) {
       return;
     }
     void (async () => {
       const resolved: BinaryFileData[] = [];
-      for (const [fileId, locator] of missing) {
-        try {
-          resolved.push(await adapter.resolve(fileId as FileId, locator));
-        } catch (error) {
-          console.error(`assetAdapter.resolve failed for ${fileId}`, error);
-        }
-      }
+      await Promise.all(
+        missing.map(async ([fileId, locator]) => {
+          this.assetResolvesInFlight.add(fileId);
+          try {
+            const file = await adapter.resolve(fileId as FileId, locator);
+            // The locator can change while a resolve is in flight. Dropping a
+            // stale result is what stops old bytes overwriting newer ones.
+            if (this.scene.getAssetLocators()[fileId] !== locator) {
+              return;
+            }
+            if (file.id !== fileId) {
+              console.error(
+                `assetAdapter.resolve returned id "${file.id}" for "${fileId}"`,
+              );
+              return;
+            }
+            resolved.push(file);
+          } catch (error) {
+            console.error(`assetAdapter.resolve failed for ${fileId}`, error);
+          } finally {
+            this.assetResolvesInFlight.delete(fileId);
+          }
+        }),
+      );
       if (resolved.length && !this.unmounted) {
-        // Cache only — `addFiles` would re-enter the writer and re-publish.
-        this.addMissingFiles(resolved);
+        // Cache ONLY. Going through the publisher would store these bytes back
+        // to the host and re-publish a locator for something we just fetched.
+        this.cacheResolvedFiles(resolved);
       }
     })();
   };
+
+  /** Ids whose `resolve` is in flight, so an observer burst fetches once. */
+  private assetResolvesInFlight = new Set<string>();
 
   /**
    * Refresh the collaborative/persistable appState subset (background + name)

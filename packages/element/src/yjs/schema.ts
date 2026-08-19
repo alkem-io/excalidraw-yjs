@@ -482,17 +482,67 @@ export const diffBoundElements = (
 export type AssetLocator = string;
 
 /**
- * Diff a full `fileId -> locator` map into the doc's reference map: add or
- * replace changed locators and, when `prune` is set, drop ids absent from
- * `next`. `prune` defaults to `false` so a normal write MERGES rather than
- * dropping a reference a peer just added. MUST run inside a `doc.transact`.
- * Returns the number of `Y.Map` mutations applied.
+ * Maximum locator size, in UTF-8 bytes.
+ *
+ * Generous for any real reference — a UUID, a path, a signed URL — and far below
+ * anything that could carry image data. The bound is what makes "opaque token"
+ * enforceable rather than aspirational: without it, `string` accepts an entire
+ * base64 payload.
+ */
+export const MAX_ASSET_LOCATOR_BYTES = 2048;
+
+/**
+ * Reject anything that is not a plausible opaque reference.
+ *
+ * A bare `typeof value === "string"` is NOT sufficient, and assuming it was is
+ * how a dataURL — the exact shape of the fallback this boundary exists to
+ * remove — could be stored verbatim and reach the wire.
+ */
+export const validateAssetLocator = (
+  id: string,
+  value: unknown,
+): AssetLocator => {
+  if (typeof value !== "string") {
+    throw new Error(
+      `asset locator for "${id}" must be a string, got ${typeof value}.`,
+    );
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error(`asset locator for "${id}" is empty.`);
+  }
+  // Case- and whitespace-insensitive: `Data:`, ` data:`, `DATA:` are all bytes.
+  if (/^data:/i.test(trimmed)) {
+    throw new Error(
+      `asset locator for "${id}" is a data URL. Bytes must go to the host asset store, never into the document.`,
+    );
+  }
+  const bytes = new TextEncoder().encode(value).length;
+  if (bytes > MAX_ASSET_LOCATOR_BYTES) {
+    throw new Error(
+      `asset locator for "${id}" is ${bytes} bytes, over the ${MAX_ASSET_LOCATOR_BYTES}-byte limit — a locator is a reference, not a payload.`,
+    );
+  }
+  return value;
+};
+
+/**
+ * Diff a full `fileId -> locator` map into the doc's reference map.
+ *
+ * EVERY entry is validated BEFORE any mutation, so a batch containing one bad
+ * value leaves the map completely unchanged rather than half-written. MUST run
+ * inside a `doc.transact`. Returns the number of `Y.Map` mutations applied.
  */
 export const writeAssetLocators = (
   yAssets: Y.Map<unknown>,
   next: Readonly<Record<string, AssetLocator>>,
   options?: { prune?: boolean },
 ): number => {
+  // Prevalidate the whole batch first — atomicity, not fail-fast.
+  for (const [id, locator] of Object.entries(next)) {
+    validateAssetLocator(id, locator);
+  }
+
   let mutations = 0;
   if (options?.prune) {
     const keep = new Set(Object.keys(next));
@@ -504,14 +554,6 @@ export const writeAssetLocators = (
     }
   }
   for (const [id, locator] of Object.entries(next)) {
-    if (typeof locator !== "string") {
-      // Fail loud rather than storing whatever was passed. This is the one
-      // guard that keeps bytes out of the document by construction: a caller
-      // handing over a `BinaryFileData` gets an error, not a silent broadcast.
-      throw new Error(
-        `writeAssetLocators: locator for "${id}" must be a string, got ${typeof locator}.`,
-      );
-    }
     if (yAssets.get(id) !== locator) {
       yAssets.set(id, locator);
       mutations++;
@@ -520,15 +562,21 @@ export const writeAssetLocators = (
   return mutations;
 };
 
-/** Materialize the doc's reference map as a plain `fileId -> locator` record. */
+/**
+ * Materialize the doc's reference map as a plain `fileId -> locator` record.
+ *
+ * FAILS LOUD on any value that is not a valid locator. Silently skipping them
+ * would make a document written in an older shape — one holding whole
+ * `BinaryFileData` records — decode "successfully" with every asset missing, so
+ * a caller cloning or re-saving it would quietly produce a broken board.
+ * Converting such a document is an explicit migration, never a silent read.
+ */
 export const readAssetLocators = (
   yAssets: Y.Map<unknown>,
 ): Record<string, AssetLocator> => {
   const out: Record<string, AssetLocator> = {};
   for (const [id, value] of yAssets.entries()) {
-    if (typeof value === "string") {
-      out[id] = value;
-    }
+    out[id] = validateAssetLocator(id, value);
   }
   return out;
 };
