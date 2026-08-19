@@ -31,9 +31,9 @@ describe("presence-aware intent diff (FR-016 / T016b)", () => {
     expect([...diffElementKeys(base, result)]).toEqual([]);
 
     const intent = computeElementIntent([base], [result]);
-    expect(intent.added).toEqual([]);
-    expect(intent.deleted).toEqual([]);
-    expect(intent.changed.size).toBe(0);
+    expect([...intent.addedIds]).toEqual([]);
+    expect([...intent.removedIds]).toEqual([]);
+    expect(intent.keysById.size).toBe(0);
   });
 
   it("a changed value is intent", () => {
@@ -116,9 +116,9 @@ describe("presence-aware intent diff (FR-016 / T016b)", () => {
     const a = rec("a");
     const b = rec("b");
     const intent = computeElementIntent([a, b], [a, rec("c")]);
-    expect(intent.added.map((e) => e.id)).toEqual(["c"]);
-    expect(intent.deleted).toEqual(["b"]);
-    expect(intent.changed.size).toBe(0);
+    expect([...intent.addedIds]).toEqual(["c"]);
+    expect([...intent.removedIds]).toEqual(["b"]);
+    expect(intent.keysById.size).toBe(0);
   });
 });
 

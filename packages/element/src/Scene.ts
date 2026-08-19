@@ -54,11 +54,14 @@ import {
   elementToYMap,
   yMapToElement,
   writeChangedKeys,
+  computeElementIntent,
+  assertIntentAgainstResult,
   writeFiles,
   readFiles,
   writeAppState,
   readAppState,
   type ElementRecord,
+  type DeclaredElementIntent,
   type FileRecord,
   type AppStateAllowKey,
 } from "./yjs";
@@ -686,6 +689,61 @@ export class Scene {
     ymap.set("isDeleted", true);
     this.yElements.set(record.id as string, ymap);
     return ymap;
+  }
+
+  /**
+   * Apply an action's INTENT to the doc as it is NOW (spec 002, FR-016).
+   *
+   * `result` is what the action produced from `base` — the scene as it was when
+   * the action was invoked. Applying `result` wholesale would revert anything
+   * that changed in between (a peer's edit, a side-effect helper's own write),
+   * which is the stale-overwrite class this exists to remove. So only what the
+   * action actually MEANT is applied.
+   *
+   * `declaredIntent` selects what changed; every VALUE is read from `result`.
+   * Omit it and the intent is derived by diffing `base` against `result` — valid
+   * only for audited SYNCHRONOUS callers, because a derived diff cannot see an
+   * explicit assignment of the value a key already had, and cannot represent an
+   * async action whose base is arbitrarily stale.
+   */
+  applyElementChanges(
+    base: readonly ElementRecord[],
+    result: readonly ElementRecord[],
+    options: {
+      declaredIntent?: DeclaredElementIntent;
+      recordHistory?: boolean;
+    } = {},
+  ): { changedIds: ReadonlySet<string> } {
+    const resultById = new Map<string, ElementRecord>();
+    for (const r of result) {
+      resultById.set(r.id as string, r);
+    }
+
+    const declared =
+      options.declaredIntent ?? computeElementIntent(base, result);
+    assertIntentAgainstResult(declared, resultById);
+
+    const add: Array<{ record: ElementRecord; keys: ReadonlySet<string> }> = [];
+    for (const id of declared.addedIds) {
+      const record = resultById.get(id)!;
+      // A creation establishes every persisted own key.
+      add.push({ record, keys: new Set(Object.keys(record)) });
+    }
+
+    const write = new Map<
+      string,
+      { record: ElementRecord; keys: ReadonlySet<string> }
+    >();
+    for (const [id, keys] of declared.keysById) {
+      write.set(id, { record: resultById.get(id)!, keys });
+    }
+
+    return this.commitPlan({
+      add,
+      remove: [...declared.removedIds],
+      write,
+      recordHistory: options.recordHistory !== false,
+    });
   }
 
   /**

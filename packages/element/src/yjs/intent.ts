@@ -32,16 +32,14 @@ import type { ElementRecord } from "./schema";
  * reconciliation metadata, membership and own-Symbol props travel in their own
  * channels.
  */
-export type ElementIntent = {
-  /** ids present in the result but not in the base */
-  readonly added: readonly ElementRecord[];
-  /** ids present in the base but not in the result */
-  readonly deleted: readonly string[];
-  /** id → the result record plus the exact keys to write from it */
-  readonly changed: ReadonlyMap<
-    string,
-    { readonly record: ElementRecord; readonly keys: ReadonlySet<string> }
-  >;
+export type DeclaredElementIntent = {
+  readonly addedIds: ReadonlySet<string>;
+  readonly removedIds: ReadonlySet<string>;
+  /**
+   * Existing-id writes only. A creation establishes all persisted own keys, so
+   * an added id does not appear here.
+   */
+  readonly keysById: ReadonlyMap<string, ReadonlySet<string>>;
 };
 
 const isIntentKey = (key: string): boolean =>
@@ -84,44 +82,50 @@ export const diffElementKeys = (
   return intent;
 };
 
+/**
+ * Derive intent by diffing `base` against `result`. Returns SELECTORS — the same
+ * shape an explicit declaration uses — so there is one intent channel, not two.
+ * Values are always read from `result` by the planner.
+ *
+ * Valid only for audited SYNCHRONOUS callers: a derived diff cannot see an
+ * explicit assignment of the value a key already held, and cannot represent an
+ * async action whose base is arbitrarily stale (FR-016).
+ */
 export const computeElementIntent = (
   base: readonly ElementRecord[],
   result: readonly ElementRecord[],
-): ElementIntent => {
+): DeclaredElementIntent => {
   const baseById = new Map<string, ElementRecord>();
   for (const el of base) {
     baseById.set(el.id as string, el);
   }
   const resultIds = new Set<string>();
 
-  const added: ElementRecord[] = [];
-  const changed = new Map<
-    string,
-    { record: ElementRecord; keys: ReadonlySet<string> }
-  >();
+  const addedIds = new Set<string>();
+  const keysById = new Map<string, ReadonlySet<string>>();
 
   for (const record of result) {
     const id = record.id as string;
     resultIds.add(id);
     const prior = baseById.get(id);
     if (!prior) {
-      added.push(record);
+      addedIds.add(id);
       continue;
     }
     const keys = diffElementKeys(prior, record);
     if (keys.size > 0) {
-      changed.set(id, { record, keys });
+      keysById.set(id, keys);
     }
   }
 
-  const deleted: string[] = [];
+  const removedIds = new Set<string>();
   for (const id of baseById.keys()) {
     if (!resultIds.has(id)) {
-      deleted.push(id);
+      removedIds.add(id);
     }
   }
 
-  return { added, deleted, changed };
+  return { addedIds, removedIds, keysById };
 };
 
 /**
@@ -170,3 +174,44 @@ export const captureElementBase = <T extends object>(
     }
     return copy;
   });
+
+/**
+ * Declared write intent as SELECTORS ONLY (spec 002, FR-016 / T016b).
+ *
+ * It deliberately carries no records. Values are always read from the canonical
+ * `result` record for that id, so there is exactly one source of truth and no
+ * winner to invent when a caller's declaration and the result disagree.
+ *
+ * This is the channel an async action or a headless MCP tool uses to state
+ * intent that a diff cannot see — most importantly "set this key to the value it
+ * already had in base", which is invisible to any derived comparison yet must
+ * still beat a value another writer put in the doc meanwhile.
+ */
+
+/**
+ * Reject contradictions BEFORE any transaction is opened: every added or changed
+ * id must exist in `result`, and a removed id must not. A contradiction is a
+ * caller bug, and resolving it silently would mean inventing intent.
+ */
+export const assertIntentAgainstResult = (
+  declared: DeclaredElementIntent,
+  resultById: ReadonlyMap<string, ElementRecord>,
+): void => {
+  for (const id of declared.addedIds) {
+    if (!resultById.has(id)) {
+      throw new Error(`declared intent: added id ${id} is absent from result`);
+    }
+  }
+  for (const id of declared.keysById.keys()) {
+    if (!resultById.has(id)) {
+      throw new Error(
+        `declared intent: changed id ${id} is absent from result`,
+      );
+    }
+  }
+  for (const id of declared.removedIds) {
+    if (resultById.has(id)) {
+      throw new Error(`declared intent: removed id ${id} is present in result`);
+    }
+  }
+};
