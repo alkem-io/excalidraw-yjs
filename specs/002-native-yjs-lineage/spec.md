@@ -2,13 +2,23 @@
 
 **Sub-spec dir**: `specs/002-native-yjs-lineage/` **Created**: 2026-06-26 **Status**: Draft (specify) — clarify pending **Repo**: `alkem-io/excalidraw-yjs` (`@excalidraw/*`, Excalidraw 0.18.x; native-Yjs core) **Parent epic**: workspace `006-collab-content-unification` (native-Yjs work-stream of `003-unify-collab-yjs`) **Backlog Story**: https://github.com/alkem-io/alkemio/issues/1909 (#1909) — the single ticket for this work (Part 1 = 003 build, Part 2 = 006 complete) **Redesigns the broken seam in**: PR #2 (`split/native-yjs-core`)
 
-> **Repo-local sub-spec — scope guard.** Same treatment as `001`. This document owns the **requirements** — the convergence + lineage safety/liveness properties the collaboration & persistence layer MUST satisfy — and the acceptance scenarios (the enumerated data-loss failure modes a full adversarial review proved). It does **not** specify the implementation model (live-doc encode, `applyUpdateV2` merge, in-place doc GC) — that is `plan.md`. The per-property element-`Y.Map` schema, the fractional `index`, awareness-for-ephemeral, and the v2 codec are **KEPT** (reviewed sound / frozen at the epic level — see `001`); only the **lineage handling across the wire + persistence + cold-load** is redesigned.
+> **Repo-local sub-spec — scope guard.** Same treatment as `001`. This document owns the **requirements** — the convergence + lineage safety/liveness properties the collaboration & persistence layer MUST satisfy — and the acceptance scenarios (the enumerated data-loss failure modes a full adversarial review proved). It does **not** specify the implementation model (live-doc encode, `applyUpdateV2` merge, in-place doc GC) — that is `plan.md`. The per-property element-`Y.Map` schema, the fractional `index`, awareness-for-ephemeral, and the v2 codec are **KEPT** (reviewed sound / frozen at the epic level — see `001`); the **lineage handling across the wire + persistence + cold-load** is redesigned, and — added 2026-08-19 — the **write path, origin taxonomy, and history binding** that destroy the same guarantee from inside the editor.
 
 ## Context — why this spec exists
 
 A full adversarial review of PR #2 found **4 confirmed defects** (1 CRITICAL, 2 HIGH, 1 MEDIUM) plus a test-coverage regression, all symptoms of **one root cause**: the scene is flattened to plain records and **re-encoded through a throwaway `Y.Doc` (a fresh random `clientID`) at every boundary** — the collaboration wire (INIT seed + 20s resync), persistence (save), and cold-load. This destroys CRDT lineage, so per-element merges collapse to **whole-element last-writer-wins on a random `clientID` tiebreak**. Measured on yjs 13.6.31 (2000-trial Monte-Carlo): a concurrent per-property edit is **lost ~50.1%** of the time and a deletion is **resurrected ~49.9%** of the time on every resync. The value-level `mergeStoredElements`, the `versionHighWater` reseed, and the `updated`-timeout are all **patches for this self-inflicted lineage loss**; they cannot converge because the foundation regenerates the defect class (the 12-after-"clean" pattern).
 
 The native-Yjs invariant the epic is built on — _"the editor's element store IS one logical `Y.Doc`"_ — requires the doc's CRDT lineage be preserved **end to end**: the bytes on the wire, the bytes in storage, and the bytes a cold-loading peer adopts must all carry the **same Yjs lineage**, so Yjs's own per-property merge holds for **every** replica regardless of how it joined. This spec states that as testable safety/liveness requirements so the seam can be rebuilt correct-by-construction and gated by a deterministic **N-replica convergence suite** (plus the re-enabled multiplayer-undo tests the PR disabled).
+
+### Widened 2026-08-19 — a second root cause, inside the editor
+
+A second full adversarial review (max effort, `origin/main...HEAD`, 36 commits / 452 files, 15 findings with executed repros) **corroborated the above from four independent angles** — and found that fixing it is **not sufficient**. A distinct class destroys per-property merge *before the bytes ever reach a boundary*:
+
+- **The write path flushes whole elements.** `Scene.mutateElement` calls `writeChangedKeys(ymap, element)`, which iterates `Object.keys(element)` — the entire object — and writes back every key differing from the doc. The caller's `updates` intent set is discarded, though bare `mutateElement` tracks `didChange` per key one layer down. A write through a reference held across a frame therefore reverts a peer's concurrent edit to a *different* property, with the doc's lineage perfectly intact. This is the root of the class `b2f708f5` patched with the `freshMap.get(id) ?? element` idiom copy-pasted at **32 sites across 14 files** — each a symptom, each future call site a latent instance. _[R2-#1]_
+- **History is no longer in lockstep with the doc.** The remote-apply path lost `captureUpdate: NEVER`, so a peer's change leaks into the next capturing local increment and `History.undoStack` desynchronises from the Yjs `UndoManager` stack — one Ctrl+Z pops the wrong StackItem and tombstones the user's own shape. _[R2-#4]_ Separately `meta.version` is written unconditionally (the adjacent `versionHighWater` write IS guarded), driving `version` **backwards** so the Store's `prev.version < next.version` gate silently discards a real edit. _[R2-#5]_
+- **The origin taxonomy is asymmetric.** `replaceAllElements` Pass 1 broadcasts a content-bearing `isDeleted:true` tombstone under `STRUCTURAL_ORIGIN` while the paired reveal is `EPHEMERAL_ORIGIN` and is filtered out — peers hold invisible elements until the next resync. _[R2-#2]_ The exported `CollabEngine` filters only `REMOTE_ORIGIN`, so an embedder broadcasts `resetScene`'s destructive deletes to the whole room. _[R2-#10]_
+
+**Why this matters for scope**: R2-#1, #4 and #5 are precisely what `describe.skip("multiplayer undo/redo")` used to cover. They are not new regressions — they are regressions the skipped tests stopped reporting. Since FR-008 re-enables exactly those 34 tests as a gate, the original plan would have gone RED in Phase 1 for reasons **nowhere in its FR list**, and INV-CONVERGE could not have gone green. Hence FR-009..FR-015 below.
 
 ## Clarifications
 
@@ -18,6 +28,13 @@ The native-Yjs invariant the epic is built on — _"the editor's element store I
 - **D2 (was OPEN-3) — the cold-load lineage race dissolves.** Cold-load and INIT both adopt the SAME persisted/peer bytes via `applyUpdateV2`/`applyUpdate` _into_ the live doc, so every replica inherits **those bytes' lineage**. Element ids are random (nanoid) ⇒ two replicas never independently mint the same id ⇒ no disjoint-lineage-same-id collision survives once re-encoding stops. INV-CONVERGE holds for every replica with no separate deterministic-`clientID` mechanism. (Documented residual, out of scope: a never-persisted doc edited offline by two peers before any sync — an astronomically unlikely id collision.)
 - **D3 (was OPEN-1) — GC / growth bound.** A deletion is an `isDeleted` record in the real lineage-preserving doc (no manual timeout merge). Baseline growth is bounded by Yjs `gc:true` (delete-set content GC) + `encodeStateAsUpdateV2` state compaction. Over-timeout tombstones **and** their orphaned file binaries are reclaimed by an in-place GC pass under `LOCAL_ORIGIN` (propagates as an ordinary CRDT deletion → converges), gated by `DELETED_ELEMENT_TIMEOUT`. This closes finding [2] with a **live mechanism**, not a dead check on stripped metadata.
 - **D4 (was OPEN-2) — orphan-binary privacy.** A deleted image's binary is removed from `yFiles` in-place by the same GC pass once the element is over-timeout and **no live element references the file** (mirrors the old `filterReferencedFiles` intent, now in-doc + lineage-preserving). Timeout-gated, so a concurrent re-reference inside the window keeps the binary; converges.
+
+### Session 2026-08-19 (the widening — resolved by analysis of the R2 findings)
+
+- **D5 — intent, not diff, is the unit of a write.** `writeChangedKeys` gains an explicit key set: the caller states WHICH keys it is changing, and no key outside that set is ever written. This is strictly stronger than re-reading before the diff (the `freshMap.get(id) ?? element` bandaid), because it holds even when the caller's element is arbitrarily stale — the state every one of the 32 patched sites was working around. Those 32 bandaids are then **deletable**, and their deletion is part of the acceptance for FR-009.
+- **D6 — one origin taxonomy, one filter, asserted exhaustively.** Rather than patching each filter, the origins become a closed set with a single declared wire-policy per origin (`LOCAL`=broadcast, `REMOTE`=never, `EPHEMERAL`=never, `STRUCTURAL`=paired-with-its-reveal). Both consumers (`Collab.onDocUpdate`, `Scene.onDocUpdate`/`CollabEngine`) derive from that one table, and INV-ORIGIN enumerates every origin × every write path — so a new origin cannot be added without a policy.
+- **D7 — the undo boundary is the doc, not React state.** An appState undo MUST write the reverted value back to `yAppState`; rewinding React state alone is silently re-reverted by the read-only mirror on the next scene update, and peers never observe the undo at all. _[R2-#7]_
+- **D8 — binaries never traverse the socket, enforced not documented.** `CollabEngine`'s "binaries are out-of-band" comment is currently false: `Scene.setFiles` defaults to `LOCAL_ORIGIN`, so a pasted image's full base64 dataURL is broadcast (a 1.5 MB PNG becomes an ~8 MB JSON frame against socket.io's 1 MB default). The wire filter must exclude `yFiles` deltas structurally, and INV-NO-BINARY-WIRE asserts it. _[R2-#6]_
 
 ## User Scenarios & Testing _(mandatory)_
 
@@ -93,6 +110,68 @@ No perpetual redundant saves; no false "already saved" skip of a genuinely-neede
 
 **Invariant INV-SAVE-SKIP**: `isSaved ⇔ the live doc state equals the last stored state`, compared on a signal that survives the v2 cutover (not a sum of stripped `version`s).
 
+### User Story 8 — A local edit never clobbers a peer's edit to a different property (Priority: P1)
+
+Two people edit the same shape at once. One of them is mid-drag, so the editor is holding a reference to that element captured a frame ago. Neither edit is lost.
+
+**Why P1**: This is US1's guarantee at the layer *below* it. US1 fails at the resync boundary; this fails on every single write, with no boundary involved. Fixing the wire and leaving this in place still loses ~half of concurrent per-property edits.
+
+**Independent Test**: two Scenes over shared lineage; B edits `strokeColor`; A edits `x` through a reference captured BEFORE B's change arrived; assert both replicas end with A's `x` and B's `strokeColor`. Repeat with `updates` touching a JSON-leaf key (`points`) and a nested key (`boundElements`).
+
+**Invariant INV-WRITE-INTENT**: a doc write modifies exactly the keys the caller declared in `updates` (plus the reconciliation metadata) — never a key that merely differs between the caller's element and the doc, however stale that element is.
+
+### User Story 9 — Undo/redo stays in lockstep while collaborating (Priority: P1)
+
+A peer's edit arrives between two of my gestures. My next Ctrl+Z undoes *my* last action — not someone else's, and not an action two steps back.
+
+**Why P1**: The failure tombstones the user's own work and leaves every later undo/redo off by one. It is also, with US8, what the 34 disabled tests covered — so FR-008's gate cannot pass without it.
+
+**Independent Test**: draw, apply a peer update via `Y.applyUpdate(doc, u, REMOTE_ORIGIN)`, deselect; assert `History.undoStack` entries and `scene.undoManager.undoStack.length` stay in lockstep (control run without the peer update gives the same depths); assert one undo reverts only the local gesture. Plus: assert a purely passive remote edit does not wipe the local redo branch.
+
+**Invariant INV-HISTORY-LOCKSTEP**: for every interleaving of local gestures and remote applies, `History.undoStack` depth equals the `UndoManager` stack depth, and a remote apply contributes zero entries to either.
+
+**Invariant INV-VERSION-MONOTONIC**: an element's stored `meta.version` never decreases; a write whose scratch version is behind the doc's does not regress it, and the Store never discards a write that genuinely changed the doc.
+
+### User Story 10 — Every doc write reaches peers exactly when it should (Priority: P1)
+
+A structural add is either fully visible to peers or not sent at all — never a content-bearing tombstone with the reveal withheld. A destructive local reset is never broadcast.
+
+**Why P1**: The current asymmetry ships peers invisible elements carrying full content, and — through the exported `CollabEngine` — ships them a room-wide wipe. Both are silent until the next resync.
+
+**Independent Test**: table-driven over {origin} × {write path}; for each, assert the broadcast decision matches the declared policy. Specifically: a `captureUpdate: NEVER` scene update introducing new ids leaves no peer holding an invisible element; `resetScene` through `CollabEngine` broadcasts nothing.
+
+**Invariant INV-ORIGIN**: the set of origins broadcast is exactly the declared wire-policy set, identically in every consumer; a tombstone and its paired reveal are either both broadcast or both withheld.
+
+### User Story 11 — Image binaries never traverse the collaboration socket (Priority: P1)
+
+Pasting a large image into a room works, and does not disconnect anyone.
+
+**Why P1**: User-visible today and independent of the CRDT work — the frame exceeds socket.io's default `maxHttpBufferSize`, so the image never reaches peers even though the out-of-band upload succeeded, and every peer that later fetches it re-broadcasts the whole binary again.
+
+**Independent Test**: paste a multi-MB image while in a room; assert no broadcast frame contains `yFiles` content and that no frame exceeds a declared size ceiling; assert peers still receive the element and resolve the binary out-of-band.
+
+**Invariant INV-NO-BINARY-WIRE**: no file binary is ever included in a collaboration broadcast, on any path, for any origin.
+
+### User Story 12 — One bad update cannot stop the room converging (Priority: P2)
+
+A corrupt, truncated, or wrong-format update from any room member is contained: that update is rejected, and the session keeps converging.
+
+**Why P2**: Not a data-loss default, but the blast radius is the whole session and any member can trigger it — `Y.applyUpdate` on peer bytes is unguarded, so the throw escapes an async socket handler as an unhandled rejection and every subsequent message hits the same throw.
+
+**Independent Test**: feed truncated bytes, a v2-encoded payload on the v1 path, and a non-array payload; assert each is rejected without throwing out of the handler, the doc is not left partially integrated, and a subsequent valid update still applies.
+
+**Invariant INV-WIRE-ROBUST**: applying an invalid remote update leaves the doc unchanged and the session live.
+
+### User Story 13 — Undoing a background/name change actually undoes it (Priority: P2)
+
+Ctrl+Z after changing the canvas background restores the previous colour — permanently, and for peers.
+
+**Why P2**: Narrower than element loss, but it is a *silent self-reverting* undo: the value returns on the next scene update, peers never see the undo, and every save persists the un-undone value.
+
+**Independent Test**: change background, undo, then trigger any subsequent scene update; assert React state AND `yAppState` both hold the pre-change value. Same for the project `name`.
+
+**Invariant INV-APPSTATE-UNDO**: an appState undo/redo writes through to `yAppState`, so the doc and React state agree after any subsequent scene update.
+
 ## Requirements _(mandatory)_
 
 - **FR-001** The collaboration wire (INIT seed + periodic resync) MUST transmit the live document's actual Yjs state (lineage-preserving), never a re-encoded throwaway snapshot. _[fixes #1]_
@@ -103,18 +182,29 @@ No perpetual redundant saves; no false "already saved" skip of a genuinely-neede
 - **FR-006** Deleted-content + orphaned-binary reclamation MUST be driven by data that survives the encode (no dead check on stripped metadata) and MUST bound storage growth under churn; a deleted image's binary MUST NOT be re-broadcast to new joiners indefinitely. _[#2]_
 - **FR-007** The save-skip optimization MUST be correct post-cutover: no perpetual redundant saves and no false-skip of a needed save. _[#4]_
 - **FR-008 (tests)** The disabled multiplayer-undo test block MUST be re-enabled and pass; a new N-replica convergence property test MUST gate INV-CONVERGE + INV-NO-RESURRECT; the whole suite MUST be non-vacuous (each invariant test fails on the pre-redesign code).
+- **FR-009** A doc write MUST be scoped to the caller's declared intent keys; no key outside that set may be written, regardless of how stale the caller's element is. The 32 `freshMap.get(id) ?? element` re-read bandaids MUST be removed as part of this. _[R2-#1]_
+- **FR-010** A remote apply MUST contribute no entry to the editor's history and MUST NOT wipe the local redo branch; `History.undoStack` and the `UndoManager` stack MUST stay in lockstep under any interleaving. _[R2-#4]_
+- **FR-011** An element's `meta.version` MUST NOT regress, and the Store MUST NOT discard a write that genuinely changed the doc. _[R2-#5]_
+- **FR-012** Every doc origin MUST have one declared wire policy, applied identically by every broadcast consumer; a structural tombstone and its paired reveal MUST share a broadcast decision. _[R2-#2, R2-#10]_
+- **FR-013** File binaries MUST NOT be included in any collaboration broadcast on any path. _[R2-#6]_
+- **FR-014** An invalid remote update MUST be rejected without desynchronising or wedging the session. _[R2-#11]_
+- **FR-015** An appState undo/redo MUST write the reverted value back to `yAppState`. _[R2-#7]_
 
 ## Success Criteria _(mandatory)_
 
 - **SC-001** INV-CONVERGE + INV-NO-RESURRECT proven by a non-vacuous N-replica property test: it FAILS on current HEAD (the throwaway-clientID resync) and PASSES after the redesign.
 - **SC-002** The 34-test `multiplayer undo/redo` block (`history.test.tsx`) is re-enabled and green, and the removed `collab.test.tsx` cases are restored and green.
 - **SC-003** A full adversarial re-review of the redesigned seam returns **ZERO findings of any kind** — defects AND observations. _(the done-gate)_
-- **SC-004** `yarn test:typecheck`, lint (`--max-warnings=0`), and all touched suites green.
+- **SC-004** `pnpm run test:typecheck`, lint (`--max-warnings=0`), and all touched suites green.
+- **SC-005** INV-WRITE-INTENT proven non-vacuous, and all 32 `freshMap.get(id) ?? element` re-read sites are gone with the suite still green — the bandaid count is the metric.
+- **SC-006** INV-HISTORY-LOCKSTEP + INV-VERSION-MONOTONIC green, and SC-002's re-enabled block passes **because** of them, not around them.
+- **SC-007** INV-ORIGIN's origin × write-path table is exhaustive: adding an origin without a declared policy fails the suite.
 
 ## Out of scope / explicitly KEPT
 
 - The per-property element-`Y.Map` schema, the fractional `index`, awareness-for-ephemeral routing, and the v2 codec — **KEPT** (reviewed sound; `001`).
 - `buildSnapshotDoc` is **retained only for a deliberate export / GC-checkpoint**, never on the hot wire / persistence / cold-load paths.
+- **Deferred, tracked, NOT fixed here** (R2 findings that are real but not convergence defects): `recomputeFromDoc` re-materialising every element on every transaction, so the identity-keyed render caches miss scene-wide (R2-#9 — a performance defect, and the biggest one, but it cannot lose data); `addMissingFiles(replace)` being defeated by the files mirror (R2-#12); the `cloneJSON` compare asymmetry re-writing `undefined`/`NaN` JSON-leaf keys forever; the undeclared `yjs` dependency on the published package (R2-#15 — changes the published dependency contract, needs a product call). Each keeps its own follow-up; none gates this spec.
 
 ## Assumptions
 
