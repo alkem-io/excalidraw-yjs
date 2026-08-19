@@ -189,7 +189,15 @@ const getNonDeletedElements = <T extends ExcalidrawElement>(
 
 const validateIndicesThrottled = throttle(
   (elements: readonly ExcalidrawElement[]) => {
-    if (isDevEnv() || isTestEnv() || window?.DEBUG_FRACTIONAL_INDICES) {
+    // `globalThis.window?.`, not `window?.` — optional chaining guards a NULL
+    // value, not an UNDECLARED identifier, so the bare form throws
+    // `ReferenceError: window is not defined` in Node. That made every element
+    // write fail for a headless consumer, over a debug flag.
+    if (
+      isDevEnv() ||
+      isTestEnv() ||
+      globalThis.window?.DEBUG_FRACTIONAL_INDICES
+    ) {
       validateFractionalIndices(elements, {
         // throw only in dev & test, to remain functional on `DEBUG_FRACTIONAL_INDICES`
         shouldThrow: isDevEnv() || isTestEnv(),
