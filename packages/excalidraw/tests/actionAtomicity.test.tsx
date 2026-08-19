@@ -38,68 +38,68 @@ describe("one action, one logical mutation", () => {
   // (scene.mutateElement, redrawTextBoundingBox) — those are already committed,
   // broadcast LOCAL transactions by the time `syncActionResult` runs, so
   // `commitPlan` cannot retroactively make them atomic. See spec 002 T016k.
-  it.fails(
-    "wrapTextInContainer emits ONE update and no dangling containerId",
-    async () => {
-      await render(<Excalidraw handleKeyboardGlobally />);
+  // Asserts the CURRENT BROKEN numbers on purpose, so it passes today and FAILS
+  // the moment the defect is fixed — flip them to the contract values (1, 1, 0)
+  // then. (`it.fails` says this more directly but is absent from the installed
+  // vitest type surface, and a green suite with a red typecheck is worse.)
+  it("DEFECT T016k — one action emits 4 updates and 2 dangling-container states", async () => {
+    await render(<Excalidraw handleKeyboardGlobally />);
 
-      const text = API.createElement({
-        type: "text",
-        id: "text-1",
-        text: "hello",
-        x: 0,
-        y: 0,
-      });
-      API.setElements([text]);
-      API.setSelectedElements([text]);
+    const text = API.createElement({
+      type: "text",
+      id: "text-1",
+      text: "hello",
+      x: 0,
+      y: 0,
+    });
+    API.setElements([text]);
+    API.setSelectedElements([text]);
 
-      // A peer, synced to the pre-action state, linked BEFORE the action runs.
-      const peerDoc = new Y.Doc();
-      const peer = new Scene(undefined, { doc: peerDoc });
-      peer.applyRemoteUpdate(h.scene.encodeStateAsUpdate());
+    // A peer, synced to the pre-action state, linked BEFORE the action runs.
+    const peerDoc = new Y.Doc();
+    const peer = new Scene(undefined, { doc: peerDoc });
+    peer.applyRemoteUpdate(h.scene.encodeStateAsUpdate());
 
-      const senderUpdates: Uint8Array[] = [];
-      const peerStates: ReadonlyArray<ExcalidrawElement>[] = [];
-      const detachSender = h.scene.onDocUpdate((u) => {
-        senderUpdates.push(u);
-        peer.applyRemoteUpdate(u);
-      });
-      const detachPeer = peer.onUpdate(() => {
-        peerStates.push(peer.getElementsIncludingDeleted() as never);
-      });
+    const senderUpdates: Uint8Array[] = [];
+    const peerStates: ReadonlyArray<ExcalidrawElement>[] = [];
+    const detachSender = h.scene.onDocUpdate((u) => {
+      senderUpdates.push(u);
+      peer.applyRemoteUpdate(u);
+    });
+    const detachPeer = peer.onUpdate(() => {
+      peerStates.push(peer.getElementsIncludingDeleted() as never);
+    });
 
-      API.executeAction(actionWrapTextInContainer);
+    API.executeAction(actionWrapTextInContainer);
 
-      // 1. exactly one transport message for the whole action
-      expect(senderUpdates.length).toBe(1);
-
-      // 2. exactly one observable state on the receiver
-      expect(peerStates.length).toBe(1);
-
-      // 3. no intermediate state may reference a container that does not exist
-      for (const state of peerStates) {
-        const ids = new Set(state.map((e) => e.id));
-        for (const el of state) {
-          const containerId = (el as { containerId?: string | null })
-            .containerId;
-          if (containerId) {
-            expect(ids.has(containerId)).toBe(true);
-          }
+    const dangling: string[] = [];
+    for (const state of peerStates) {
+      const ids = new Set(state.map((e) => e.id));
+      for (const el of state) {
+        const containerId = (el as { containerId?: string | null }).containerId;
+        if (containerId && !ids.has(containerId)) {
+          dangling.push(`${el.id} -> missing ${containerId}`);
         }
       }
+    }
 
-      // 4. final order: the container sits immediately below its text
-      const finalOrder = peer.getElementsIncludingDeleted();
-      const textIdx = finalOrder.findIndex((e) => e.id === "text-1");
-      const container = finalOrder[textIdx - 1];
-      expect(container).toBeDefined();
-      expect(
-        (finalOrder[textIdx] as { containerId?: string }).containerId,
-      ).toBe(container.id);
+    // CONTRACT (FR-016/FR-017) is 1, 1, 0. CURRENT is 4, 4, 2 — the peer twice
+    // sees a text whose containerId points at a container that does not exist.
+    expect(senderUpdates.length).toBe(4);
+    expect(peerStates.length).toBe(4);
+    expect(dangling.length).toBe(2);
 
-      detachSender();
-      detachPeer();
-      peer.destroy();
-    },
-  );
+    // 4. final order: the container sits immediately below its text
+    const finalOrder = peer.getElementsIncludingDeleted();
+    const textIdx = finalOrder.findIndex((e) => e.id === "text-1");
+    const container = finalOrder[textIdx - 1];
+    expect(container).toBeDefined();
+    expect((finalOrder[textIdx] as { containerId?: string }).containerId).toBe(
+      container.id,
+    );
+
+    detachSender();
+    detachPeer();
+    peer.destroy();
+  });
 });
