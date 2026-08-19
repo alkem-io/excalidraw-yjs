@@ -1,65 +1,69 @@
-# Minimal package-boundary plan (generic excalidraw-yjs)
+# Package-boundary plan — revision 2 (deletion-first)
 
-**Status**: report only, no refactor started. Numbers are measured, not estimated.
+**Status**: report only. Revision 1 is withdrawn; its central conclusion was backwards.
 
-## Defect 1 — `@excalidraw-yjs/element/headless` is not a sound standalone TS package
+## What I got wrong
 
-**Measured.** Across `packages/element/src`:
+Revision 1 argued: _"`AppState` has 335 occurrences in `element/src`, therefore narrowing the headless surface is not viable, therefore move the shared type graph into `common`."_
 
-```
-62  imports from "@excalidraw-yjs/excalidraw/types"
- 4  imports from "@excalidraw-yjs/excalidraw/scene/types"
- 2  imports from "@excalidraw-yjs/excalidraw/components/App"   (type-only, store.ts — NOT in headless)
-```
+That reasoning is inverted. **I wrote the headless barrel by copying `index.ts` minus the browser-only modules** — 36 modules — and then used its size as evidence that it could not be smaller. The leak count is a property of my barrel, not of any generic consumer's needs. The smoke test consumes exactly two symbols (`Scene`, `newElement`).
 
-**21 of the 36 modules the headless barrel re-exports** import from the excalidraw package: `align`, `binding`, `bounds`, `collision`, `comparisons`, `distribute`, `duplicate`, `elbowArrow`, `flowchart`, `frame`, `groups`, `image`, `resizeElements`, `selection`, `shape` (×2), `sizeHelpers`, `textElement`, `typeChecks`, `utils`, `zindex`, `arrows/helpers`.
+## Measured: a minimal surface barely leaks at all
 
-`packages/element/package.json` declares no dependency on `@excalidraw-yjs/excalidraw`. So a consumer installing only `element` gets working JS (proved by the bare-Node smoke) but **cannot resolve the public types**.
+| module                                   | leaks `excalidraw` types |
+| ---------------------------------------- | ------------------------ |
+| `Scene`                                  | **0**                    |
+| `newElement`                             | **0**                    |
+| `textMeasurements`                       | **0**                    |
+| `yjs/schema`, `yjs/origin`, `yjs/intent` | **0**                    |
+| `typeChecks`                             | 1 — `ElementOrToolType`  |
+| `bounds`                                 | 1 — `AppState`           |
 
-**Where the types live** — this decides the shape of the fix:
+Both residuals are a single type, and neither needs `AppState` moved:
 
-| type | defined in |
+- `bounds.ts:1182` destructures **five viewport fields** — `{ scrollX, scrollY, width, height, zoom }`. Narrow the parameter to that structural shape. A headless consumer has no viewport anyway.
+- `typeChecks` uses `ElementOrToolType = ExcalidrawElementType | ToolType | "custom"` in 3 functions. `ToolType` is editor-side; either keep those 3 internal or narrow to the element-side union.
+
+`AppClassProperties` does **not** move, per review. Any retained public operation that needs it gets the narrow structural capability instead, or stays internal.
+
+## Public-surface audit (to complete before any code)
+
+For each generic workflow, list the exact functions/types consumed; export only those. Everything else stays internal — `Scene` already provides binding, group and frame semantics through `mutateElement`, so a consumer does not import `binding`, `groups` or `frame` to get them.
+
+| workflow | expected surface |
 | --- | --- |
-| `SceneElementsMap`, `NonDeletedSceneElementsMap` | `element/src/types.ts` ✅ already neutral |
-| `AppState`, `InteractiveCanvasAppState`, `StaticCanvasAppState`, `AppClassProperties`, `Zoom`, `PendingExcalidrawElements` | `excalidraw/types.ts` ❌ |
+| create / adopt a doc | `Scene` (+ `{ doc }` option) |
+| import an existing Excalidraw board | the fresh-lineage JSON converter |
+| scoped element mutations (binding/group/frame semantics included) | `Scene.mutateElement`, `applyElementChanges`, element constructors |
+| files / appState | `Scene.setFiles/getFiles/getPersistedAppState` |
+| encode / decode | `encodeStateAsUpdate`, `applyRemoteUpdate`, `decodeSnapshot` |
+| observe / apply updates | `Scene.onDocUpdate`, `Scene.applyRemoteUpdate` |
+| text in Node | `setCustomTextMetricsProvider` |
 
-`AppState` is pervasive — 335 identifier occurrences in `element/src`. So **narrowing the headless surface is not viable**: it would have to drop `binding`, `shape`, `selection`, `resizeElements` and most of the geometry, which is the whole point of the entry.
+**Proof**: a packed-tarball consumer in a fresh temp project, installing only declared deps, compiling a **real workflow** under `tsc` and running it in Node — not merely importing the barrel.
 
-**Direction**: move the dependency-neutral type shapes DOWN into a package `element` already depends on (`@excalidraw-yjs/common`), and have `excalidraw` re-export them for its own consumers. Not a circular dependency from `element` → `excalidraw`, and not shipping the React editor as a runtime dep.
+## Deletions (measured, no aliases — none of this shipped)
 
-`AppClassProperties` is the one that may not be movable — it is the App class surface. Modules needing it (14 occurrences) may need a narrower structural parameter type instead. That is the part of this plan I would not call mechanical.
-
-**Proof required**: a packed-tarball consumer fixture — fresh temp project, installs only declared deps, runs `tsc` **and** a bare-Node import. The current smoke proves runtime only.
-
-## Defect 2 — `CollabEngine` is not attachable through the public API
-
-Exported from `@excalidraw-yjs/excalidraw`, but its constructor requires `Scene`, which is not exported from the main package. `ExcalidrawImperativeAPI` exposes only `getSceneDoc(): Y.Doc`. Only tests construct it — zero production callers.
-
-**Direction**: make it operate on the `Y.Doc` (+ generic origin/handler config) so `api.getSceneDoc()` suffices, OR give `ExcalidrawImperativeAPI` a minimal collaboration attach point. Not exposing `Scene`. Proof is an external-consumer test using only published exports.
-
-Note this interacts with FR-017: `CollabEngine` currently subscribes via `Scene.onDocUpdate`, which filters only `REMOTE_ORIGIN` — the R2-#10 defect where an embedder broadcasts `resetScene`'s destructive deletes. Whatever shape it takes must consume the same origin policy, not re-derive one.
-
-## Defect 3 — product identity in generic runtime vocabulary
-
-| item | measured |
+| target | evidence |
 | --- | --- |
-| origin sentinels `alkemio-yjs-*` | 8 occurrences in `yjs/origin.ts` |
-| package version `0.18.0-864353b-alkemio-16` | `excalidraw/package.json` |
-| Alkemio named in published source | 3 files |
-| `element` repository metadata | points at **upstream** `excalidraw/excalidraw` ❌ |
-| `excalidraw` repository metadata | points at `alkem-io/excalidraw-fork` — the **old repo name**, now `excalidraw-yjs` ❌ |
+| `CollabEngine` public export | non-test references are **only** its own definition and the `index.tsx` export line. Zero callers, unattachable through the public API (constructor needs `Scene`, which is not exported), and its correct origin/filter boundary depends on unfinished FR-017. Keeping it is preserving an intermediate stage. |
+| `Scene.encodeSnapshot()` | **0** production callers, 4 test uses, and the body is `return Y.encodeStateAsUpdateV2(this.doc)` — a duplicate of `encodeStateAsUpdate("v2")`. |
+| `Scene.fromSnapshot()` | **0** production callers, 3 test uses. |
 
-Origins become `local` / `structural` / `ephemeral` / `remote`. No aliases: none of this shipped.
+Reintroduce collaboration as one coherent public attach boundary when designed — preference noted: `App`/`ExcalidrawImperativeAPI` owning `attachCollaboration(transport)` returning a destroy handle, never handing out `Scene`. Name frozen only after the workflow audit.
 
-## Defect 4 — converter naming, not converter deletion
+## Converter naming (after the call-site audit, not before)
 
-Converters stay: fresh-lineage import from ordinary Excalidraw JSON is a generic necessity. But two operations currently have near-identical names and opposite lineage semantics:
+Keep the converters. Make the lineage semantics unmissable:
 
-- `encodeSnapshot(snapshot)` (schema) — builds a **fresh** `Y.Doc`, new lineage
-- `Scene.encodeSnapshot()` — encodes the **live** doc, preserving lineage
-
-An external consumer choosing wrongly gets the ~50% concurrent-edit loss this whole spec exists to remove. Rename so the distinction is unmissable, and document both.
+- fresh-lineage import from ordinary Excalidraw JSON → e.g. `importExcalidrawSnapshotAsYjsUpdate`
+- `decodeSnapshot` returns JSON and **discards lineage** — the name must say so; it is used by `firebase.ts`, so it is a real consumer, not test-only.
 
 ## Ordering
 
-Defect 3 is mechanical and can land immediately. Defect 4 is naming plus docs. Defects 1 and 2 are real design work and should not start before T016's correctness work is settled — but the generic-readiness claim cannot be made until both have their boundary tests.
+1. **Now**: product-neutral origin sentinels, correct repository metadata on both packages, delete the `CollabEngine` public export. Independent of T016.
+2. **Now-ish**: delete the two redundant `Scene` snapshot methods once their tests are re-pointed.
+3. **Next**: the public-surface audit and the narrowed barrel + tarball consumer test. This is the smallest slice that unblocks headless consumers and does **not** wait on T016, nor block it.
+4. **Deferred**: converter renaming, after the call-site audit.
+
+The package version needs a neutral Yjs prerelease scheme rather than another historical suffix — flagging as a decision, not inventing one.
