@@ -15,8 +15,6 @@ import { encodeSnapshotAsUpdate } from "@excalidraw-yjs/element";
 import { t } from "@excalidraw-yjs/excalidraw/i18n";
 import { bytesToHexString } from "@excalidraw-yjs/common";
 
-import type { FileRecord } from "@excalidraw-yjs/element";
-
 import type { UserIdleState } from "@excalidraw-yjs/common";
 import type { ImportedDataState } from "@excalidraw-yjs/excalidraw/data/types";
 import type { SceneBounds } from "@excalidraw-yjs/element";
@@ -121,7 +119,7 @@ export const filterReferencedFiles = <T>(
  */
 export const encodeSyncableSceneAsUpdate = (
   elements: readonly OrderedExcalidrawElement[],
-  files: BinaryFiles,
+  assets: Readonly<Record<string, string>>,
   appState: Pick<AppState, "viewBackgroundColor" | "name">,
 ): Uint8Array => {
   const syncableElements = getSyncableElements(elements);
@@ -131,10 +129,8 @@ export const encodeSyncableSceneAsUpdate = (
         string,
         unknown
       >[],
-      files: filterReferencedFiles(
-        files as unknown as Record<string, FileRecord>,
-        syncableElements,
-      ),
+      // References only — the snapshot carries `fileId -> locator`, never bytes.
+      assets: filterReferencedFiles(assets, syncableElements),
       appState: {
         viewBackgroundColor: appState.viewBackgroundColor,
         name: appState.name,

@@ -22,7 +22,6 @@ import {
 } from "firebase/firestore";
 import { getStorage, ref, uploadBytes } from "firebase/storage";
 
-import type { FileRecord } from "@excalidraw-yjs/element";
 import type {
   ExcalidrawElement,
   FileId,
@@ -225,12 +224,12 @@ const mergeStoredElements = (
 const encryptScene = async (
   key: string,
   elements: readonly ExcalidrawElement[],
-  files: BinaryFiles,
+  assets: Readonly<Record<string, string>>,
   appState: AppState,
   priorDocBytes?: Uint8Array,
 ): Promise<{ ciphertext: ArrayBuffer; iv: Uint8Array }> => {
   let mergedElements = elements as unknown as readonly MergeableElement[];
-  let mergedFiles = files as unknown as Record<string, FileRecord>;
+  let mergedAssets = assets;
   let mergedAppState = pickPersistableAppState(appState);
 
   if (priorDocBytes && priorDocBytes.byteLength > 0) {
@@ -239,10 +238,10 @@ const encryptScene = async (
       mergedElements,
       prior.elements as readonly MergeableElement[],
     );
-    // Union the file maps, then prune to those a LIVE merged element references
-    // below (a prior-only image still pointed at by a surviving element keeps its
-    // binary; a deleted-image binary is dropped). Live wins on a fileId collision.
-    mergedFiles = { ...prior.files, ...mergedFiles };
+    // Union the reference maps, then prune to those a LIVE merged element
+    // references below. Live wins on a fileId collision. These are locators, not
+    // bytes — dropping one drops a reference, never a stored asset.
+    mergedAssets = { ...prior.assets, ...mergedAssets };
     // appState: live values win for the keys it carries; fall back to the stored
     // value for any allow-listed key the live save omitted (never clobber a stored
     // background/name with a partial update). Mirrors finding #4's carry-through.
@@ -251,8 +250,8 @@ const encryptScene = async (
 
   const doc = buildSnapshotDoc({
     elements: mergedElements as unknown as readonly Record<string, unknown>[],
-    files: filterReferencedFiles(
-      mergedFiles,
+    assets: filterReferencedFiles(
+      mergedAssets,
       mergedElements as unknown as readonly OrderedExcalidrawElement[],
     ),
     appState: mergedAppState,
@@ -271,7 +270,7 @@ type DecryptedScene = {
   /** The decrypted plaintext = the stored doc as Yjs V2 bytes. */
   docBytes: Uint8Array;
   elements: readonly ExcalidrawElement[];
-  files: Record<string, FileRecord>;
+  assets: Record<string, string>;
   appState: Partial<Record<typeof APPSTATE_ALLOW_LIST[number], unknown>>;
 };
 
@@ -294,11 +293,11 @@ const decryptScene = async (
 
   const decrypted = await decryptData(iv, ciphertext, roomKey);
   const docBytes = new Uint8Array(decrypted);
-  const { elements, files, appState } = decodeSnapshot(docBytes);
+  const { elements, assets, appState } = decodeSnapshot(docBytes);
   return {
     docBytes,
     elements: elements as unknown as readonly ExcalidrawElement[],
-    files,
+    assets,
     appState,
   };
 };
@@ -361,7 +360,7 @@ export const saveFilesToFirebase = async ({
 
 const createFirebaseSceneDocument = async (
   elements: readonly SyncableExcalidrawElement[],
-  files: BinaryFiles,
+  assets: Readonly<Record<string, string>>,
   appState: AppState,
   roomKey: string,
   /** The already-stored doc's V2 bytes (read inside the save transaction); they
@@ -373,7 +372,7 @@ const createFirebaseSceneDocument = async (
   const { ciphertext, iv } = await encryptScene(
     roomKey,
     elements,
-    files,
+    assets,
     appState,
     priorDocBytes,
   );
@@ -388,7 +387,7 @@ export const saveToFirebase = async (
   portal: Portal,
   elements: readonly SyncableExcalidrawElement[],
   appState: AppState,
-  files: BinaryFiles = {},
+  assets: Readonly<Record<string, string>> = {},
 ): Promise<readonly SyncableExcalidrawElement[] | null> => {
   const { roomId, roomKey, socket } = portal;
   if (
@@ -437,7 +436,7 @@ export const saveToFirebase = async (
 
     const storedScene = await createFirebaseSceneDocument(
       elements,
-      files,
+      assets,
       appState,
       roomKey,
       priorDocBytes,
@@ -467,7 +466,7 @@ export const saveToFirebase = async (
  * background/name; carrying it through restores the saved scene faithfully. */
 export type LoadedFirebaseScene = {
   elements: readonly SyncableExcalidrawElement[];
-  files: Record<string, FileRecord>;
+  assets: Record<string, string>;
   appState: Partial<Record<typeof APPSTATE_ALLOW_LIST[number], unknown>>;
 };
 
@@ -494,7 +493,11 @@ export const loadFromFirebase = async (
     FirebaseSceneVersionCache.set(socket, elements);
   }
 
-  return { elements, files: decrypted.files, appState: decrypted.appState };
+  return {
+    elements,
+    assets: decrypted.assets,
+    appState: decrypted.appState,
+  };
 };
 
 export const loadFilesFromFirebase = async (

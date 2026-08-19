@@ -391,7 +391,7 @@ class Collab extends PureComponent<CollabProps, CollabState> {
         this.portal,
         syncableElements,
         this.excalidrawAPI.getAppState(),
-        this.excalidrawAPI.getFiles(),
+        this.excalidrawAPI.getSceneAssetLocators(),
       );
 
       this.resetErrorIndicator();
@@ -888,7 +888,10 @@ class Collab extends PureComponent<CollabProps, CollabState> {
             // `restoreAppState`; files seed the in-memory cache before image
             // fetch.
             appState: loaded.appState as Partial<ImportedDataState["appState"]>,
-            files: loaded.files as ImportedDataState["files"],
+            // No `files` here: the stored document holds `fileId -> locator`,
+            // not bytes. Seeding the cache is the asset adapter's job once the
+            // references are in the scene — see T020 for adopting the stored
+            // bytes into the doc, which is what puts them there on a cold load.
           };
         }
       } catch (error: any) {
@@ -1087,7 +1090,7 @@ class Collab extends PureComponent<CollabProps, CollabState> {
     const appState = this.excalidrawAPI.getAppState();
     return encodeSyncableSceneAsUpdate(
       this.excalidrawAPI.getSceneElementsIncludingDeleted(),
-      this.excalidrawAPI.getFiles(),
+      this.excalidrawAPI.getSceneAssetLocators(),
       {
         viewBackgroundColor: appState.viewBackgroundColor,
         name: appState.name,

@@ -58,13 +58,13 @@ import {
   writeChangedKeys,
   computeElementIntent,
   assertIntentAgainstResult,
-  writeFiles,
-  readFiles,
+  writeAssetLocators,
+  readAssetLocators,
   writeAppState,
   readAppState,
   type ElementRecord,
   type DeclaredElementIntent,
-  type FileRecord,
+  type AssetLocator,
   type AppStateAllowKey,
 } from "./yjs";
 
@@ -383,7 +383,7 @@ export class Scene {
    * {@link getFiles}. The renderer keeps consuming a plain files object; the doc
    * is just where they now live and persist.
    */
-  public readonly yFiles: Y.Map<unknown>;
+  public readonly yAssets: Y.Map<unknown>;
 
   /**
    * The persistable / collaborative appState subset (native-Yjs core, M4):
@@ -572,7 +572,7 @@ export class Scene {
     // Files + the persistable appState subset live in the SAME doc (M4), so an
     // encoded doc is a complete whiteboard snapshot. `getMap` is idempotent —
     // when a pre-decoded doc is adopted these resolve to its existing maps.
-    this.yFiles = this.doc.getMap<unknown>(FILES);
+    this.yAssets = this.doc.getMap<unknown>(FILES);
     this.yAppState = this.doc.getMap<unknown>(APPSTATE);
     this.yElementDeletions = this.doc.getMap<number>(ELEMENT_DELETIONS);
 
@@ -636,12 +636,12 @@ export class Scene {
     // `setFiles`, OR a remote files apply (REMOTE_ORIGIN, M3), OR a load
     // (a non-recording write, `STRUCTURAL_ORIGIN`) — must notify the same `callbacks` as an element
     // change, so the editor refreshes its in-memory files cache and re-renders.
-    // `.observe` (not `observeDeep`): each `yFiles` value is a whole FileRecord
+    // `.observe` (not `observeDeep`): each value is an opaque locator string
     // stored as a JSON-leaf — files are added/removed, never sub-merged (see the
     // {@link yFiles} doc), so a shallow observe captures every file mutation.
     // Read-only on the App side (refresh from `getFiles()`), so this can never
     // echo: the observer does not write back, it only fires `triggerUpdate`.
-    const filesObserver = () => {
+    const assetsObserver = () => {
       // Honor the same `informMutation:false` suppression window as the element
       // recompute, so a files write coinciding with a suppressed element write
       // (e.g. mid-gesture) does not force a React re-render early.
@@ -649,7 +649,7 @@ export class Scene {
         this.triggerUpdate();
       }
     };
-    this.yFiles.observe(filesObserver);
+    this.yAssets.observe(assetsObserver);
 
     // The persistable appState subset (background + name) lives on the SAME doc
     // (M4), so a change to `yAppState` — a local `setAppState`, a remote appState
@@ -669,7 +669,7 @@ export class Scene {
 
     this.detachObserver = () => {
       this.yElements.unobserveDeep(observer);
-      this.yFiles.unobserve(filesObserver);
+      this.yAssets.unobserve(assetsObserver);
       this.yAppState.unobserve(appStateObserver);
     };
 
@@ -1698,26 +1698,26 @@ export class Scene {
   // ---------------------------------------------------------------------------
 
   /**
-   * Merge `files` into the doc's `yFiles` (`doc.getMap(FILES)`). Append-mostly:
-   * an existing file is left in place unless its bytes changed (Excalidraw never
-   * removes an image's binary on element delete), so this never drops a file a
-   * peer just added. No-op (no transaction) when nothing changed.
+   * Merge `fileId -> locator` references into the document.
+   *
+   * Bytes never pass through here. The caller stores them with the host asset
+   * adapter first and writes back only the opaque locator it returns, so a
+   * full-state encode can never carry image data. `writeAssetLocators` throws on
+   * a non-string value, which makes that structural rather than a convention.
    *
    * Written under `LOCAL_ORIGIN`, so the change is published to peers. That does
    * NOT make it undoable: the `UndoManager` is scoped to `yElements` and
-   * {@link yElementDeletions}, so a write to `yFiles` produces no undo step at
-   * all. Loading a document is done by adopting its doc, not by writing here.
+   * {@link yElementDeletions}, so a reference write produces no undo step.
    */
-  setFiles(files: Readonly<Record<string, FileRecord>>): void {
+  setAssetLocators(locators: Readonly<Record<string, AssetLocator>>): void {
     this.doc.transact(() => {
-      writeFiles(this.yFiles, files, { prune: false });
+      writeAssetLocators(this.yAssets, locators);
     }, LOCAL_ORIGIN);
   }
 
-  /** The scene's files as a plain `Record<fileId, BinaryFileData>`, read out of
-   * the doc (deep-cloned, never aliasing doc-internal data). */
-  getFiles(): Record<string, FileRecord> {
-    return readFiles(this.yFiles);
+  /** The document's `fileId -> locator` references. Never bytes. */
+  getAssetLocators(): Record<string, AssetLocator> {
+    return readAssetLocators(this.yAssets);
   }
 
   /**
@@ -1781,7 +1781,9 @@ export class Scene {
         referenced.add(fileId);
       }
     }
-    const orphans = [...this.yFiles.keys()].filter((id) => !referenced.has(id));
+    const orphans = [...this.yAssets.keys()].filter(
+      (id) => !referenced.has(id),
+    );
 
     if (expired.length === 0 && orphans.length === 0) {
       return { elements: 0, files: 0 };
@@ -1794,7 +1796,7 @@ export class Scene {
         this.meta.delete(id);
       }
       for (const id of orphans) {
-        this.yFiles.delete(id);
+        this.yAssets.delete(id);
       }
     }, STRUCTURAL_ORIGIN);
 

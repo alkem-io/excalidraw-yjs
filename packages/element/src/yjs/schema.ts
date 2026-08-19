@@ -456,72 +456,79 @@ export const diffBoundElements = (
 };
 
 // ---------------------------------------------------------------------------
-// files schema (native-Yjs core, M4 — persistence cutover)
+// asset-reference schema (T023 — binaries do not live in the document)
 //
-// `yFiles: Y.Map<fileId, BinaryFileData>` (`doc.getMap(FILES)`) — the scene's
-// image binaries live IN the doc, alongside `yElements`, so the encoded doc
-// (`encodeStateAsUpdateV2`) carries the WHOLE whiteboard: a persisted doc the
-// editor saves is exactly what a persistence or collaboration backend stores
-// (`getMap("elements")` + `getMap("files")` + `getMap("appState")`). Data-model
-// §1: a `BinaryFileData` is a flat JSON record (`{mimeType,id,dataURL,created,
-// lastRetrieved?,version?}`), stored whole as a **JSON-leaf** value — it is only
-// ever added/removed, never sub-merged, so there is no per-property nesting.
+// `doc.getMap(FILES): Y.Map<fileId, locator>` — the collaborative document
+// carries a REFERENCE per image, never its bytes. The value is an opaque
+// host-owned string: core stores it, round-trips it and garbage-collects it, and
+// never parses it. No dataURL, no mimeType, no cache metadata, no URL semantics,
+// no bucket/auth/row identifiers.
+//
+// Bytes are owned by the local editor cache and the host asset store, moved
+// through the host adapter (`store(bytes) -> locator`, `resolve(locator) ->
+// bytes`). Keeping them out of the document is what lets a full-state encode be
+// sent on the wire at all: a live encode carries every root verbatim, so bytes
+// in the document mean bytes on every INIT and resync.
+//
+// The root NAME stays `files` so the stored-document convention a backend reads
+// (`getMap("elements")` / `getMap("files")` / `getMap("appState")`) is unchanged;
+// only the value type changes.
 // ---------------------------------------------------------------------------
 
-/** A binary-file record as it travels through the schema (a flat JSON object —
- * structurally Excalidraw's `BinaryFileData`, kept loose here so the element
- * package does not depend on `packages/excalidraw`'s types). Keyed by `id`. */
-export type FileRecord = { id: string } & Record<string, unknown>;
+/**
+ * An opaque host-owned reference to stored bytes. Core never interprets it —
+ * treat it as a token that only the host's asset adapter can resolve.
+ */
+export type AssetLocator = string;
 
 /**
- * Diff a full `files` map into `yFiles` (the doc's `Y.Map<fileId,
- * BinaryFileData>`): add/replace any file whose JSON value changed, and — when
- * `prune` is set — remove files absent from `next`. Each file value is stored
- * whole (deep-cloned JSON-leaf), so it round-trips byte-stable through the doc.
- *
- * Files are append-mostly in Excalidraw (a deleted image's binary is normally
- * left in place), so `prune` defaults to `false`: a normal save MERGES files in
- * rather than dropping any a peer may have just added. MUST run inside a
- * `doc.transact`. Returns the number of `Y.Map` mutations applied.
+ * Diff a full `fileId -> locator` map into the doc's reference map: add or
+ * replace changed locators and, when `prune` is set, drop ids absent from
+ * `next`. `prune` defaults to `false` so a normal write MERGES rather than
+ * dropping a reference a peer just added. MUST run inside a `doc.transact`.
+ * Returns the number of `Y.Map` mutations applied.
  */
-export const writeFiles = (
-  yFiles: Y.Map<unknown>,
-  next: Readonly<Record<string, FileRecord>>,
+export const writeAssetLocators = (
+  yAssets: Y.Map<unknown>,
+  next: Readonly<Record<string, AssetLocator>>,
   options?: { prune?: boolean },
 ): number => {
   let mutations = 0;
   if (options?.prune) {
     const keep = new Set(Object.keys(next));
-    for (const id of [...yFiles.keys()]) {
+    for (const id of [...yAssets.keys()]) {
       if (!keep.has(id)) {
-        yFiles.delete(id);
+        yAssets.delete(id);
         mutations++;
       }
     }
   }
-  for (const [id, file] of Object.entries(next)) {
-    if (file === undefined || file === null) {
-      continue;
+  for (const [id, locator] of Object.entries(next)) {
+    if (typeof locator !== "string") {
+      // Fail loud rather than storing whatever was passed. This is the one
+      // guard that keeps bytes out of the document by construction: a caller
+      // handing over a `BinaryFileData` gets an error, not a silent broadcast.
+      throw new Error(
+        `writeAssetLocators: locator for "${id}" must be a string, got ${typeof locator}.`,
+      );
     }
-    if (!deepEqual(yFiles.get(id), file)) {
-      yFiles.set(id, cloneJSON(file));
+    if (yAssets.get(id) !== locator) {
+      yAssets.set(id, locator);
       mutations++;
     }
   }
   return mutations;
 };
 
-/**
- * Materialize the doc's `yFiles` back into a plain `Record<fileId,
- * BinaryFileData>` (deep-cloned, so the result never aliases doc-internal data)
- * — the inverse of {@link writeFiles}.
- */
-export const readFiles = (
-  yFiles: Y.Map<unknown>,
-): Record<string, FileRecord> => {
-  const out: Record<string, FileRecord> = {};
-  for (const [id, value] of yFiles.entries()) {
-    out[id] = cloneJSON(value) as FileRecord;
+/** Materialize the doc's reference map as a plain `fileId -> locator` record. */
+export const readAssetLocators = (
+  yAssets: Y.Map<unknown>,
+): Record<string, AssetLocator> => {
+  const out: Record<string, AssetLocator> = {};
+  for (const [id, value] of yAssets.entries()) {
+    if (typeof value === "string") {
+      out[id] = value;
+    }
   }
   return out;
 };
@@ -596,7 +603,8 @@ export const readAppState = (
 /** The portable content of one whiteboard: everything that persists. */
 export type WhiteboardSnapshot = {
   elements: readonly Record<string, unknown>[];
-  files: Readonly<Record<string, FileRecord>>;
+  /** `fileId -> opaque locator`. Never bytes — see {@link AssetLocator}. */
+  assets: Readonly<Record<string, AssetLocator>>;
   appState: Readonly<Partial<Record<AppStateAllowKey, unknown>>>;
 };
 
@@ -610,7 +618,7 @@ export type WhiteboardSnapshot = {
 export const buildSnapshotDoc = (snapshot: WhiteboardSnapshot): Y.Doc => {
   const doc = new Y.Doc();
   const yElements = doc.getMap<Y.Map<unknown>>(ELEMENTS);
-  const yFiles = doc.getMap<unknown>(FILES);
+  const yAssets = doc.getMap<unknown>(FILES);
   const yAppState = doc.getMap<unknown>(APPSTATE);
   const yDeletions = doc.getMap<number>(ELEMENT_DELETIONS);
   doc.transact(() => {
@@ -634,7 +642,7 @@ export const buildSnapshotDoc = (snapshot: WhiteboardSnapshot): Y.Doc => {
         yDeletions.set(id, updated);
       }
     }
-    writeFiles(yFiles, snapshot.files, { prune: false });
+    writeAssetLocators(yAssets, snapshot.assets, { prune: false });
     writeAppState(yAppState, snapshot.appState);
   }, LOCAL_ORIGIN);
   return doc;
@@ -683,7 +691,7 @@ export const decodeSnapshot = (bytes: Uint8Array): WhiteboardSnapshot => {
   const doc = new Y.Doc();
   Y.applyUpdateV2(doc, bytes);
   const yElements = doc.getMap<Y.Map<unknown>>(ELEMENTS);
-  const yFiles = doc.getMap<unknown>(FILES);
+  const yAssets = doc.getMap<unknown>(FILES);
   const yAppState = doc.getMap<unknown>(APPSTATE);
 
   const yDeletions = doc.getMap<number>(ELEMENT_DELETIONS);
@@ -731,10 +739,10 @@ export const decodeSnapshot = (bytes: Uint8Array): WhiteboardSnapshot => {
     return (a.id as string) < (b.id as string) ? -1 : 1;
   });
 
-  const files = readFiles(yFiles);
+  const assets = readAssetLocators(yAssets);
   const appState = readAppState(yAppState);
   doc.destroy();
-  return { elements, files, appState };
+  return { elements, assets, appState };
 };
 
 // NB: do NOT re-export LOCAL_ORIGIN here. It is declared in ./origin and the

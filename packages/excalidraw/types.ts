@@ -568,7 +568,33 @@ export type OnExportProgress = {
   progress?: number;
 };
 
+/**
+ * How the host stores and retrieves image bytes.
+ *
+ * The collaborative document carries only `fileId -> locator`; the bytes
+ * themselves live in the local cache and in whatever store the host provides.
+ * The locator is OPAQUE to the editor — it is round-tripped, never parsed — so
+ * a host may use any identifier it likes without leaking its scheme into the
+ * document.
+ *
+ * Deliberately two operations. There is no `delete`: the editor's GC drops
+ * references, and deleting the underlying asset is the host's decision, not the
+ * editor's. Do not add operations here without a consumer that needs them.
+ */
+export interface AssetAdapter {
+  /** Persist the bytes and return an opaque locator for them. */
+  store: (file: BinaryFileData) => Promise<string>;
+  /** Retrieve the bytes a locator refers to. */
+  resolve: (fileId: FileId, locator: string) => Promise<BinaryFileData>;
+}
+
 export interface ExcalidrawProps {
+  /**
+   * Storage for image bytes. Without it the editor is local-only for images:
+   * they render from the cache but are never published, because the document
+   * cannot carry bytes. See {@link AssetAdapter}.
+   */
+  assetAdapter?: AssetAdapter;
   onChange?: (
     elements: readonly OrderedExcalidrawElement[],
     appState: AppState,
@@ -990,6 +1016,7 @@ export interface ExcalidrawImperativeAPI {
     clear: InstanceType<typeof App>["resetHistory"];
   };
   getSceneElements: InstanceType<typeof App>["getSceneElements"];
+  getSceneAssetLocators: InstanceType<typeof App>["getSceneAssetLocators"];
   getAppState: () => InstanceType<typeof App>["state"];
   getFiles: () => InstanceType<typeof App>["files"];
   getName: InstanceType<typeof App>["getName"];
