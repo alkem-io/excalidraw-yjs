@@ -10,7 +10,8 @@
 !packages/
 !scripts/
 !tsconfig.json
-!yarn.lock
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
 
 # keep (sub)sub directories at the end to exclude from explicit included
 # e.g. ./packages/excalidraw/{dist,node_modules}
