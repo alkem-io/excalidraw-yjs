@@ -453,7 +453,7 @@ export const diffBoundElements = (
 // `yFiles: Y.Map<fileId, BinaryFileData>` (`doc.getMap(FILES)`) — the scene's
 // image binaries live IN the doc, alongside `yElements`, so the encoded doc
 // (`encodeStateAsUpdateV2`) carries the WHOLE whiteboard: a persisted doc the
-// editor saves is exactly what the server / collab-service stores
+// editor saves is exactly what a persistence or collaboration backend stores
 // (`getMap("elements")` + `getMap("files")` + `getMap("appState")`). Data-model
 // §1: a `BinaryFileData` is a flat JSON record (`{mimeType,id,dataURL,created,
 // lastRetrieved?,version?}`), stored whole as a **JSON-leaf** value — it is only

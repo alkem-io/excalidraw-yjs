@@ -143,7 +143,7 @@ describe("native-yjs Scene persistence: the doc IS the persistence unit", () => 
     const bytes = scene.encodeStateAsUpdate("v2");
 
     // Decode into a bare Y.Doc (no Scene) and read the canonical root maps — this
-    // is exactly how the Alkemio server / collab-service reads the stored bytes.
+    // is exactly how a persistence or collaboration backend reads the stored bytes.
     const doc = new Y.Doc();
     Y.applyUpdateV2(doc, bytes);
 

@@ -182,7 +182,7 @@ export const captureElementBase = <T extends object>(
  * `result` record for that id, so there is exactly one source of truth and no
  * winner to invent when a caller's declaration and the result disagree.
  *
- * This is the channel an async action or a headless MCP tool uses to state
+ * This is the channel an async action or a headless automation client uses to state
  * intent that a diff cannot see — most importantly "set this key to the value it
  * already had in base", which is invisible to any derived comparison yet must
  * still beat a value another writer put in the doc meanwhile.

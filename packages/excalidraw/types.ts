@@ -981,12 +981,16 @@ export interface ExcalidrawImperativeAPI {
   /**
    * The scene's `Y.Doc` — the native-Yjs element store.
    *
-   * Read access for inspection and encoding. This is NOT a supported way to wire
-   * up collaboration: a bare `doc.on("update")` subscription does not implement
-   * the origin and broadcast policy the editor requires (a remote apply must not
-   * be re-broadcast; a structural prelude and its reveal are one logical
-   * mutation), so a provider attached this way will emit and re-emit writes the
-   * editor never intended to send. A supported attach boundary is pending.
+   * The doc is MUTABLE and handing it out bypasses the editor's write boundary:
+   * writing to it directly skips intent scoping, origin tagging and
+   * logical-mutation batching, so such writes are not what the editor would have
+   * produced and may not be broadcast correctly.
+   *
+   * A consumer subscribing for collaboration must implement the origin policy
+   * itself — filter `REMOTE_ORIGIN` so a peer's update is never echoed back, and
+   * treat a structural prelude and its reveal as ONE logical mutation. The only
+   * current consumer doing this is the bundled collaboration client
+   * (`excalidraw-app/collab/Collab.tsx`), which filters origins explicitly.
    */
   getSceneDoc: InstanceType<typeof App>["getSceneDoc"];
   history: {

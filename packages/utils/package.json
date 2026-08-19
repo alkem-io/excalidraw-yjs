@@ -65,7 +65,7 @@
     "wawoff2": "2.0.1",
     "which": "4.0.0"
   },
-  "bugs": "https://github.com/excalidraw/excalidraw/issues",
+  "bugs": "https://github.com/alkem-io/excalidraw-yjs/issues",
   "repository": "https://github.com/alkem-io/excalidraw-yjs",
   "scripts": {
     "gen:types": "rimraf types && tsc",

@@ -329,13 +329,6 @@ export {
   restoreLibraryItems,
 } from "./data/restore";
 
-// NOTE: there is deliberately no public collaboration export here. `CollabEngine`
-// was exported but was never attachable through `ExcalidrawImperativeAPI` — its
-// constructor requires the internal `Scene`, which is not public — and it had zero
-// callers. Its correct origin/broadcast policy also depends on unfinished work
-// (spec 002 FR-017), so shipping it would freeze an intermediate design. A single
-// coherent attach boundary will be introduced when that policy is settled.
-
 export {
   exportToCanvas,
   exportToBlob,
@@ -420,7 +413,7 @@ export { Fonts } from "./fonts/Fonts";
 export { setCustomTextMetricsProvider } from "@excalidraw-yjs/element";
 
 // 006-collab-content-unification: re-export the native-Yjs snapshot schema so consumers
-// (client-web) get it from the single published @excalidraw-yjs/excalidraw package rather than
+// get it from the single published @excalidraw-yjs/excalidraw package rather than
 // a separately-published @excalidraw-yjs/element.
 export { encodeSnapshot, decodeSnapshot } from "@excalidraw-yjs/element";
 export type { WhiteboardSnapshot } from "@excalidraw-yjs/element";

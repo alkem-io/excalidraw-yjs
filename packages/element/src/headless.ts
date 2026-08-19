@@ -4,7 +4,7 @@
  *
  * ## What this is for
  *
- * Server-side consumers (the MCP whiteboard tools, batch/import jobs) need the
+ * Server-side and batch consumers (import jobs, automation, headless editing) need the
  * fork's element semantics — construct elements, mutate them, bind them,
  * read/write the `Y.Doc` — running headless in Node. They must NOT reimplement
  * those semantics, or server-authored content diverges from client-authored

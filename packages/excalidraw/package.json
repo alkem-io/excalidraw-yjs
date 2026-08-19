@@ -67,8 +67,8 @@
     ]
   },
   "repository": "https://github.com/alkem-io/excalidraw-yjs",
-  "bugs": "https://github.com/alkem-io/excalidraw-fork/issues",
-  "homepage": "https://github.com/alkem-io/excalidraw-fork/tree/master/packages/excalidraw",
+  "bugs": "https://github.com/alkem-io/excalidraw-yjs/issues",
+  "homepage": "https://github.com/alkem-io/excalidraw-yjs/tree/main/packages/excalidraw",
   "scripts": {
     "gen:types": "rimraf types && tsc",
     "build:esm": "rimraf dist && node ../../scripts/buildPackage.js && pnpm run gen:types"

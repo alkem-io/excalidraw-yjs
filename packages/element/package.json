@@ -62,7 +62,7 @@
       "last 1 safari version"
     ]
   },
-  "bugs": "https://github.com/excalidraw/excalidraw/issues",
+  "bugs": "https://github.com/alkem-io/excalidraw-yjs/issues",
   "repository": "https://github.com/alkem-io/excalidraw-yjs",
   "scripts": {
     "gen:types": "rimraf types && tsc",

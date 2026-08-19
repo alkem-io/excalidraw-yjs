@@ -17,7 +17,7 @@ Please add the latest change on the top under the correct section.
 
 ### Breaking changes
 
-- **Native-Yjs collaboration core:** `reconcileElements` is no longer exported from `@excalidraw-yjs/excalidraw`. The editor's element store is now a `Y.Doc`, so the old scene-array broadcast + JSON `reconcileElements` merge were removed — Yjs converges per-property natively. Collaboration is now wired through the exported `CollabEngine` (+ `CollabTransport` / `CollabEngineOptions` types). Hosts that imported `reconcileElements` must migrate to `CollabEngine`.
+- **Native-Yjs collaboration core:** `reconcileElements` is no longer exported from `@excalidraw-yjs/excalidraw`. The editor's element store is now a `Y.Doc`, so the old scene-array broadcast + JSON `reconcileElements` merge were removed — Yjs converges per-property natively. There is currently no public collaboration engine export; a supported attach boundary is not yet part of the published API.
 
 - Theme changes initiated by the default UI are now delegated to `<Excalidraw onThemeChange={(theme) => ...} />` when supplied. If `onThemeChange` is not supplied, light/dark theme toggling still falls back to updating the internal editor state.
 
