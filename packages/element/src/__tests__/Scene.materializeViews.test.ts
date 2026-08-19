@@ -91,7 +91,7 @@ describe("materializeViews (via Scene) is identity- and order-preserving", () =>
         y: 0,
         width: 100,
         height: 100,
-      } as Parameters<typeof newElement>[0]) as ExcalidrawElement,
+      } as unknown as Parameters<typeof newElement>[0]) as unknown as ExcalidrawElement,
     ]);
 
     expect(scene.getFramesIncludingDeleted().map((f) => f.id)).toEqual(["f1"]);
