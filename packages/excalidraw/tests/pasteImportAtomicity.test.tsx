@@ -18,10 +18,12 @@ const { h } = window;
  * split for new ids (FR-017) is the leading cause.
  */
 describe("T016m — paste/import is one logical mutation for a peer", () => {
-  // SKIPPED — asserts the DESIRED contract, which currently fails. Un-skip when
-  // T016m lands. Deliberately not rewritten to assert today's counts, which would
-  // turn a known defect green.
-  it.skip("a multi-element import reaches the peer as ONE update", async () => {
+  // Was SKIPPED as the desired contract; it now PASSES, satisfied by the
+  // logical-mutation boundary (FR-017) rather than by migrating the commit site.
+  // Non-vacuity re-proven when un-skipping: disabling the boundary's buffering
+  // in `Scene.ensureInternalDocHandler` returns this to `expected 2 to be 1` —
+  // exactly the count T016m originally measured.
+  it("a multi-element import reaches the peer as ONE update", async () => {
     await render(<Excalidraw handleKeyboardGlobally />);
     API.setElements([API.createElement({ type: "rectangle", id: "pre" })]);
 
