@@ -3,7 +3,10 @@
  * experiences it: a bare Node process, no jsdom, importing the BUILT bundle and
  * driving the real workflow.
  *
- * Run: pnpm run test:headless   (builds first: pnpm run build:packages)
+ * Run: `pnpm run test:headless`, which BUILDS the element package and its
+ * workspace siblings first. That ordering is part of the command, not a
+ * convention the caller has to remember — running the script directly against a
+ * stale `dist/` would happily pass after a source regression.
  *
  * Why a script and not a vitest case: the suite runs under jsdom with a global
  * setup that defines `window.matchMedia`, `document.fonts` and friends, so it

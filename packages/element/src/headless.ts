@@ -17,15 +17,15 @@
  *
  * ## The contract, precisely
  *
- * - **Import-safe in Node.** Nothing reachable from this entry performs DOM
- *   access at MODULE SCOPE, so importing it cannot throw. Enforced by
- *   `__tests__/headless.contract.test.ts`, which walks the runtime import graph
- *   (value imports only — `import type` is erased at compile time) and fails if a
- *   new module-scope DOM access appears.
+ * - **Verified in a real DOM-free runtime**, not by static analysis. `pnpm run
+ *   test:headless` builds this package and its siblings, then imports the BUILT
+ *   bundle in a bare Node process and drives the workflow: adopt a `Y.Doc`, write
+ *   elements, mutate per-property, emit updates, encode state. The import itself
+ *   is the module-scope assertion; a call-time DOM read throws when called.
  *
  *   Import-safety is the guarantee, NOT zero-reachability. `shape` imports the
  *   `elementWithCanvasCache` WeakMap from `renderElement`, so that module is
- *   loaded; its DOM access lives inside function bodies that this entry does not
+ *   loaded; its DOM access lives inside function bodies this entry does not
  *   export and a headless caller must not invoke.
  * - **One runtime DOM dependency, with an escape hatch.** Text measurement
  *   lazily constructs a canvas-backed provider on first use. Call
@@ -36,20 +36,6 @@
  *   deliberately wrong and must not be used as a reference implementation. A
  *   server provider must agree with the browser's real font metrics, or text
  *   wraps at different points and every bound element shifts.
- *
- * ## KNOWN GAP — this contract is NOT yet sufficient for Node
- *
- * Verified by building the bundle and importing it in bare Node: the import
- * SUCCEEDS, but `scene.replaceAllElements([...])` then throws
- * `ReferenceError: window is not defined`. The dependency comes from
- * `@excalidraw-yjs/common` (`constants.ts` reads `window.EXCALIDRAW_EXPORT_SOURCE`
- * / `window.location.origin`; `utils.ts` uses `window.setTimeout` and
- * `requestAnimationFrame`), which is bundled into this entry's runtime.
- *
- * The contract test below walks only relative imports, so it stops at the package
- * boundary and does not see this. Until that is closed, treat this entry as
- * "import-safe and export-scoped" — NOT as "usable headless end to end". See spec
- * 002 task T018.
  *
  * ## Not exported here (browser-only)
  *
