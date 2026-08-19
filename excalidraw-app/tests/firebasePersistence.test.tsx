@@ -1,3 +1,4 @@
+import * as Y from "yjs";
 import { newElement, newImageElement } from "@excalidraw-yjs/element";
 import { vi } from "vitest";
 
@@ -333,33 +334,46 @@ describe("firebase persistence boundary", () => {
   });
 
   /**
-   * INV-PERSIST-MERGE (T003): `save(A) ∥ save(B)` over shared lineage must store
-   * the native PER-PROPERTY merge of A and B — order-independent and idempotent,
-   * with no value-level whole-element fallback.
+   * INV-PERSIST-MERGE (T003) — PARTIAL.
    *
-   * The save path decodes the stored doc, value-merges whole elements
-   * (`mergeStoredElements`) and rebuilds a FRESH doc (`buildSnapshotDoc`), so
-   * two replicas editing DIFFERENT properties of the same element cannot both
-   * survive: the saving replica's whole element replaces the stored one.
+   * These exercise the CURRENT flattened save boundary: `saveToFirebase` takes a
+   * plain element array, so by the time it is called the information needed to
+   * tell "B intentionally reset x" from "B never saw A's x" is already gone.
+   * They reproduce the resulting loss; they are NOT the final gate.
+   *
+   * The final gate needs two real Scenes derived from ONE shared update, whose
+   * lineage-bearing updates are persisted — which requires the post-T021
+   * boundary. That API does not exist yet and is not invented here.
    */
-  describe("INV-PERSIST-MERGE", () => {
-    // SKIPPED — asserts the DESIRED contract, which currently fails: measured,
-    // A's `x` edit is lost when B saves a different property of the same
-    // element. Deliberately not rewritten to assert the lossy behaviour, which
-    // would turn a known defect green. Un-skip when T021 replaces the value
-    // merge with an `applyUpdateV2` fold over shared lineage.
+  describe("INV-PERSIST-MERGE (current boundary)", () => {
+    /** Lineage-sensitive: the stored CRDT bytes, not the decoded values. */
+    const storedFingerprint = (room: string) => {
+      const data = store.get(`${room}`) as
+        | { sceneVersion?: number; ciphertext?: { toUint8Array(): Uint8Array } }
+        | undefined;
+      const raw = data?.ciphertext?.toUint8Array();
+      if (!raw) {
+        return null;
+      }
+      const probe = new Y.Doc();
+      Y.applyUpdateV2(probe, raw);
+      const sv = Array.from(Y.encodeStateVector(probe));
+      probe.destroy();
+      return JSON.stringify(sv);
+    };
+
+    // SKIPPED — desired contract, currently fails: measured, A's x=100 is lost
+    // (stored x=0 y=200). Cause is `mergeStoredElements` (firebase.ts:191),
+    // "both alive: whole-element LWW, saving replica wins", followed by a
+    // `buildSnapshotDoc` rebuild. Not rewritten to assert the loss.
     it.skip("a concurrent edit to a DIFFERENT property of the same element survives", async () => {
       const room = "persist-merge";
-
-      // Shared starting point.
       await saveToFirebase(
         portalForRoom(room),
         [rect("e1", { x: 0, y: 0 })],
         appStateWith({}),
         {},
       );
-
-      // A moves it on x; B, from the same starting point, moves it on y.
       await saveToFirebase(
         portalForRoom(room),
         [rect("e1", { x: 100, y: 0 })],
@@ -378,13 +392,67 @@ describe("firebase persistence boundary", () => {
         (e) => e.id === "e1",
       );
       expect(e1).toBeDefined();
-      // BOTH edits must survive — that is what per-property merge means.
       expect(e1!.x).toBe(100);
       expect(e1!.y).toBe(200);
     });
 
-    it("is idempotent — saving the same state twice changes nothing", async () => {
-      const room = "persist-idempotent";
+    // SKIPPED — desired contract. Order-independence is what makes the invariant
+    // non-vacuous, so it is asserted rather than deferred on the grounds that it
+    // obviously fails.
+    it.skip("is ORDER-INDEPENDENT — A then B stores the same as B then A", async () => {
+      const seed = [rect("e1", { x: 0, y: 0 })];
+      const A = [rect("e1", { x: 100, y: 0 })];
+      const B = [rect("e1", { x: 0, y: 200 })];
+
+      await saveToFirebase(
+        portalForRoom("order-ab"),
+        seed,
+        appStateWith({}),
+        {},
+      );
+      await saveToFirebase(portalForRoom("order-ab"), A, appStateWith({}), {});
+      await saveToFirebase(portalForRoom("order-ab"), B, appStateWith({}), {});
+
+      await saveToFirebase(
+        portalForRoom("order-ba"),
+        seed,
+        appStateWith({}),
+        {},
+      );
+      await saveToFirebase(portalForRoom("order-ba"), B, appStateWith({}), {});
+      await saveToFirebase(portalForRoom("order-ba"), A, appStateWith({}), {});
+
+      const semantic = async (room: string) => {
+        const l = await loadFromFirebase(room, KEY, null);
+        return (l!.elements as readonly OrderedExcalidrawElement[])
+          .map((e) => `${e.id}:${e.x},${e.y}`)
+          .sort();
+      };
+
+      expect(await semantic("order-ab")).toEqual(await semantic("order-ba"));
+    });
+
+    // SKIPPED — desired contract. The earlier version of this compared decoded
+    // id/x/y/isDeleted only and PASSED, which was vacuous for lineage:
+    // `buildSnapshotDoc` mints a fresh `clientID` on every save, so the stored
+    // CRDT state changes underneath while the semantic values stay identical.
+    it.skip("is IDEMPOTENT in the stored CRDT state, not just in decoded values", async () => {
+      const room = "persist-idempotent-lineage";
+      const elements = [rect("e1", { x: 42, y: 7 })];
+
+      await saveToFirebase(portalForRoom(room), elements, appStateWith({}), {});
+      const first = storedFingerprint(room);
+      await saveToFirebase(portalForRoom(room), elements, appStateWith({}), {});
+      const second = storedFingerprint(room);
+
+      expect(first).not.toBeNull(); // guard: something was stored
+      expect(second).toBe(first);
+    });
+
+    it("semantic values are stable across an identical re-save", async () => {
+      // The weaker property that DOES hold today, kept so the skipped lineage
+      // case above is not the only coverage of re-saving.
+      const room = "persist-idempotent-semantic";
       const elements = [rect("e1", { x: 42, y: 7 })];
 
       await saveToFirebase(portalForRoom(room), elements, appStateWith({}), {});
