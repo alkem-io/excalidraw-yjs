@@ -98,19 +98,14 @@ const isWellFormedIndex = (
 };
 
 /**
- * Build Scene's six derived views from an array of materialized records.
+ * Build Scene's six derived views from materialized records.
  *
- * PURE: no `this`, no metadata, no notification. It is the second of the three
- * things `recomputeFromDoc` used to do inline — record materialization and
- * metadata reconciliation (which mutate `meta` and `versionHighWater`), then view
- * building, then notification. Only view building is safe to run against records
- * that are not the committed doc, which is why it is factored out (spec 002,
- * T016k): a draft rebuild through `recomputeFromDoc` would mutate COMMITTED
- * reconciliation state that a discard could not restore.
+ * PURE: no `this`, no metadata, no notification — which is what makes it safe to
+ * run against records that are not the committed doc (spec 002, T016k).
  *
- * Extracted with no behaviour change: `orderByFractionalIndex` still sorts the
- * passed array IN PLACE, and the returned objects are the same instances the
- * caller's records are, so identity-keyed caches downstream behave identically.
+ * Two requirements callers depend on: `orderByFractionalIndex` sorts the passed
+ * array IN PLACE, and the views hold the SAME instances as `records` — the render
+ * caches are identity-keyed WeakMaps, so a copy would silently miss all of them.
  */
 const materializeViews = (
   records: OrderedExcalidrawElement[],
