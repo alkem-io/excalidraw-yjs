@@ -36,7 +36,7 @@ const resolveImport = (from: string, spec: string): string | null => {
     return null;
   }
   const base = path.resolve(path.dirname(from), spec);
-  for (const c of [base + ".ts", base + ".tsx", path.join(base, "index.ts")]) {
+  for (const c of [`${base}.ts`, `${base}.tsx`, path.join(base, "index.ts")]) {
     if (fs.existsSync(c)) {
       return c;
     }

@@ -71,7 +71,12 @@
   "dependencies": {
     "@excalidraw-yjs/common": "workspace:*",
     "@excalidraw-yjs/math": "workspace:*",
-    "@excalidraw-yjs/fractional-indexing": "workspace:*",
+    "@excalidraw-yjs/fractional-indexing": "workspace:*"
+  },
+  "peerDependencies": {
+    "yjs": "^13.6.27"
+  },
+  "devDependencies": {
     "yjs": "^13.6.27"
   }
 }

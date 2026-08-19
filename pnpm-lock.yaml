@@ -231,6 +231,7 @@ importers:
       '@excalidraw-yjs/math':
         specifier: workspace:*
         version: link:../math
+    devDependencies:
       yjs:
         specifier: ^13.6.27
         version: 13.6.31
