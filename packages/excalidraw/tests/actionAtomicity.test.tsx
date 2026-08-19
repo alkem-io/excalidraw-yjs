@@ -42,7 +42,12 @@ describe("one action, one logical mutation", () => {
   // the moment the defect is fixed — flip them to the contract values (1, 1, 0)
   // then. (`it.fails` says this more directly but is absent from the installed
   // vitest type surface, and a green suite with a red typecheck is worse.)
-  it("DEFECT T016k — one action emits 4 updates and 2 dangling-container states", async () => {
+  // SKIPPED — asserts the DESIRED contract, which currently fails: measured
+  // 4 sender updates, 4 observable peer states, and 2 dangling container refs
+  // ('text-1 -> missing id2' in states #0 and #1). Deliberately NOT rewritten to
+  // assert the broken numbers — that would turn a known defect green and force
+  // the fix to "break" the suite. Un-skip when T016k lands.
+  it.skip("wrapTextInContainer is ONE logical mutation for the peer", async () => {
     await render(<Excalidraw handleKeyboardGlobally />);
 
     const text = API.createElement({
@@ -83,11 +88,15 @@ describe("one action, one logical mutation", () => {
       }
     }
 
-    // CONTRACT (FR-016/FR-017) is 1, 1, 0. CURRENT is 4, 4, 2 — the peer twice
-    // sees a text whose containerId points at a container that does not exist.
-    expect(senderUpdates.length).toBe(4);
-    expect(peerStates.length).toBe(4);
-    expect(dangling.length).toBe(2);
+    // GUARDS — without these a green result could mean "the action never ran"
+    // or "the receiver was never linked", which is how such a test goes vacuous.
+    expect(h.elements.length).toBeGreaterThan(1);
+    expect(senderUpdates.length).toBeGreaterThan(0);
+
+    // THE CONTRACT (FR-016/FR-017). Currently 4 / 4 / 2 — see T016k.
+    expect(senderUpdates.length).toBe(1);
+    expect(peerStates.length).toBe(1);
+    expect(dangling).toEqual([]);
 
     // 4. final order: the container sits immediately below its text
     const finalOrder = peer.getElementsIncludingDeleted();

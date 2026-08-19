@@ -134,9 +134,15 @@ export class ActionManager {
 
     event.preventDefault();
     event.stopPropagation();
+    // Capture BEFORE `perform` runs. JavaScript evaluates arguments left to
+    // right, so passing `captureElementBase(elements)` as a later argument would
+    // snapshot AFTER the action has already mutated the scratch objects in place
+    // — `Scene.mutateElement` mutates its argument — and the "invocation base"
+    // would equal the result, making the derived intent diff empty.
+    const invocationBase = captureElementBase(elements);
     this.updater(
       data[0].perform(elements, appState, value, this.app),
-      captureElementBase(elements),
+      invocationBase,
     );
     return true;
   }
@@ -151,9 +157,15 @@ export class ActionManager {
 
     trackAction(action, source, appState, elements, this.app, value);
 
+    // Capture BEFORE `perform` runs. JavaScript evaluates arguments left to
+    // right, so passing `captureElementBase(elements)` as a later argument would
+    // snapshot AFTER the action has already mutated the scratch objects in place
+    // — `Scene.mutateElement` mutates its argument — and the "invocation base"
+    // would equal the result, making the derived intent diff empty.
+    const invocationBase = captureElementBase(elements);
     this.updater(
       action.perform(elements, appState, value, this.app),
-      captureElementBase(elements),
+      invocationBase,
     );
   }
 
@@ -179,6 +191,12 @@ export class ActionManager {
         trackAction(action, "ui", appState, elements, this.app, formState);
 
         const invocationElements = this.getElementsIncludingDeleted();
+        // Capture BEFORE `perform` runs. JavaScript evaluates arguments left to
+        // right, so passing `captureElementBase(elements)` as a later argument would
+        // snapshot AFTER the action has already mutated the scratch objects in place
+        // — `Scene.mutateElement` mutates its argument — and the "invocation base"
+        // would equal the result, making the derived intent diff empty.
+        const invocationBase = captureElementBase(invocationElements);
         this.updater(
           action.perform(
             invocationElements,
@@ -186,7 +204,7 @@ export class ActionManager {
             formState,
             this.app,
           ),
-          captureElementBase(invocationElements),
+          invocationBase,
         );
       };
 
