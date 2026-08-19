@@ -40,7 +40,9 @@ const applyRemoteEdit = (id: string, x: number) => {
   if (target) {
     mirrorScene.mutateElement(target, { x });
   }
-  h.scene.applyRemoteUpdate(mirrorScene.encodeStateAsUpdate());
+  // Through the App boundary — the path a provider actually uses
+  // (`Collab` calls `excalidrawAPI.applyRemoteSceneUpdate`).
+  h.app.applyRemoteSceneUpdate(mirrorScene.encodeStateAsUpdate());
   mirrorScene.destroy();
 };
 
@@ -49,10 +51,14 @@ describe("INV-HISTORY-LOCKSTEP", () => {
     await render(<Excalidraw handleKeyboardGlobally />);
   });
 
-  // SKIPPED — asserts the DESIRED contract (FR-010), which currently fails: the
-  // remote apply adds a History entry the UndoManager does not have. Un-skip when
-  // FR-010 lands. Not rewritten to assert the broken depths, which would turn a
-  // known defect green.
+  // SKIPPED — its premise does not hold as written, so it is not evidence of the
+  // defect it describes. Measured step by step: after the remote apply the depths
+  // are unchanged (history 1, undoManager 1); the divergence appears only on the
+  // NEXT click, which is an appState-only step. Such a step creates a `History`
+  // entry carrying an appState delta with `hasElementChange: false`, and by
+  // design contributes no `UndoManager` entry — so equal DELTAS is the wrong
+  // assertion, not a failing one. Re-scope against T017 before un-skipping; see
+  // that task for the measurement.
   it.skip("a remote apply contributes NOTHING to either history stack", async () => {
     const rect = API.createElement({ type: "rectangle", id: "r1", x: 0, y: 0 });
     API.setElements([rect]);
