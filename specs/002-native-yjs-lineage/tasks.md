@@ -136,80 +136,26 @@
 
   `applyElementChanges` inherits the same monotonic rule as every other write: content-gated, strict-regression only, with the tombstone-watermark reservation. **Live gate**: the un-skipped INV-VERSION-MONOTONIC case, green through both the authoritative and the diff route.
 
-- [ ] T016f **(OPEN — this slice removed TWO of the sites, not the family)** Revisit the remaining re-read sites, retiring each only where patch mode proves it redundant AND a test discriminates.
+- [x] T016f **(DONE — the doc re-read class is fully characterized)** Retire the post-helper re-reads where, and only where, a test discriminates.
 
-  - Removed so far: `actionFlip`'s post-flip whole-object reread, and `actionBoundText`'s wrap reread. Both were proven by a failing production test, not by inspection.
-  - **SCOPE CORRECTED — the "36 `freshMap.get(id) ?? element` sites" figure does not match the code.** Counted directly (multi-line tolerant, production only, excluding tests and `dist`):
+  **Denominator, counted directly** (production only, multi-line tolerant): the class is **12** doc re-read sites of the `freshMap`/`resultMap` … `??` shape — NOT the 36 originally recorded. That figure conflated this class with unrelated `fresh-snapshot` markers and with `updatedElementsMap.get(id) ?? element`, which is an action's own map rather than a doc read.
 
-    - **9 DOC RE-READ sites** of the `freshMap`/`resultMap` … `??` shape — `actionProperties` ×5, `actionFinalize` ×1, `actionBoundText` ×1, `actionDistribute` ×1, `actionFlip` ×1. That is the class T016b/T016f has been measuring, and it is **9, not 36**.
-    - **34 production `fresh-snapshot` markers** in total across 14 files, so roughly 25 annotated sites are a DIFFERENT shape — chiefly single-element re-reads such as `scene.getElement(x.id)` after a helper write (`Stats/*`, `resizeElements`, `transform`, `binding`). Those are category 3 (helper/consumer input), never censused, and are not retirable by an ownership policy.
-    - `actionAlign` now has **zero** doc re-reads: its remaining `updatedElementsMap.get(id) ?? element` is the action's own updated map, not a doc read. An earlier count mistook that for one.
+  **3 RETIRED**, each proven by a production test that fails when the re-read returns:
 
-  - **`actionProperties`' five guarded sites — measured, KEPT.** Neutralising every `editedTextIds`/`editedArrowIds`-guarded re-read in that file (8 replacements) leaves the full suite green at 1613. Unobservable, so they stay by the standing bar.
+  - `flip:216` — stale `selectedElements` clobbered helper geometry.
+  - `boundText:358` — replaced the just-reindexed text with the live doc version still carrying its OLD index, turning `syncMovedIndices`' distinct `a1`/`a2` into a tie.
+  - `align:83` — `actionAlign` now has **zero** doc re-reads. Removal without ownership makes the fail-closed boundary throw naming `arr.points, arr.y`; `ALIGN_OVERLAP_POLICY` (geometry → `applied`) closes it, and inverting to `result` leaves the arrow on its pre-align diagonal.
 
-  - **HARNESS CAPACITY LIMIT, not a product flake**: `npx vitest run --maxWorkers=32 --minWorkers=32` on a 10-core machine deterministically produces `still loading` failures. Normal configured parallelism has adequate margin; defaults are deliberately unchanged.
+  **9 RETAINED, every one measured**, because removal is unobservable and "the suite is still green" is exactly the reasoning the discrimination bar refuses:
 
-  - **Measured, per invocation, across the six families that call side-effecting helpers**: `flip:163` 63 reached / 2 semantic; `boundText:184` 25 / 10 (`boundElements`); `boundText:358` 14 / 3 (`index`); `props:319` 9 / 1; `props:1107` and `props:1379` 8 / 0 each; `distribute:77` **now KNOWN — reached but NOT load-bearing** (see below); `actionStyles`' is already narrow (copies only `width`/`height`).
-  - **`align:83` — coverage gap CLOSED and the site RETIRED.** It was reachable only for an element absent from `updatedElements`: a bound arrow moved through the doc by `updateBoundElements` while not itself selected. No test had that shape. `alignBoundArrowReread.test.tsx` now does, and it discriminates in both directions:
+  - `flip:163` — removal IS observable (`expected -50 to be close to 110`), but it feeds `bindOrUnbindBindingElements` as a HELPER INPUT, not the returned array. Ownership governs how a result is applied and cannot substitute; retiring it needs the helper to take doc-derived input.
+  - `boundText:184`, `distribute:77`, `actionProperties` ×5 (including all `editedTextIds`/`editedArrowIds`-guarded ones), `actionFinalize` ×1 — each removed in turn with the full suite still green.
 
-    - removing the re-read with no ownership declared → the fail-closed boundary THROWS naming `arr.points, arr.y`, rather than silently reverting;
-    - declaring `ALIGN_OVERLAP_POLICY` (geometry → `applied`, same shape and reason as flip's) → green;
-    - inverting to `result` → the arrow keeps its pre-align diagonal (`[[0,0],[188,188]]` instead of the re-routed `[[0,0],[188,0]]`), caught by asserting the arrow is FLAT once both bindables share a `y`.
+  **Why the retained ones are redundant yet not retirable**: under the patch route the derived diff compares the result against the INVOCATION BASE, and the stale entry equals that base — so no key is declared, nothing is written, and the helper's doc value already survives.
 
-    Retired on exactly the stated bar: a test fails when the re-read returns.
+  **OBSERVATION, not a task and not a defect**: ~25 further production `fresh-snapshot` markers (34 in total across 14 files) are a DIFFERENT class — single-element re-reads such as `scene.getElement(x.id)` after a helper write (`Stats/*`, `resizeElements`, `transform`, `binding`). They are helper/consumer inputs, an ownership policy cannot retire them, and no production path or test has demonstrated a stale overwrite through them. Recorded so the count is not mistaken for outstanding work; do not open it as a task without a concrete failing case.
 
-  - **`distribute:77` — coverage gap CLOSED; deliberately NOT retired.** Same reachable shape as align's, and `distributeBoundArrowReread.test.tsx` now has it (three bindables plus an unselected bound arrow). Instrumented: the site IS reached and the live arrow DIFFERS from the stale entry at that moment. But removing the re-read fails nothing and leaves the final arrow byte-identical (`[[0,0],[188,0]]`, `x` 106.00000000000001) — because the action's entry for the unselected arrow equals its INVOCATION BASE, so the derived diff declares no keys for it and the helper's write is already protected.
-
-    So this is coverage, not a retirement: the site moves from unknown to known, and it stays in place because nothing fails when it returns. Retiring it would be exactly the "suite is green, so delete it" reasoning the bar exists to prevent.
-
-  - **`boundText:184` — measured, KEPT, and it establishes the general pattern.** `bindTextReread.test.tsx` covers `actionBindText`. Instrumented across the whole suite, the container's `boundElements` differs between the stale entry and the live doc on **every** reached invocation (`cont:boundElements`, `id0:boundElements`, …) — so the census's "10 semantic" is real, and in fact universal at this site. Yet removing the re-read leaves the full suite green (1612 passed) and this scenario byte-identical.
-
-  - **THE PATTERN, now measured at three sites** (`distribute:77`, `boundText:184`, `boundText:358`): the re-read IS genuinely redundant under the patch route, because the derived diff compares the result against the INVOCATION BASE and the stale entry EQUALS that base — so no key is declared, nothing is written, and the helper's doc value survives. **Redundant is not retirable**: removal is unobservable, which is exactly the state the "a test must discriminate" bar exists to refuse, so these three stay. Only `align:83` and `flip:216` behaved otherwise — there the action's entry had genuinely diverged from its base, removal WAS observable, and both were retired behind an ownership policy.
-
-  - **THE RULE WAS HALF WRONG — corrected by probing, as required.** The hypothesis "entry diverges from base ⇒ retirable; equality ⇒ redundant" was tested on the two remaining candidates:
-
-    - **`props:319` — hypothesis HELD.** Removal leaves the full suite green (1612 passed). Redundant, unobservable, KEPT.
-    - **`flip:163` — hypothesis FALSIFIED.** It has only 2 semantic invocations out of 63, which the rule predicted meant redundant. Removing it FAILS a real test: _"mutliple elements > with bound text flip correctly"_ (`expected -50 to be close to 110`). Frequency predicts nothing.
-
-    And `flip:163` is not even the same KIND of site. Its result feeds `bindOrUnbindBindingElements(flippedElements, …)` — a HELPER INPUT consumed mid-action, not the array returned to `syncActionResult`. An ownership policy governs how the RESULT is applied, so it cannot substitute for this: the problem is a helper computing from stale geometry, and flip's existing geometry policy does not prevent the failure.
-
-  - **The corrected taxonomy**, by what the re-read FEEDS:
-
-    1. **Result array, entry diverges from base** → removal observable → retirable behind an ownership policy. `flip:216`, `align:83` (both done).
-    2. **Result array, entry equals base** → removal unobservable → KEEP. `distribute:77`, `boundText:184`, `boundText:358`, `props:319`.
-    3. **Helper input consumed mid-action** → removal observable, but ownership is the wrong instrument entirely → KEEP until the helper takes doc-derived input. `flip:163`.
-
-  - **TEARDOWN RACE — ATTRIBUTED AND FIXED.** `App` schedules `LocalData.save(...)` on scene change; `LocalData._save` is DEBOUNCED, and its `onFilesSaved` callback guarded with `if (excalidrawAPI)` — a TRUTHINESS check. After unmount the retained API object is still truthy, so the guard passed and the first method call threw "ExcalidrawAPI is no longer usable…" as an UNHANDLED REJECTION that made the runner exit non-zero while every test passed.
-
-    **Ownership was split with nobody closing it**: the timer belongs to `LocalData` (a module-level static), the callback closes over `App`'s `excalidrawAPI`, and `LocalData` exposes only `flushSave()` — which RUNS the pending save — with no cancel. Its three call sites are unload, blur/visibility and beforeunload; **none is a React unmount**.
-
-    **The boundary is `App`'s, not `LocalData`'s.** Persisting after unmount is legitimate — the unload path wants exactly that — but touching the EDITOR must not outlive the editor, and `LocalData` should not know about React lifecycles. Fixed by checking `isDestroyed`, which `componentWillUnmount` deliberately keeps as DATA while replacing every callable member, precisely so a consumer can check before calling.
-
-    Pinned by `localDataUnmountRace.test.tsx`, which captures the callback and invokes it directly rather than driving the real timer — letting the timer fire post-unmount reintroduces the very unhandled rejection under diagnosis, and a test must not do that. Non-vacuous: restoring the truthiness guard fails it with the exact error.
-
-  - **`still loading` FLAKE — DIAGNOSED: worker contention, not state pollution, and NOT a product defect.**
-
-    Instrumented `renderApp`'s `waitFor` and measured all 808 app renders in a full run, then varied worker count on a 10-core machine:
-
-    | workers | p50   | p95   | max    | `still loading`                   |
-    | ------- | ----- | ----- | ------ | --------------------------------- |
-    | default | 62ms  | 237ms | 570ms  | 0                                 |
-    | 16      | 127ms | 434ms | 1093ms | 0                                 |
-    | 32      | 250ms | 792ms | 1273ms | **5** (+4 outright test timeouts) |
-
-    Render latency scales directly with oversubscription, against testing-library's **default 1000ms** `asyncUtilTimeout` (no `asyncUtilTimeout` is configured). At normal parallelism the margin is ~2–4×; oversubscribed, it is gone.
-
-    **Deterministic reproducer**: `npx vitest run --maxWorkers=32 --minWorkers=32`.
-
-    **Cross-file state pollution is RULED OUT.** Under load the failures land on entirely different files each time — the 32-worker run hit `encodedScene adoption` ×2, `selection`, `internal component fallback` and `setActiveTool`, none of them the originally-observed `zindex` / `textWysiwyg` / `fitToContent`. Eight distinct files across runs, arbitrary and load-dependent. Vitest also isolates per file (no `isolate: false`, no pool override).
-
-    **Confirmed unrelated to the LocalData teardown race**, which was a specific timer+callback and is fixed: that error no longer appears in any run, while this persists independently.
-
-    **It does NOT invalidate the T016f negative evidence.** Those probes ran at normal parallelism where the margin holds, and a `still loading` timeout is loud and trivially distinguishable from a semantic assertion failure — the retirement decisions turned on assertions like `expected -50 to be close to 110`, never on a bare absence of failure under load.
-
-    **Deliberately NOT fixed here.** Raising `asyncUtilTimeout` would trade flake for masking genuinely slow renders, and reducing worker count trades it for wall-clock. Both are harness policy decisions with real costs, and the measurement above is what those decisions need — not a unilateral timeout bump.
-
-  - A semantic difference is NOT an observable defect: `boundText:184` and `boundText:358` can each be deleted with the suite still green. Do not retire a site without a test that fails when it returns.
+  **Harness capacity limit** (not a product flake): `npx vitest run --maxWorkers=32 --minWorkers=32` on a 10-core machine deterministically produces `still loading` timeouts. Normal parallelism has ~2–4× margin; `asyncUtilTimeout` and worker defaults are deliberately unchanged.
 
 **Design note (do not lose):** a base→result diff is a sound migration default but is NOT the definition of intent. "Explicitly set a key to the value it already had in base" is invisible to a diff yet must still beat an interleaved remote write — the same asymmetry FR-009 fixed one layer down. Derive for synchronous actions in the interim; the durable contract carries explicit per-id key sets plus membership intent.
 
@@ -381,6 +327,6 @@ Every SC has a gate, recomputed against live tests:
 - **SC-002** → T002, **NOT satisfied**. 36 multiplayer failures remain, measured on current HEAD. Both recorded leads (T014b, T016b) have since LANDED without moving the count, so there is no standing hypothesis; T016c is closed with zero current producers. Causes remain unattributed and must not be batch-fixed.
 - **SC-003** → T030, open: a fresh full adversarial review of HEAD returning zero findings.
 - **SC-004** → typecheck, lint (`--max-warnings=0`) and the suite: currently green at 143 files / 1609 passed, headless 4/4.
-- **SC-005** → T008 (green) + T016f. The re-read family is PARTLY retired: 2 of 36 sites, each proven by a failing production test. Not "all gone" — see the corrected SC-005 in spec.md.
+- **SC-005** → T008 (green) + T016f (DONE). The doc re-read class is fully characterized: 12 sites, 3 retired on a discriminating test, 9 measured and deliberately retained. A raw count was never the metric.
 - **SC-006** → T009, green (both halves; the depth-equality wording is falsified and must not return).
 - **SC-007** → T010, the origin × write-path table.
