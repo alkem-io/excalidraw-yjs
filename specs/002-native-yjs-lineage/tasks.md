@@ -154,8 +154,35 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
 
 - [x] T016a **(done)** `ActionManager` captures a real COPY of the element array at invocation and preserves it alongside the promise (`ActionFn` may be async). A bare reference is not a stable "before" image — `Scene.mutateElement` mutates the passed scratch before re-derivation. **A top-level spread is NOT sufficient**: it leaves nested persisted fields (`points`, `groupIds`, `boundElements`, `roundness`, `scale`, `crop`, `customData`) aliased to the live object, so they mutate underneath the "before" image and diff as unchanged. Copy every persisted field the diff reads, and preserve reconciliation/own-Symbol metadata deliberately — `structuredClone` does not carry symbol-keyed metadata.
 - [x] T016b-i **(diff done)** `computeElementIntent` / `diffElementKeys` in `packages/element/src/yjs/intent.ts` — presence-aware, `Object.hasOwn`, `id` + RECONCILE_META_KEYS excluded, 9 tests incl. a no-op-derives-nothing guard and a non-vacuity proof that a value-only diff misses the transitions. Pure function, wired to nothing yet.
-- [ ] T016b `scene.applyElementChanges(base, result, intent?)`: diff result against the invocation snapshot for added/deleted ids and changed keys, apply only those against the CURRENT doc. Order/index is an ordinary explicit key. `replaceAllElements` stays authoritative and keeps its callers (load/import); a local reset is not among them — it replaces the Scene generation. - **ATOMICITY — a LOGICAL boundary, superseding the earlier "one Yjs transaction" wording, which is FALSE for actions containing additions.** All action-phase work — membership deletions, scoped writes for existing ids, and the reveals — lands in ONE `LOCAL`/`STRUCTURAL` transaction, with metadata for actual writes updated inside it. A creation may additionally have the ONE untracked `STRUCTURAL` prelude (see FR-016: two origins are required because a LOCAL structural add would let `UndoManager` hard-remove the element on undo, and a wholly STRUCTURAL create would not be undoable — Yjs cannot give nested parts of one transaction different origins). The prelude and the action transaction together are ONE explicit logical mutation and ONE broadcast (T016g). Actions with no additions keep the stronger single-transaction path. Compute and validate the whole patch before any write. - **Scope of the derived diff**: it is the INTERIM mechanism for SYNCHRONOUS actions only. See the design note below.
-- [x] T016g **(done — FR-017)** One logical mutation is one transport message. The boundary buffers the exact update bytes Yjs emits while it is open, merges them with `Y.mergeUpdates`, and dispatches once; a no-op buffers nothing and dispatches nothing. Buffering emitted bytes rather than recomputing a delta from a pre-mutation state vector is what keeps deletions — a state vector tracks inserted struct clocks, not delete-set advancement. Boundaries join, so a caller spanning several Scene writes still produces one message.
+- [ ] T016b **(PRODUCER CENSUS DONE — and the base already reaches the boundary)** `scene.applyElementChanges(base, result, intent?)`: diff the result against the invocation snapshot and apply onto CURRENT doc state.
+
+  **The plumbing is already there and is DISCARDED.** `ActionManager.updater` is
+  typed `(actionResult, invocationBase?)` and T016a already made the base survive
+  an `await`. The updater it is constructed with IS `App.syncActionResult` — whose
+  signature takes **one** parameter. So every action already hands its invocation
+  base to the boundary, and the boundary silently drops it. No new plumbing is
+  needed for synchronous actions (the reviewer's point 4): the argument is
+  arriving today.
+
+  **Producer census** (`packages/excalidraw/actions/*`):
+  - 87 `perform:` implementations in total; **8 are async** (outside this slice —
+    T016c/d).
+  - **49 SYNCHRONOUS performs return an `elements` array** through
+    `syncActionResult` → `scene.replaceAllElements(...)`, which is authoritative
+    ("make the doc equal this set"). Exactly 1 async perform returns elements.
+  - **6 action files call the side-effecting helpers** (`redrawTextBoundingBox`,
+    `updateBoundElements`, `bindOrUnbindBindingElements`): `actionAlign`,
+    `actionStyles`, `actionBoundText`, `actionDistribute`, `actionProperties`,
+    `actionFlip`. These are where a helper writes to the doc mid-`perform` and
+    the action then returns an array that may not carry that write.
+
+  **T015 is HELD, not started** — declaring intent sets in those three helpers
+  would create a SECOND unconsumed API, the same trap as the `commitPlan`
+  reservation. The textWysiwyg `+7` proves stale full writes happen; it does not
+  prove helper-declared intents are consumed or sufficient. Whether a derived
+  diff alone suffices must be shown first; only a demonstrated ambiguity would
+  justify explicit helper intents.
+
 - [ ] T016h **Staged order within the application** (not required for CRDT correctness — Yjs observers see only the committed final state — but it makes the invariants auditable): (1) before any write, take the deep snapshot, compute and validate the complete intent, resolve/canonicalize every required fractional index, and assert added/deleted/changed id sets are disjoint; (2) STRUCTURAL prelude materializes still-absent added ids as complete tombstones, in result order; (3) one LOCAL/STRUCTURAL action transaction applies membership deletions and scoped writes for existing ids, then reveals added ids LAST — not needed for correctness inside one transaction, but it preserves the invariant that an element is never live before its complete record exists; (4) metadata for actual writes inside that same transaction; (5) one recompute/notification after.
 - [x] T016i **(already satisfied — verified, not built)** The rule that an id classified "added" against the base but already present in the current doc must NOT be structurally replaced is implemented: `commitPlan` partitions adds into `absent` vs `collided` (`Scene.ts:1004`) and a collided add takes the scoped-write path rather than a `Y.Map` replacement (G7, `Scene.ts:1057`). Covered by `Scene.commitPlan.test.ts:68` ("a collided add is a scoped write"). No collision machinery is needed, and the case is not hypothetical — undo/redo re-adding a previously-known id reaches it, which is why the doc entry already exists as a tombstone rather than being absent.
 - [ ] T016c Point `App.syncActionResult` at the new path. RED first: a test where a remote apply lands mid-action and must survive the result application. **This does NOT make the async path solved** — that test proves preservation of an unrelated remote key, not the same-base explicit-intent case. An async action is only covered once it either carries explicit intent or is audited to return no element changes (T016d). Do not mark the async class closed on the strength of T016c.
