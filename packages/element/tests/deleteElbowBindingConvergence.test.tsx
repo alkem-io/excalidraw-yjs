@@ -1,5 +1,10 @@
+import * as Y from "yjs";
 import { reseed } from "@excalidraw-yjs/common";
-import { bindBindingElement, isElbowArrow } from "@excalidraw-yjs/element";
+import {
+  Scene,
+  bindBindingElement,
+  isElbowArrow,
+} from "@excalidraw-yjs/element";
 
 import { pointFrom } from "@excalidraw-yjs/math";
 
@@ -123,45 +128,48 @@ describe("actionDeleteSelected — elbow-binding branch re-converges (not stale-
     ).toBe(true);
   });
 
-  it("the array handed to replaceAllElements already carries the null start binding (convergence proof)", () => {
+  /**
+   * OBSERVABLE contract, not a mechanism assertion.
+   *
+   * This previously monkey-patched `scene.replaceAllElements` and asserted on
+   * the array handed to it via a `"NOCALL"` sentinel — so it failed under ANY
+   * change to which planner applies the result, even when the product behaviour
+   * was correct. What actually matters is the converged state: the binding is
+   * nulled locally AND at a peer, and it is one undoable step.
+   */
+  it("nulls the elbow binding in the converged state, locally and at a peer", () => {
     const { rect1, arrow } = buildBoundElbow();
 
-    const scene = h.app.scene as unknown as {
-      replaceAllElements: (n: unknown, o?: unknown) => unknown;
-    };
-    const orig = scene.replaceAllElements.bind(scene);
-    let capturedStartBinding: unknown = "NOCALL";
-    scene.replaceAllElements = (nextElements: unknown, opts?: unknown) => {
-      const arr = Array.isArray(nextElements)
-        ? (nextElements as { id: string; startBinding?: unknown }[])
-        : [
-            ...((
-              nextElements as {
-                values?: () => Iterable<{ id: string; startBinding?: unknown }>;
-              }
-            ).values?.() ?? []),
-          ];
-      const a = arr.find((e) => e.id === arrow.id);
-      if (a) {
-        capturedStartBinding = a.startBinding ?? null;
-      }
-      return orig(nextElements, opts);
-    };
+    const peer = new Scene(undefined, { doc: new Y.Doc() });
+    peer.applyRemoteUpdate(h.app.scene.encodeStateAsUpdate());
+    const detach = h.app.scene.onDocUpdate((u) => peer.applyRemoteUpdate(u));
 
-    try {
-      API.setSelectedElements([liveRect(rect1.id)]);
-      act(() => {
-        h.app.actionManager.executeAction(actionDeleteSelected);
-      });
-    } finally {
-      // Always restore the monkeypatch, even if the action throws — otherwise the
-      // patched replaceAllElements leaks into and poisons later tests.
-      scene.replaceAllElements = orig;
-    }
+    // GUARD: the binding really exists first, or "null afterwards" proves nothing.
+    expect(liveArrow(arrow.id).startBinding?.elementId).toBe(rect1.id);
 
-    // Despite the elbow branch's stale return, fixBindingsAfterDeletion re-nulled
-    // the binding on the returned array → the doc write lands as null.
-    expect(capturedStartBinding).toBe(null);
+    const undoBefore = h.history.undoStack.length;
+
+    API.setSelectedElements([liveRect(rect1.id)]);
+    act(() => {
+      h.app.actionManager.executeAction(actionDeleteSelected);
+    });
+    detach();
+
+    // Local converged state.
     expect(liveArrow(arrow.id).startBinding?.elementId ?? null).toBe(null);
+
+    // The peer agrees — the null reached the doc, not just the local derive.
+    const peerArrow = peer
+      .getElementsIncludingDeleted()
+      .find((e) => e.id === arrow.id) as unknown as {
+      startBinding?: { elementId?: string } | null;
+    };
+    expect(peerArrow).toBeDefined();
+    expect(peerArrow.startBinding?.elementId ?? null).toBe(null);
+
+    // One undoable step for one action.
+    expect(h.history.undoStack.length - undoBefore).toBe(1);
+
+    peer.destroy();
   });
 });

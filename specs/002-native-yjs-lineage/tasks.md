@@ -9,7 +9,8 @@
 ## Phase 1 — RED suite (the deterministic gate, authored against HEAD first)
 
 - [x] T001 **(done — Scene-level convergence gate)** `Scene.convergence.property.test.ts`. N-replica property for INV-CONVERGE / INV-NO-RESURRECT over the `Scene` wire path: 4 replicas × 12 rounds × 5 fixed seeds, each round making unexchanged concurrent edits (move / soft-delete / create), then exchanging in a seeded Fisher–Yates order, roughly half as full-state resyncs and half as state-vector deltas. Asserts identical canonical content fingerprints (id/x/y/isDeleted — semantic convergence, NOT Yjs byte equality) and that nothing soft-deleted returns. Per-seed guards reject a vacuous pass: >20 edits, ≥1 full-state resync, non-empty live set. - **Proven sharp**: all 5 seeds fail when the Scene encoder is made to rebuild through a throwaway `Y.Doc` with a fresh `clientID`. - **SC-001 is now satisfied together with T032** (landed): the app's INIT/resync no longer rebuilds — `encodeSyncableSceneAsUpdate` is deleted and `Collab.encodeSceneAsUpdate` encodes the live document. This task covers the Scene wire path; T032's own pins cover the app producer, including the per-property loss a rebuild causes.
-- [ ] T002 **(MEASURED — the failures are recorded; their causes are NOT yet attributed)** Re-enabling `describe.skip("multiplayer undo/redo")` (history.test.tsx:2218) plus the removed `collab.test.tsx` cases. **Measured by un-skipping and reverting: 36 of 37 fail.** - **Measured clusters** (the only established facts): ~24 snapshot mismatches, concentrated in "conflicts in bound text elements and their containers" and "conflicts in arrows and their bindable elements"; ~16 element-shape mismatches; and several history-depth assertions off by one or more (`expected 4 to be 1`, `expected 1 to be 3`). - **Investigation LEADS, not dependencies**: **T014b** (meta version regression) and **T016b/T016c** (intent-scoped result application) are plausible causes given the clusters, but **no failing case has been traced to either**, so neither is recorded as a blocker. Trace one concrete failure to a cause before treating that cause as required work. - **T017 is excluded, not merely untraced**: its premise was falsified — a remote apply already contributes zero to both stacks — so no failure here can originate from it. - Do not fix the 36 as a batch; each cluster needs its own attribution first.
+- [ ] T002 **(MEASURED — the failures are recorded; their causes are NOT yet attributed)** Re-enabling `describe.skip("multiplayer undo/redo")` (history.test.tsx:2218) plus the removed `collab.test.tsx` cases. **Measured by un-skipping and reverting: 36 of 37 fail.** - **Measured clusters** (the only established facts): ~24 snapshot mismatches, concentrated in "conflicts in bound text elements and their containers" and "conflicts in arrows and their bindable elements"; ~16 element-shape mismatches; and several history-depth assertions off by one or more (`expected 4 to be 1`, `expected 1 to be 3`). - **T014b is REMOVED as a lead** — it has since LANDED and the failure count did not move (36 before, 36 after; re-measured on current HEAD). Whatever these failures are, meta-version regression is not it.
+  - **T016b/T016c remain UNVERIFIED leads only** — intent-scoped result application is plausible given the clusters, but **no failing case has been traced to either**, so neither is a blocker. Keep them as leads until ONE concrete T002 failure traces to them. Trace one concrete failure to a cause before treating that cause as required work. - **T017 is excluded, not merely untraced**: its premise was falsified — a remote apply already contributes zero to both stacks — so no failure here can originate from it. - Do not fix the 36 as a batch; each cluster needs its own attribution first.
 
   **RE-MEASURED against current HEAD** (after T014b, T021, T023, T026, T032,
   T016k all landed; block un-skipped, measured, re-skipped):
@@ -478,6 +479,46 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
   gaining an explicit per-id/per-key resolution map (`"result" | "applied"`),
   with `keysById` implying `"result"` for matching overlaps. Not built pending
   the re-attribution above.
+
+  **ROUND-4 — `textWysiwyg` ATTRIBUTED: ordering / index normalization. T016j was
+  RIGHT ALL ALONG.** (Experiment reverted; only the test rewrite kept.)
+
+  The failing assertion is not a value mismatch — `h.elements[1]` is the TEXT
+  where the CONTAINER is expected. Measured at the boundary:
+  ```
+  resultOrder: ["id1@a0", "id6@a1", "id3@a1"]     <- id6 and id3 TIED at a1
+  docOrder:    ["id1@a0", "id3@a1"]
+  FINAL:       ["id1:rectangle@a0", "id3:text@a1", "id6:rectangle@a1"]
+  ```
+  The action's result ARRAY order is correct (`id1, id6, id3` — container before
+  its text), but `syncMovedIndices` minted the new container at the SAME
+  fractional index as the text. Authoritative `replaceAllElements` repairs that
+  tie via `syncInvalidIndices`; `applyElementChanges` deliberately does not
+  (T016j's own comment: format validation only, "NOT neighbour-relative — a
+  relational tie is classified at the caller that knows the intended array
+  order"). Remove the repair and the tie breaks by id, putting the text first.
+
+  **So T016j's original attribution was CORRECT and my "falsified" verdict was
+  wrong — twice over.** The tie is real; it is simply invisible while
+  `replaceAllElements` repairs it. Classification: **ordering / index
+  normalization**, at the CALLER, not membership, not metadata, not suppression.
+
+  **`actionDeleteSelected` test REWRITTEN to an observable contract** (kept). It
+  monkey-patched `scene.replaceAllElements` and asserted on the array handed to
+  it, so it failed under any change of planner even when behaviour was correct.
+  It now pins the converged product state: binding nulled locally AND at a linked
+  peer, plus one undo step, with a guard that the binding existed first. **Passes
+  under BOTH planners** (authoritative today, and under the experiment).
+
+  **NON-VACUITY NOT ESTABLISHED for that rewrite — stated, not glossed.** Three
+  separate sabotages — no-op'ing `fixBindingsAfterDeletion`'s body, disabling the
+  `startBinding` ternary in `actionDeleteSelected`, and deleting the
+  `fixBindingsAfterDeletion` call entirely — ALL left it green. The null is
+  evidently over-determined by several mechanisms. The guard does hold (the
+  binding exists before the action), so it is not vacuous in the "nothing was set
+  up" sense, but no mutation has yet been found that breaks it. It needs a
+  sharper assertion or a narrower sabotage before it can be treated as a
+  regression gate.
 
   **T015 — HOLD LIFTED (see the discriminating experiment above).** It was held
   because helper intent sets risked being a SECOND unconsumed API, and because
