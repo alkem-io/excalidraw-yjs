@@ -177,7 +177,27 @@
 
     Pinned by `localDataUnmountRace.test.tsx`, which captures the callback and invokes it directly rather than driving the real timer — letting the timer fire post-unmount reintroduces the very unhandled rejection under diagnosis, and a test must not do that. Non-vacuous: restoring the truthiness guard fails it with the exact error.
 
-  - **FLAKE LEAD — a SEPARATE symptom, still unattributed.** Intermittent `still loading` render timeouts, now seen in THREE files across separate runs (`zindex`, `textWysiwyg`, `fitToContent`), each passing alone and not recurring on the next full run. **Deliberately NOT folded into the teardown race above**: that one traces to a specific timer and callback, this has no trace yet. An intermittently red runner still undermines every non-vacuity claim sabotage probes make, so it stays a lead worth chasing if it recurs.
+  - **`still loading` FLAKE — DIAGNOSED: worker contention, not state pollution, and NOT a product defect.**
+
+    Instrumented `renderApp`'s `waitFor` and measured all 808 app renders in a full run, then varied worker count on a 10-core machine:
+
+    | workers | p50   | p95   | max    | `still loading`                   |
+    | ------- | ----- | ----- | ------ | --------------------------------- |
+    | default | 62ms  | 237ms | 570ms  | 0                                 |
+    | 16      | 127ms | 434ms | 1093ms | 0                                 |
+    | 32      | 250ms | 792ms | 1273ms | **5** (+4 outright test timeouts) |
+
+    Render latency scales directly with oversubscription, against testing-library's **default 1000ms** `asyncUtilTimeout` (no `asyncUtilTimeout` is configured). At normal parallelism the margin is ~2–4×; oversubscribed, it is gone.
+
+    **Deterministic reproducer**: `npx vitest run --maxWorkers=32 --minWorkers=32`.
+
+    **Cross-file state pollution is RULED OUT.** Under load the failures land on entirely different files each time — the 32-worker run hit `encodedScene adoption` ×2, `selection`, `internal component fallback` and `setActiveTool`, none of them the originally-observed `zindex` / `textWysiwyg` / `fitToContent`. Eight distinct files across runs, arbitrary and load-dependent. Vitest also isolates per file (no `isolate: false`, no pool override).
+
+    **Confirmed unrelated to the LocalData teardown race**, which was a specific timer+callback and is fixed: that error no longer appears in any run, while this persists independently.
+
+    **It does NOT invalidate the T016f negative evidence.** Those probes ran at normal parallelism where the margin holds, and a `still loading` timeout is loud and trivially distinguishable from a semantic assertion failure — the retirement decisions turned on assertions like `expected -50 to be close to 110`, never on a bare absence of failure under load.
+
+    **Deliberately NOT fixed here.** Raising `asyncUtilTimeout` would trade flake for masking genuinely slow renders, and reducing worker count trades it for wall-clock. Both are harness policy decisions with real costs, and the measurement above is what those decisions need — not a unilateral timeout bump.
 
   - A semantic difference is NOT an observable defect: `boundText:184` and `boundText:358` can each be deleted with the suite still green. Do not retire a site without a test that fails when it returns.
 
