@@ -1,8 +1,16 @@
 diff --git a/packages/element/src/Scene.ts b/packages/element/src/Scene.ts
-index 7b51c8af..c13a949a 100644
+index 7b51c8af..c7dc14e8 100644
 --- a/packages/element/src/Scene.ts
 +++ b/packages/element/src/Scene.ts
-@@ -496,6 +496,22 @@ export class Scene {
+@@ -57,6 +57,7 @@ import {
+   yMapToElement,
+   writeChangedKeys,
+   computeElementIntent,
++  isIntentKey,
+   assertIntentAgainstResult,
+   writeAssetLocators,
+   readAssetLocators,
+@@ -496,6 +497,22 @@ export class Scene {
    /** Depth of open logical mutations; only the outermost close publishes. */
    private logicalDepth = 0;
  
@@ -25,7 +33,7 @@ index 7b51c8af..c13a949a 100644
    private logicalBuffer: { v1: Uint8Array[]; v2: Uint8Array[] } | null = null;
  
    private internalDocHandlers: Array<[string, (...a: never[]) => void]> = [];
-@@ -905,6 +921,19 @@ export class Scene {
+@@ -905,6 +922,19 @@ export class Scene {
      result: readonly ElementRecord[],
      options: {
        declaredIntent?: DeclaredElementIntent;
@@ -45,7 +53,7 @@ index 7b51c8af..c13a949a 100644
        recordHistory?: boolean;
      } = {},
    ): { changedIds: ReadonlySet<string> } {
-@@ -913,8 +942,21 @@ export class Scene {
+@@ -913,8 +943,21 @@ export class Scene {
        resultById.set(r.id as string, r);
      }
  
@@ -69,7 +77,7 @@ index 7b51c8af..c13a949a 100644
      assertIntentAgainstResult(declared, resultById);
  
      // T016j — validate ONLY the records this mutation affects: creations, and
-@@ -1165,6 +1207,52 @@ export class Scene {
+@@ -1165,6 +1208,56 @@ export class Scene {
     * Deliberately narrow — the editor's action layer is the only caller. This is
     * not a general mode; see {@link openLogicalMutation} for the join rule.
     */
@@ -106,7 +114,11 @@ index 7b51c8af..c13a949a 100644
 +   */
 +  endActionMutationJournal(): void {
 +    if (this.mutationJournalDepth === 0) {
-+      return;
++      // Loud, not lenient: a no-op would hide caller imbalance rather than make
++      // stale reuse impossible, and the imbalance is the actual bug.
++      throw new Error(
++        "Scene: endActionMutationJournal() without a matching beginActionMutationJournal().",
++      );
 +    }
 +    this.mutationJournalDepth--;
 +    if (this.mutationJournalDepth === 0) {
@@ -122,7 +134,7 @@ index 7b51c8af..c13a949a 100644
    beginLogicalMutation(): void {
      this.openLogicalMutation();
    }
-@@ -2213,6 +2301,18 @@ export class Scene {
+@@ -2213,6 +2306,23 @@ export class Scene {
        isDragging: false,
      },
    ): TElement {
@@ -134,8 +146,13 @@ index 7b51c8af..c13a949a 100644
 +        this.mutationJournal.set(id, keys);
 +      }
 +      // Declared, not effective: recorded even if the value already matches.
++      // Filtered through the SAME selector intent derivation uses, so passing a
++      // broad element object as `updates` cannot turn `id` or reconciliation
++      // metadata into action ownership.
 +      for (const key of Object.keys(updates)) {
-+        keys.add(key);
++        if (isIntentKey(key)) {
++          keys.add(key);
++        }
 +      }
 +    }
      const elementsMap = this.getNonDeletedElementsMap();
@@ -143,10 +160,10 @@ index 7b51c8af..c13a949a 100644
      const { version: prevVersion } = element;
 diff --git a/packages/element/src/__tests__/Scene.mutationJournal.test.ts b/packages/element/src/__tests__/Scene.mutationJournal.test.ts
 new file mode 100644
-index 00000000..f864f2fc
+index 00000000..f5659358
 --- /dev/null
 +++ b/packages/element/src/__tests__/Scene.mutationJournal.test.ts
-@@ -0,0 +1,176 @@
+@@ -0,0 +1,230 @@
 +import { Scene } from "../Scene";
 +import { newElement } from "../newElement";
 +
@@ -193,6 +210,60 @@ index 00000000..f864f2fc
 +      ) ?? []),
 +    ]).toContain("x");
 +    scene.endActionMutationJournal();
++  });
++
++  it("THROWS on a close without an open", () => {
++    const scene = new Scene();
++    // Loud, not lenient: a no-op would hide caller imbalance, which is the bug.
++    expect(() => scene.endActionMutationJournal()).toThrow(
++      /without a matching beginActionMutationJournal/,
++    );
++  });
++
++  it("a throw mid-action still clears the journal for the NEXT action", () => {
++    const scene = new Scene();
++    scene.replaceAllElements([rect("a")]);
++
++    expect(() => {
++      scene.beginActionMutationJournal();
++      try {
++        scene.mutateElement(
++          scene.getElement("a" as never)! as never,
++          {
++            x: 1,
++          } as never,
++        );
++        throw new Error("action blew up");
++      } finally {
++        scene.endActionMutationJournal();
++      }
++    }).toThrow("action blew up");
++
++    // No stale declarations survive into the next action.
++    expect(scene.getActionMutationJournal().size).toBe(0);
++  });
++
++  it("records only the PERSISTED key domain — never id or reconciliation metadata", () => {
++    const scene = new Scene();
++    scene.replaceAllElements([rect("a", { x: 1 })]);
++    const live = scene.getElement("a" as never)!;
++
++    scene.beginActionMutationJournal();
++    // A broad element object passed as `updates` must not turn `id`/`version`/
++    // `versionNonce`/`updated` into action ownership.
++    scene.mutateElement(live as never, { ...live, x: 2 } as never);
++    const keys = [
++      ...((scene.getActionMutationJournal() as Map<string, Set<string>>).get(
++        "a",
++      ) ?? []),
++    ];
++    scene.endActionMutationJournal();
++
++    expect(keys).toContain("x");
++    expect(keys).not.toContain("id");
++    expect(keys).not.toContain("version");
++    expect(keys).not.toContain("versionNonce");
++    expect(keys).not.toContain("updated");
 +  });
 +
 +  it("is empty when no scope is open, and is cleared at end", () => {
@@ -323,6 +394,92 @@ index 00000000..f864f2fc
 +    expect(scene.getElement("a")!.x).toBe(50);
 +  });
 +});
+diff --git a/packages/element/src/yjs/intent.ts b/packages/element/src/yjs/intent.ts
+index ec786038..271037a4 100644
+--- a/packages/element/src/yjs/intent.ts
++++ b/packages/element/src/yjs/intent.ts
+@@ -42,7 +42,13 @@ export type DeclaredElementIntent = {
+   readonly keysById: ReadonlyMap<string, ReadonlySet<string>>;
+ };
+ 
+-const isIntentKey = (key: string): boolean =>
++/**
++ * The persisted-key domain shared by intent derivation and the action mutation
++ * journal: never `id`, never reconciliation metadata. Exported so the journal
++ * reuses THIS selector rather than maintaining a second exclusion list that
++ * could drift from it.
++ */
++export const isIntentKey = (key: string): boolean =>
+   key !== "id" && !RECONCILE_META_KEYS.has(key);
+ 
+ /**
+diff --git a/packages/element/tests/linearElementEditor.test.tsx b/packages/element/tests/linearElementEditor.test.tsx
+index 57ac84fa..9b1dd514 100644
+--- a/packages/element/tests/linearElementEditor.test.tsx
++++ b/packages/element/tests/linearElementEditor.test.tsx
+@@ -388,7 +388,7 @@ describe("Test Linear Elements", () => {
+       expect(renderInteractiveScene.mock.calls.length).toMatchInlineSnapshot(
+         `12`,
+       );
+-      expect(renderStaticScene.mock.calls.length).toMatchInlineSnapshot(`7`);
++      expect(renderStaticScene.mock.calls.length).toMatchInlineSnapshot(`6`);
+ 
+       expect(line.points.length).toEqual(3);
+       expect(line.points).toMatchInlineSnapshot(`
+@@ -564,7 +564,7 @@ describe("Test Linear Elements", () => {
+         expect(renderInteractiveScene.mock.calls.length).toMatchInlineSnapshot(
+           `15`,
+         );
+-        expect(renderStaticScene.mock.calls.length).toMatchInlineSnapshot(`9`);
++        expect(renderStaticScene.mock.calls.length).toMatchInlineSnapshot(`7`);
+ 
+         expect(line.points.length).toEqual(5);
+ 
+@@ -615,7 +615,7 @@ describe("Test Linear Elements", () => {
+         expect(renderInteractiveScene.mock.calls.length).toMatchInlineSnapshot(
+           `12`,
+         );
+-        expect(renderStaticScene.mock.calls.length).toMatchInlineSnapshot(`7`);
++        expect(renderStaticScene.mock.calls.length).toMatchInlineSnapshot(`6`);
+ 
+         line = h.elements.find(
+           (e) => e.id === line.id,
+@@ -660,7 +660,7 @@ describe("Test Linear Elements", () => {
+         expect(renderInteractiveScene.mock.calls.length).toMatchInlineSnapshot(
+           `12`,
+         );
+-        expect(renderStaticScene.mock.calls.length).toMatchInlineSnapshot(`7`);
++        expect(renderStaticScene.mock.calls.length).toMatchInlineSnapshot(`6`);
+ 
+         line = h.elements.find(
+           (e) => e.id === line.id,
+@@ -714,7 +714,7 @@ describe("Test Linear Elements", () => {
+         expect(renderInteractiveScene.mock.calls.length).toMatchInlineSnapshot(
+           `18`,
+         );
+-        expect(renderStaticScene.mock.calls.length).toMatchInlineSnapshot(`10`);
++        expect(renderStaticScene.mock.calls.length).toMatchInlineSnapshot(`7`);
+ 
+         const newMidPoints = LinearElementEditor.getEditorMidPoints(
+           liveLine(),
+@@ -778,7 +778,7 @@ describe("Test Linear Elements", () => {
+         expect(renderInteractiveScene.mock.calls.length).toMatchInlineSnapshot(
+           `15`,
+         );
+-        expect(renderStaticScene.mock.calls.length).toMatchInlineSnapshot(`9`);
++        expect(renderStaticScene.mock.calls.length).toMatchInlineSnapshot(`7`);
+         expect(line.points.length).toEqual(5);
+ 
+         expect((h.elements[0] as ExcalidrawLinearElement).points)
+@@ -880,7 +880,7 @@ describe("Test Linear Elements", () => {
+         expect(renderInteractiveScene.mock.calls.length).toMatchInlineSnapshot(
+           `12`,
+         );
+-        expect(renderStaticScene.mock.calls.length).toMatchInlineSnapshot(`7`);
++        expect(renderStaticScene.mock.calls.length).toMatchInlineSnapshot(`6`);
+ 
+         line = h.elements.find(
+           (e) => e.id === line.id,
 diff --git a/packages/excalidraw/actions/actionFlip.ts b/packages/excalidraw/actions/actionFlip.ts
 index fbf2af52..e0339479 100644
 --- a/packages/excalidraw/actions/actionFlip.ts

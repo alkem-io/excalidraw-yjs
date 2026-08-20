@@ -360,6 +360,60 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
   lands, so the one async element-returning `perform` gets no journal — **T016c
   remains open**.
 
+  **ROUND-2 ON THE JOURNAL — two corrections applied, both semantic failures
+  attributed, and they share ONE cause.** (Reverted again; suite is NOT green, so
+  landing is not justified.)
+
+  **Correction 1 — `endActionMutationJournal` now THROWS on imbalance**, matching
+  the transport boundary rather than silently no-op'ing. A no-op hides caller
+  imbalance instead of preventing stale reuse. Pinned: close-without-open throws,
+  and a throw MID-action still clears before the next action.
+
+  **Correction 2 — the journal reuses the EXISTING persisted-key selector.** It
+  recorded raw `Object.keys(updates)`, so passing a broad element object could
+  have made `id` / `version` / `versionNonce` / `updated` into action ownership.
+  It now filters through **`isIntentKey`** (`packages/element/src/yjs/intent.ts`
+  — `key !== "id" && !RECONCILE_META_KEYS.has(key)`), the same selector intent
+  derivation uses, exported rather than duplicated so the two cannot drift.
+  Pinned directly.
+
+  **Snapshot classification — ALL 15 are reconciliation metadata only.** Across
+  3 files: 6 `"version"` + 4 `"versionNonce"`. **Zero** `hasElementChange`, zero
+  geometry/binding/content, zero membership/order. Accepting them leaves exactly
+  **2 failures**.
+
+  **Both semantic failures attributed — SAME cause, and it is none of (a)-(d) as
+  offered: it is OVER-SUPPRESSION.**
+  ```
+  actionDeleteSelected  derived id2:startBinding      journal id2:endBinding+startBinding
+  textWysiwyg wrap      derived id3:containerId+textAlign+verticalAlign
+                        journal id3:angle+autoResize+boundElements+containerId+
+                                height+text+textAlign+verticalAlign+width+x+y
+  ```
+  In BOTH, every key the action derived is also in the journal, so every one is
+  suppressed and the action's contribution is dropped entirely. Neither action
+  declares an explicit intent (`explicit: false`).
+
+  **What this means for the design.** The journal's rule is "a helper touched
+  this key, so the helper's doc value wins". That is RIGHT for flip — the
+  action's value there was computed from a stale base. It is WRONG here — the
+  helper wrote an intermediate value and the ACTION's derived value is the
+  intended final one. A derived diff cannot tell those apart in EITHER direction,
+  which is the same limit that killed plain derived intent, now showing from the
+  other side.
+
+  So the explicit `declaredIntent` channel is not an optional escape hatch — it
+  is **required per action** wherever an action must override a helper it
+  invoked. That is per-action ownership work (T015's real shape), not something
+  the journal can infer. **Not special-cased here**, per instruction.
+
+  **Still verified after the corrections**: both flip REDs green, both journal
+  non-vacuity probes fire, ONE transport update, local/peer converged, undo +1.
+
+  **T016c REMAINS OPEN.** The single async element-returning `perform` gets no
+  journal, because `ActionManager` closes its boundary before the promise
+  resolves.
+
   **T015 — HOLD LIFTED (see the discriminating experiment above).** It was held
   because helper intent sets risked being a SECOND unconsumed API, and because
   the textWysiwyg `+7` proved only that stale full writes happen, not that
