@@ -436,6 +436,49 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
   journal, because `ActionManager` closes its boundary before the promise
   resolves.
 
+  **ROUND-3 — INSTRUMENTING FIRST OVERTURNED MY OWN ATTRIBUTION.** (Reverted.)
+
+  Measured the AMBIGUOUS OVERLAP properly — keys in BOTH the derived diff and the
+  journal **whose canonical result value differs from the CURRENT doc value**
+  (a same-valued overlap is not a conflict). Complete measured set across the
+  whole suite:
+  ```
+  flip / re-center:  arr.x, rec1.x, rec2.x, and .x/.y on 12 further ids
+  (journal unit test): a.x
+  ```
+  **`textWysiwyg` and `actionDeleteSelected` produce NO ambiguous overlap at
+  all.**
+
+  **So the round-2 "over-suppression" attribution was WRONG.** If the result value
+  equals the doc value, suppressing that key changes nothing and cannot be the
+  cause. Verified directly: with journal subtraction DISABLED, **both still
+  fail** — so both are caused by the ROUTING (`applyElementChanges` replacing
+  `replaceAllElements`), not by the journal. Instrumenting rather than reasoning
+  from the abbreviated examples is what caught this.
+
+  **`actionDeleteSelected` is category (d) — a wrong test assumption.** The test
+  monkey-patches `scene.replaceAllElements` and asserts on the array handed to
+  it (`'NOCALL'` sentinel). Under the routing that function is not called, so the
+  spy never fires. It asserts the MECHANISM, not the observable outcome, and
+  would break under any change to that boundary. Not evidence of a defect;
+  it needs rewriting against the outcome.
+
+  **`textWysiwyg` container-wrap remains unattributed** — it is a routing
+  consequence, not journal suppression, and needs its own trace.
+
+  **Design consequence for the conflict selector**: the ambiguous set is far
+  narrower than assumed — only flip-family geometry keys. So the
+  "resolve every conflict explicitly, fail closed" rule has a small, concrete
+  domain rather than an open-ended one.
+
+  **On extending the existing API rather than adding a second**: a positive
+  `keysById` alone CANNOT express "every conflict explicitly decided", because
+  omission would silently mean "helper wins" — precisely the omission default
+  that must not exist. The minimal single-API shape is `DeclaredElementIntent`
+  gaining an explicit per-id/per-key resolution map (`"result" | "applied"`),
+  with `keysById` implying `"result"` for matching overlaps. Not built pending
+  the re-attribution above.
+
   **T015 — HOLD LIFTED (see the discriminating experiment above).** It was held
   because helper intent sets risked being a SECOND unconsumed API, and because
   the textWysiwyg `+7` proved only that stale full writes happen, not that
