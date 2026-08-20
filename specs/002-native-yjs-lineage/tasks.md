@@ -4,18 +4,20 @@
 
 **Strategy** (plan §Migration): suite-first (author each invariant RED against current HEAD, proving non-vacuity), single-owner (one author holds the lineage seam — no parallel-agent edge edits), edge-by-edge (each FR keeps the whole suite + typecheck + lint green before the next). Land on `split/native-yjs-core`, superseding the throwaway-detour code (commit `96f9bce3`, retained as the RED baseline).
 
-**LANE STATUS (2026-08-20).** Every task still shown open is open for a reason outside this repo, not for want of work here:
+**LANE STATUS (2026-08-20).** **T030 is the only open task**, and it is paused by design rather than blocked on anything in this repo:
 
-| task | why it is still open |
+| task | state |
 | --- | --- |
 | T011 | CLOSED — both halves done |
-| T023 | fork side complete; `client-web` / `server` migration is the consumer lane. Packaging contract DECIDED — Route A, see `audit-one-artifact-feasibility.md`: one direct package per consumer (client → umbrella, server → slim `element`), same build identifier, five internals are transitives. One manifest cleanup is prepared and HELD until the client slice lands. |
+| T023 | CLOSED — consumer lane landed and verified. Contract is Route A (`audit-one-artifact-feasibility.md`): one direct package per consumer — client → umbrella, server → slim `element` — at the same build identifier, five internals as transitives. |
 | T027 | CLOSED — truncation has no shipped producer; nothing owed |
-| T030 | paused by design until the consumer + ingress work lands, then run fresh |
+| T030 | PAUSED by design — waiting only on collab-unification's clean-close corrective, then run fresh on complete HEAD |
 
 T002 is closed by replacement, not repair — see its entry before reading its "36 failures" as debt. T027 is closed by _unreachability_: the truncation class it measured has no shipped producer, so the measurements are evidence and not an open gate.
 
-T030's precondition is now specifically collab-unification's clean-1000 corrective; once that lands the full cross-repo state is ready for the final review.
+T030's precondition is now specifically collab-unification's clean-close corrective; once that lands the full cross-repo state is ready for the final review.
+
+**One manifest cleanup is prepared and waiting on a decision, not on work** (`audit-one-artifact-feasibility.md`): moving `sass` out of runtime `dependencies` and deleting the duplicate `cross-env` entry. It was held until the client slice landed — that condition is now MET — but applying it produces a new build identifier that **both** consumers would have to adopt, days after they just standardised on `2af664c`. It is worth batching with the next change that forces a re-pin rather than spending a migration on a non-functional cleanup.
 
 **Revised order (2026-08-19): the write path comes BEFORE the wire.** The reordering was originally argued from the 34 re-enabled `multiplayer undo/redo` tests gating FR-009/010/011 rather than FR-001. **That premise is withdrawn (T002 — the block never exercised a second replica and is now deleted)**, but the order it produced is right for an independent reason that survives: the write path is where lineage is destroyed, so INV-CONVERGE cannot go green while every local write clobbers it. Fixing the write path first also deletes 32 bandaid sites, shrinking what every later phase must keep green.
 
@@ -296,7 +298,7 @@ T030's precondition is now specifically collab-unification's clean-1000 correcti
 ## Phase 7 — Origin policy + binaries off the wire (FR-012, FR-013)
 
 - [x] T022 **(done)** The origin→wire policy has exactly ONE implementation, in `Scene.onDocUpdate`. No shared lookup table: with a single call site it would be indirection, not deduplication. Pairing a structural tombstone with its reveal is the logical-mutation boundary's job, not the origin table's. **Closed**: INV-ORIGIN's table-driven suite is `Scene.originPolicyTable.test.ts` (T029). Note it is a table-driven TEST, not the runtime lookup table this task rejected.
-- [ ] T023 **(FORK SIDE COMPLETE — every remaining item is in the consumer lane)** The collaborative document carries `fileId -> opaque locator`; image bytes are out-of-band.
+- [x] T023 **(CLOSED — fork side and consumer lane both landed)** The collaborative document carries `fileId -> opaque locator`; image bytes are out-of-band.
 
   **The contract, stated directly.** The document stores an opaque host-owned locator string per image and never bytes. Core stores it, round-trips it and garbage-collects it, and never parses it — no URL semantics, no bucket or entity identifiers interpreted. Bytes live in the editor's local cache and in the host's store, moved by the `AssetAdapter`: `store(file) -> locator`, `resolve(fileId, locator) -> BinaryFileData`.
 
@@ -305,6 +307,15 @@ T030's precondition is now specifically collab-unification's clean-1000 correcti
   **Live blocker — ONE, outside this repo**: `client-web` must supply an `AssetAdapter` and delete its `dataURL`-on-upload-failure fallback (`useWhiteboardFilesManager.getUploadedFiles`, which on upload failure keeps the file with its `dataURL` so peers "receive the dataURL directly"). That fallback writes bytes into a document that rejects them.
 
   **No protocol/version gate is required.** The byte-carrying document shape was never shipped, so there is no mixed population, no stale client and no compatibility boundary to negotiate. No `documentSchemaVersion`, no join payload field, no rejection path.
+
+  **CLOSED 2026-08-20 — consumer lane landed, and verified here rather than taken on report.** The collab-assists session inspected the migration; I checked the four things that would show it was incomplete, by reading the sibling repos directly:
+
+  - **`client-web` holds exactly ONE `@excalidraw-yjs/*` pin** — the umbrella at `2af664c` — and **zero** `@excalidraw-yjs/element` imports remain in `src`.
+  - **`useWhiteboardFilesManager.ts` is gone**, and no `getUploadedFiles` reference survives anywhere in `src`. That was the `dataURL`-on-upload-failure fallback, the one live blocker this task named: bytes can no longer be smuggled into a document that rejects them.
+  - **`server` holds exactly ONE pin** — the slim `element` at `2af664c` — and imports `@excalidraw-yjs/element/headless`.
+  - **Both consumers are on the SAME build identifier**, which was the whole point of Route A.
+
+  Reported by that session and not re-verified here: the asset store → document-id locator, `resolve` → `lookup.document` → bytes, and flush gating on save / close / template merge (`efd44a2a1`, `72686d930`, `da58927e2`, `d939e32d9`).
 
   **FORK SIDE CLOSED (2026-08-20).** Two things the consumer needed did not exist and now do; neither was in the original task text, both came out of consumer-side audits:
 
