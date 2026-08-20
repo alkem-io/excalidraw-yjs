@@ -80,7 +80,7 @@ So the corrective is a swap back to a path that is measured working, not a hopef
 
 **`sass` and `cross-env` are declared as runtime `dependencies` of the umbrella** and are build-time tools. Every consumer installs them (~5 MB, 2 packages) for nothing.
 
-**Prepared, verified, then reverted and HELD** — deliberately not landed, because it would churn the `@2af664c` pin the client migration is testing against, for a change with no functional effect. Apply once that slice lands. What was already checked, so it need not be rechecked:
+**Prepared, verified, reverted — and DEFERRED BY DECISION (2026-08-20).** The original reason not to land it was that it would churn the `@2af664c` pin the client migration was testing against. That migration has since landed, and the deferral stands for a stronger reason: publishing solely for this would mint a new identifier **both** consumers must adopt, for a change with no functional effect. **Batch it into the next functional build that already forces a re-pin.** What was already checked, so it need not be rechecked:
 
 - `sass@1.51.0` moves `dependencies` → `devDependencies`. Its only consumer is `esbuild-sass-plugin`, which is _already_ a devDependency, and the published package ships compiled CSS (`dist/prod/index.css`, 180 KB) so no consumer ever compiles `.scss`.
 - `cross-env@7.0.3` is simply **declared twice** — once in `dependencies`, once in `devDependencies`, same version. Delete the runtime entry; nothing needs adding.
