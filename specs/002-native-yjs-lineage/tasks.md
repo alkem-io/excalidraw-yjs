@@ -260,12 +260,60 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
   **The kept n=3 order pin does NOT pin the re-read or any T016b mechanism** — it
   passes with and without them. It is a product z-order regression gate only.
 
-  **T015 is HELD, not started** — declaring intent sets in those three helpers
-  would create a SECOND unconsumed API, the same trap as the `commitPlan`
-  reservation. The textWysiwyg `+7` proves stale full writes happen; it does not
-  prove helper-declared intents are consumed or sufficient. Whether a derived
-  diff alone suffices must be shown first; only a demonstrated ambiguity would
-  justify explicit helper intents.
+  **THE DISCRIMINATING EXPERIMENT — derived intent is NOT SUFFICIENT. T015 is
+  REQUIRED.** (Experiment reverted; tree clean at 1589.)
+
+  Ran exactly the specified shape: removed only `flip:216`'s whole-object
+  re-read, and routed `ActionResult`s carrying an `invocationBase` through
+  `scene.applyElementChanges(base, result)`.
+
+  **Wiring**: `withBatchedUpdates` only wraps a 0/1-arg function, so
+  `syncActionResult` became a thin 2-arg wrapper delegating to a batched body
+  that takes `{ actionResult, invocationBase }`. Callers without a base keep the
+  authoritative `replaceAllElements`.
+
+  **Result — it fixed ONE of the two REDs and left the other:**
+  - *"with bound text flip correctly"* → **GREEN**. Its staleness is in keys the
+    action never touched, so the diff leaves the doc's values alone.
+  - *"elbow arrow touches group selection side…"* → **STILL RED**
+    (`expected 101.697 to be close to 100`).
+
+  **Why, from the per-id/per-key sets at the apply:**
+  ```
+  rec1  keys=["x"]  base.x=179.643  result.x=101.697  current.x=101.498
+                    base.y=101.076  result.y=101.076  current.y=101
+  ```
+  The `y` case works exactly as intended: base and result agree, so `y` is NOT
+  declared, and the doc's own `101` survives untouched. **`x` is the problem —
+  the action AND the helper both wrote it.** The action's `x` was computed from a
+  now-stale base (179.643) while the helper had already written the correct
+  101.498 to the doc; the declared diff names `x` and overwrites it.
+
+  **This is the answer to the question the experiment was built to settle**: a
+  derived base→result diff CANNOT distinguish "the action owns this key" from
+  "a side-effecting helper owns this key" when both touch the SAME key. Only
+  explicit ownership can — so **T015 (helper-declared intent) is required, and
+  its earlier HOLD is lifted**: it is no longer a speculative unconsumed API, it
+  is the missing input this mechanism needs.
+
+  **Full-suite impact of the experiment**: 18 failures — 15 snapshot, 3 semantic
+  (the elbow-arrow case above, `textWysiwyg` container-wrap, and
+  `actionDeleteSelected`'s elbow-binding branch). All 18 are introduced by the
+  experiment; the baseline is clean.
+
+  **Async class NOT closed**: the census's single async element-returning
+  `perform` is unaffected here because this routing is origin-agnostic — it uses
+  whatever base the updater supplies, and T016a already carries that across the
+  `await`. Passing unrelated-key preservation says nothing about same-key
+  ownership for async results; that remains T016c.
+
+  **T015 — HOLD LIFTED (see the discriminating experiment above).** It was held
+  because helper intent sets risked being a SECOND unconsumed API, and because
+  the textWysiwyg `+7` proved only that stale full writes happen, not that
+  helper-declared intents were needed. The experiment has now demonstrated the
+  ambiguity that was required to justify them: when an action and a helper write
+  the SAME key, a derived diff prefers the action's stale value over the helper's
+  correct one. Explicit ownership is the only thing that can resolve it.
 
 - [ ] T016h **Staged order within the application** (not required for CRDT correctness — Yjs observers see only the committed final state — but it makes the invariants auditable): (1) before any write, take the deep snapshot, compute and validate the complete intent, resolve/canonicalize every required fractional index, and assert added/deleted/changed id sets are disjoint; (2) STRUCTURAL prelude materializes still-absent added ids as complete tombstones, in result order; (3) one LOCAL/STRUCTURAL action transaction applies membership deletions and scoped writes for existing ids, then reveals added ids LAST — not needed for correctness inside one transaction, but it preserves the invariant that an element is never live before its complete record exists; (4) metadata for actual writes inside that same transaction; (5) one recompute/notification after.
 - [x] T016i **(already satisfied — verified, not built)** The rule that an id classified "added" against the base but already present in the current doc must NOT be structurally replaced is implemented: `commitPlan` partitions adds into `absent` vs `collided` (`Scene.ts:1004`) and a collided add takes the scoped-write path rather than a `Y.Map` replacement (G7, `Scene.ts:1057`). Covered by `Scene.commitPlan.test.ts:68` ("a collided add is a scoped write"). No collision machinery is needed, and the case is not hypothetical — undo/redo re-adding a previously-known id reaches it, which is why the doc entry already exists as a tombstone rather than being absent.
