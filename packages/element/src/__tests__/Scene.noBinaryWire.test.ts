@@ -227,4 +227,27 @@ describe("INV-NO-BINARY-WIRE", () => {
     a.destroy();
     probe.destroy();
   });
+
+  it("a poisoned root cannot be FULL-STATE encoded, but a delta still can", () => {
+    const victim = new Scene();
+    victim.replaceAllElements([mk("a")]);
+    const clean = victim.encodeStateVector();
+
+    const hostile = new Y.Doc();
+    hostile.transact(() => {
+      hostile.getMap("files").set("f1", "data:image/png;base64,AAAA");
+    });
+    victim.applyRemoteUpdate(Y.encodeStateAsUpdate(hostile));
+
+    // a checkpoint / INIT seed / resync refuses
+    expect(() => victim.encodeStateAsUpdate()).toThrow(/data URL/);
+    expect(() => victim.encodeStateAsUpdate("v2")).toThrow(/data URL/);
+
+    // an incremental delta is not gated — it carries only what a peer lacks,
+    // and gating it would put the cost on the hot path for no added protection.
+    expect(() => victim.encodeStateAsUpdate("v1", clean)).not.toThrow();
+
+    victim.destroy();
+    hostile.destroy();
+  });
 });

@@ -184,6 +184,49 @@ describe("assetAdapter", () => {
     peer.destroy();
   });
 
+  it("a locator changing mid-resolve still ends with bytes cached", async () => {
+    // The stale result is discarded, so something must re-trigger the fetch or
+    // the cache is left permanently empty. Asserted on the FINAL CACHE, not on
+    // a second resolve call — the call is a means, the bytes are the contract.
+    const seen: string[] = [];
+    const gate: { release?: () => void } = {};
+    const adapter: AssetAdapter = {
+      store: async (f) => `asset://${f.id}`,
+      resolve: async (fileId, loc) => {
+        seen.push(loc);
+        if (loc === "asset://old") {
+          await new Promise<void>((r) => {
+            gate.release = r;
+          });
+        }
+        return file(fileId);
+      },
+    };
+    await render(<Excalidraw assetAdapter={adapter} />);
+
+    const peer = new Scene(undefined, { doc: new Y.Doc() });
+    peer.applyRemoteUpdate(h.app.encodeSceneAsUpdate());
+    peer.setAssetLocators({ f1: "asset://old" });
+    act(() => {
+      h.app.applyRemoteSceneUpdate(peer.encodeStateAsUpdate());
+    });
+    await flush();
+
+    // the asset MOVED — same content, new locator — while the fetch was pending
+    peer.setAssetLocators({ f1: "asset://new" });
+    act(() => {
+      h.app.applyRemoteSceneUpdate(peer.encodeStateAsUpdate());
+    });
+    gate.release?.();
+    await flush();
+    await flush();
+
+    expect(seen).toContain("asset://old");
+    expect(seen).toContain("asset://new"); // it did re-trigger
+    expect(h.app.files.f1).toBeDefined(); // ...and the cache ended up filled
+    peer.destroy();
+  });
+
   // SKIPPED — a real gap, recorded rather than hacked around. A cold load
   // returns the stored scene's asset references, but the app's initialize path
   // discards them and the fresh Scene generation never receives them, so the

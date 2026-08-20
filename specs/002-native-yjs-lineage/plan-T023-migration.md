@@ -45,6 +45,29 @@ Most `BinaryFiles` usage in this repo is local cache, render and export plumbing
 3. server builds the clone against the reference view, then bumps.
 4. Only then T025b + T032 (wire lineage) and T021/T004 (persistence lineage), against the settled shape.
 
+## Ingress trust: scoped to protocol-compliant clients (ruling)
+
+Per-update scratch-doc preflight is **rejected**: it is O(document) on the hot path, validates one schema surface unless generalized, and conflicts with the deliberately content-agnostic server boundary.
+
+The invariant is therefore scoped, and this is not a security claim against a client that manufactures arbitrary Yjs:
+
+- supported writers emit only validated, bounded locators;
+- readers and converters fail loud on a malformed asset root;
+- a client's FULL-STATE egress refuses a poisoned root, so an injection cannot become permanent via a checkpoint or resync.
+
+Recovery from an already-integrated malformed update is **not** this: a poisoned generation cannot checkpoint or resync and must be discarded, which is T027's discard-and-resync behaviour. `assertAssetRootValid` prevents; it does not repair.
+
+## Protocol-version gate (REQUIRED before any consumer bump)
+
+Egress validation alone does not make the rollout safe. An old browser tab is a _compliant_ producer of the retired shape from its own perspective, and the collaboration service relays and checkpoints without inspecting the asset root. So mixed writers must be impossible, not merely discouraged:
+
+- the new client advertises an asset-schema/protocol version at WS admission;
+- the service rejects missing or old versions after the cutover — a generic integer or capability check, with no Excalidraw parsing on the server;
+- rollout drains or rejects existing old sessions rather than tolerating a mixed window;
+- no alias, no dual schema, no fallback.
+
+**Finding: there is no existing handshake field to carry this.** Admission is `socket.emit("join-room", roomId)` (`Portal.tsx:38`) with no version or capability payload, and nothing else in the join path carries one. So the gate needs a new field — which is a consumer and service migration obligation, not necessarily core code, and it must be assigned before anyone bumps.
+
 ## What must not happen
 
 - No alias, no dual schema, no compatibility path.

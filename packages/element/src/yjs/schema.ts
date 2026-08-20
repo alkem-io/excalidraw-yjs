@@ -482,18 +482,17 @@ export const diffBoundElements = (
 export type AssetLocator = string;
 
 /**
- * Maximum locator size, in UTF-8 bytes.
+ * Maximum locator size, in UTF-8 bytes. An intentional part of the adapter
+ * contract: an opaque locator MUST fit within it.
  *
- * This is a SCHEMA bound, not a proof that no bytes can be encoded: a short
- * base64 string without a `data:` prefix is indistinguishable from an opaque
- * token, and no length check can separate them. What the bound does is keep the
- * value in the size class of a reference so a payload cannot be smuggled at
- * scale, and give a document schema a definite shape.
+ * It is a schema bound, not a proof that no bytes can be encoded — a short
+ * base64 string without a `data:` prefix is indistinguishable from a token, and
+ * no length check separates them. What it does is give the asset root a definite
+ * shape and keep values in the size class of a reference.
  *
- * 2048 is a starting value chosen to clear common identifiers — UUIDs, paths,
- * most signed URLs — with headroom. It is NOT derived from a measured consumer
- * requirement; a host using long signed URLs may need it raised, and that should
- * be a deliberate, recorded change rather than a silent bump.
+ * A host whose credentials do not fit should store an opaque key and resolve the
+ * credential itself; long signed URLs are not the shape core carries. Raising
+ * this is a deliberate contract change, not a convenience.
  */
 export const MAX_ASSET_LOCATOR_BYTES = 2048;
 

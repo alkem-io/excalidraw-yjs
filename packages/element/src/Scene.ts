@@ -363,7 +363,7 @@ export class Scene {
    * `triggerUpdate()` fires.
    *
    * Native-Yjs core (M4): files and the persistable appState subset are ALSO on
-   * this doc ({@link yFiles} / {@link yAppState}), so `encodeStateAsUpdateV2(doc)`
+   * this doc ({@link yAssets} / {@link yAppState}), so `encodeStateAsUpdateV2(doc)`
    * is a complete, portable whiteboard snapshot over `getMap("elements")` +
    * `getMap("files")` + `getMap("appState")` — the format any persistence layer or
    * collaboration server stores. Persistence is therefore native: create/load/save
@@ -375,13 +375,10 @@ export class Scene {
   public readonly yElements: Y.Map<Y.Map<unknown>>;
 
   /**
-   * The scene's image binaries (native-Yjs core, M4): `Y.Map<fileId,
-   * BinaryFileData>` (`doc.getMap(FILES)`), in the SAME doc as the elements so a
-   * saved doc carries the whole whiteboard. Each value is the flat
-   * `BinaryFileData` record stored whole (JSON-leaf) — files are only ever
-   * added/removed, never sub-merged. Written via {@link setFiles} / read via
-   * {@link getFiles}. The renderer keeps consuming a plain files object; the doc
-   * is just where they now live and persist.
+   * The scene's asset REFERENCES: `Y.Map<fileId, locator>` (`doc.getMap(FILES)`),
+   * in the same doc as the elements so an encoded doc is the whole whiteboard.
+   * Values are opaque host locators, never bytes — see {@link AssetLocator}.
+   * Written via {@link setAssetLocators}, read via {@link getAssetLocators}.
    */
   public readonly yAssets: Y.Map<unknown>;
 
@@ -569,7 +566,7 @@ export class Scene {
   ) {
     this.doc = options?.doc ?? new Y.Doc();
     this.yElements = this.doc.getMap<Y.Map<unknown>>(ELEMENTS);
-    // Files + the persistable appState subset live in the SAME doc (M4), so an
+    // Asset references + the persistable appState subset live in the SAME doc, so an
     // encoded doc is a complete whiteboard snapshot. `getMap` is idempotent —
     // when a pre-decoded doc is adopted these resolve to its existing maps.
     this.yAssets = this.doc.getMap<unknown>(FILES);
@@ -632,13 +629,13 @@ export class Scene {
     };
     this.yElements.observeDeep(observer);
 
-    // Files live on the SAME doc (M4), so a change to `yFiles` — a local
+    // Asset references live on the SAME doc, so a change to them — a local
     // `setFiles`, OR a remote files apply (REMOTE_ORIGIN, M3), OR a load
     // (a non-recording write, `STRUCTURAL_ORIGIN`) — must notify the same `callbacks` as an element
     // change, so the editor refreshes its in-memory files cache and re-renders.
     // `.observe` (not `observeDeep`): each value is an opaque locator string
     // stored as a JSON-leaf — files are added/removed, never sub-merged (see the
-    // {@link yFiles} doc), so a shallow observe captures every file mutation.
+    // {@link yAssets}), so a shallow observe captures every reference change.
     // Read-only on the App side (refresh from `getFiles()`), so this can never
     // echo: the observer does not write back, it only fires `triggerUpdate`.
     const assetsObserver = () => {
@@ -1580,6 +1577,17 @@ export class Scene {
     format: "v1" | "v2" = "v1",
     targetStateVector?: Uint8Array,
   ): Uint8Array {
+    if (!targetStateVector) {
+      // FULL STATE — a checkpoint, an INIT seed or a resync. Refuse to serialize
+      // an asset root a peer has poisoned: doing so would make one client's
+      // injection permanent for everyone who loads the result afterwards. This
+      // is prevention, NOT recovery — a poisoned generation cannot checkpoint or
+      // resync, and discarding it is the transport's job (T027).
+      //
+      // A delta (with a target vector) is deliberately not checked: it carries
+      // only what the peer lacks, and the cost belongs on the rarer full encode.
+      this.assertAssetRootValid();
+    }
     return format === "v2"
       ? Y.encodeStateAsUpdateV2(this.doc, targetStateVector)
       : Y.encodeStateAsUpdate(this.doc, targetStateVector);
@@ -1693,7 +1701,7 @@ export class Scene {
   // also published, and a peer's change arrives through `applyRemoteUpdate` under
   // `REMOTE_ORIGIN` and is never echoed. Undo ownership is NOT decided by origin
   // alone but by which map is in scope: the `UndoManager` covers `yElements` and
-  // `yElementDeletions` only, so writes to `yFiles`/`yAppState` produce no Yjs
+  // `yElementDeletions` only, so writes to `yAssets`/`yAppState` produce no Yjs
   // undo step whatever origin they carry.
   // ---------------------------------------------------------------------------
 

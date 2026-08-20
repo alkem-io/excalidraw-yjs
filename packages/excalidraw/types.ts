@@ -581,6 +581,13 @@ export type OnExportProgress = {
  * references, and deleting the underlying asset is the host's decision, not the
  * editor's. Do not add operations here without a consumer that needs them.
  *
+ * ASSET IDENTITY: `fileId` is the immutable identity of the asset's CONTENT.
+ * A locator changing for the same `fileId` means the same bytes moved — a
+ * migration, a re-upload, a new signature — never different content. The editor
+ * relies on this: it does not re-fetch bytes it has already cached when a
+ * locator changes, because the content is by definition unchanged. A host that
+ * needs to change an image must mint a NEW `fileId`.
+ *
  * FAILURE CONTRACT, stated narrowly: if `store` rejects, the image is retained
  * locally and no reference is published — it is never downgraded to inline
  * bytes. It is retried on a LATER PUBLISH PASS, which happens when files are

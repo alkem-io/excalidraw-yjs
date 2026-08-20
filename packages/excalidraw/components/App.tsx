@@ -4849,8 +4849,9 @@ class App extends React.Component<AppProps, AppState> {
 
     this.files = nextFiles;
 
-    // Persist the newly-added files into the scene doc (M4): files live in the
-    // SAME `Y.Doc` as the elements, so `encodeStateAsUpdateV2(scene.doc)` captures
+    // Publish a REFERENCE for anything not yet referenced. Bytes stay local and
+    // go to the host store through the adapter; only the opaque locator it
+    // returns reaches the document.
     void this.publishUnreferencedAssets();
 
     return { addedFiles };
