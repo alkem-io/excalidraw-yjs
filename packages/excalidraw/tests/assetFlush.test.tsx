@@ -161,6 +161,43 @@ describe("flushAssetPublication", () => {
     expect(h.app.getSceneAssetLocators().f1).toBe("asset://f1");
   });
 
+  it("never re-uploads a file that already has a locator", async () => {
+    // FOUND BY MUTATION TESTING. Deleting the `already has a locator` filter in
+    // the publish pass survived the whole suite: the commit-time re-check still
+    // stops a redundant WRITE, so the document stays correct and nothing failed.
+    // What it does not stop is a redundant UPLOAD — every cached image
+    // re-uploaded on every pass, which on a board with fifty images is fifty
+    // stores per added file, billed to the host. Correctness tests could not see
+    // it; this counts the calls.
+    const stores: string[] = [];
+    const adapter: AssetAdapter = {
+      store: async (f) => {
+        stores.push(f.id);
+        return `asset://${f.id}`;
+      },
+      resolve: async (fileId) => file(fileId),
+    };
+    await render(<Excalidraw assetAdapter={adapter} />);
+
+    act(() => {
+      h.app.addFiles([file("f1")]);
+    });
+    expect((await h.app.flushAssetPublication()).published).toEqual(["f1"]);
+
+    act(() => {
+      h.app.addFiles([file("f2")]);
+    });
+    expect((await h.app.flushAssetPublication()).published).toEqual(["f2"]);
+
+    // f1 was uploaded exactly once, despite being cached through both passes.
+    expect(stores).toEqual(["f1", "f2"]);
+
+    // and a flush with nothing pending uploads nothing at all
+    const idle = await h.app.flushAssetPublication();
+    expect(idle).toEqual({ published: [], skipped: [], failed: [] });
+    expect(stores).toEqual(["f1", "f2"]);
+  });
+
   it("unmounting mid-flush resolves with an explicit skip and writes nothing", async () => {
     const rejections: unknown[] = [];
     const onRejection = (e: PromiseRejectionEvent) => rejections.push(e.reason);

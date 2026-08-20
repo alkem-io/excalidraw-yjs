@@ -438,6 +438,16 @@
 
   **Closed by `Scene.nonRecordingWrites.test.ts`** (4 tests). Note the trap that cost a first draft: there are TWO independent origin selectors — `replaceAllElements` at `Scene.ts:1406` and `commitPlan` at `:1173` — and the first draft tested only the former, so it passed happily under the surviving mutant. Both are covered now, and each mutation is verified to fail the file.
 
+  **ROUND 2 — 12 more mutations, on the surfaces round 1 did not touch.** Same method. **11 killed, 1 survived.**
+
+  Killed: `wouldWriteChange` comparing JSON leaves by `!==` instead of `deepEqual`; `boundElements` by identity instead of the set-diff; `writeChangedKeys` no longer clearing a key that went value→absent; the asset locator validator accepting `data:` URLs, oversized strings, and non-strings (three separate mutations, three separate tests); the logical-mutation boundary never buffering, so one creation becomes two transport messages; the action journal tolerating an unbalanced close; fractional-index ordering skipped; `contentToken` frozen; and — as a regression guard on work landed the same day — `flushAssetPublication` no longer awaiting in-flight publishes.
+
+  **The survivor: the publish pass no longer skipping files that already have a locator.** It survived because the document stays CORRECT — the commit-time re-check still refuses the redundant write — so no correctness test could see it. What it changes is that **every cached image is re-uploaded on every publish pass**: on a board with fifty images, fifty `adapter.store` calls per added file, billed to the host. A cost defect invisible to state-based assertions.
+
+  **Closed by counting calls** (`assetFlush.test.tsx`): publish `f1`, add `f2`, publish again, and assert `store` was called `["f1", "f2"]` — under the mutant it is `["f1", "f1", "f2"]`. Plus an idle flush that must upload nothing.
+
+  **What the two rounds say about the suite**: 24 mutations, 22 killed on the first run, and both survivors were of the same kind — a contract whose _state_ outcome is asserted from several directions while the thing that actually varies (which origin was used; how many uploads happened) is asserted nowhere. Both are now covered.
+
 - [ ] T030 SC-003 gate: a fresh FULL adversarial review of the complete HEAD returns ZERO findings of any kind. Ratchet any finding → a new invariant test + back to its phase.
 
 ## Analyze (spec↔plan↔tasks consistency — pre-implement gate)
