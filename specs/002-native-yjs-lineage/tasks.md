@@ -245,11 +245,22 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
   regression; sabotaging the delete's owning `mutateElement(startBinding)` site
   fails the delete gate; restoring either reread fails its own gate.
 
-  **Snapshot movement**: exactly 10 lines across 3 files — 6 `version`, 4
-  `versionNonce`. Zero `updated`, `hasElementChange`, geometry/binding/content or
-  membership/order. The `textWysiwyg` geometry assertion no longer pins a
-  version: measured across both apply routes the doc write SET is identical, so
-  the difference was accumulated in-memory version, not lost content.
+  **Snapshot movement, in TWO classes** — an earlier report said "exactly 10
+  lines across 3 files" and was INCOMPLETE, because
+  `git diff -- '*__snapshots__*'` does not cover INLINE snapshots living in
+  `.test.tsx` files:
+  - **File snapshots**: 10 lines across 3 files — 6 `version`, 4 `versionNonce`.
+    Zero `updated`, `hasElementChange`, geometry/binding/content, membership/order.
+  - **Inline snapshots**: 7 `renderStaticScene` CALL-COUNT values in
+    `linearElementEditor.test.tsx`, every one a REDUCTION
+    (7→6, 9→7, 7→6, 7→6, 10→7, 9→7, 7→6). These count React renders, not
+    content. Fewer renders is the expected consequence of writing only declared
+    keys instead of flushing whole objects — the same cause as the version
+    reduction — and no assertion about element content, order or binding moved.
+
+  The `textWysiwyg` geometry assertion no longer pins a version: measured across
+  both apply routes the doc write SET is identical, so the difference was
+  accumulated in-memory version, not lost content.
 
 - [x] T016c **(CLOSED — no current producer; the rule lives at the boundary)** Async action results.
 
