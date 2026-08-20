@@ -4,6 +4,17 @@
 
 **Strategy** (plan §Migration): suite-first (author each invariant RED against current HEAD, proving non-vacuity), single-owner (one author holds the lineage seam — no parallel-agent edge edits), edge-by-edge (each FR keeps the whole suite + typecheck + lint green before the next). Land on `split/native-yjs-core`, superseding the throwaway-detour code (commit `96f9bce3`, retained as the RED baseline).
 
+**LANE STATUS (2026-08-20).** Every task still shown open is open for a reason outside this repo, not for want of work here:
+
+| task | why it is still open |
+| --- | --- |
+| T011 | its remaining half IS T027 |
+| T023 | fork side complete; `client-web` / `server` migration is the consumer lane |
+| T027 | policy settled and gated; the resync itself belongs to `UnifiedCollabProvider` |
+| T030 | paused by design until the consumer + ingress work lands, then run fresh |
+
+T002 is closed by replacement, not repair — see its entry before reading its "36 failures" as debt.
+
 **Revised order (2026-08-19): the write path comes BEFORE the wire.** The reordering was originally argued from the 34 re-enabled `multiplayer undo/redo` tests gating FR-009/010/011 rather than FR-001. **That premise is withdrawn (T002 — the block never exercised a second replica and is now deleted)**, but the order it produced is right for an independent reason that survives: the write path is where lineage is destroyed, so INV-CONVERGE cannot go green while every local write clobbers it. Fixing the write path first also deletes 32 bandaid sites, shrinking what every later phase must keep green.
 
 ## Phase 1 — RED suite (the deterministic gate, authored against HEAD first)
@@ -91,7 +102,7 @@
   - **The original "history depths stay in lockstep" wording is FALSIFIED and must not be restored**: an appState-only step makes a `History` entry with no `UndoManager` item, so equal depths cannot hold for a correct editor. Stated behaviourally instead — a remote apply contributes nothing to local history — and green (`historyLockstep.test.tsx`).
   - **`meta.version` never regresses** — closed by T014b. Live gate: the un-skipped INV-VERSION-MONOTONIC case in `Scene.native-yjs-write-intent.test.ts`, plus the reservation pin in `reappearReveal.test.tsx`.
 
-- [ ] T011 **(SPLIT — one done, one open)** - **INV-APPSTATE-UNDO — DONE (T028)**: undo/redo of background/name survives the next scene update, verified across a linked peer, with `name` narrowed by evidence. Live gate: `appStateUndo.test.tsx`. - **INV-WIRE-ROBUST — OPEN, tracked as T027.** Its original wording ("an invalid update is rejected without desynchronising") is unachievable by catching: Yjs apply is not atomic on a decode failure, measured at 10 of 1056 truncation offsets both throwing AND mutating. Generation replacement now exists with a live consumer, so the dependency is gone; the transport-level reproduction is built and the receiver policy is drafted and measured (`wireRecoveryPolicy.test.tsx`), but no transport code is written — held pending the server ingress policy.
+- [ ] T011 **(SPLIT — one done; the other is settled and owned elsewhere)** - **INV-APPSTATE-UNDO — DONE (T028)**: undo/redo of background/name survives the next scene update, verified across a linked peer, with `name` narrowed by evidence. Live gate: `appStateUndo.test.tsx`. - **INV-WIRE-ROBUST — tracked as T027, where the policy is now SETTLED and the implementation belongs to the embedder's provider, not this repo.** Its original wording ("an invalid update is rejected without desynchronising") is unachievable by catching: Yjs apply is not atomic on a decode failure, measured at 10 of 1056 truncation offsets both throwing AND mutating. Generation replacement now exists with a live consumer, so the dependency is gone; the transport-level reproduction is built and the receiver policy is drafted and measured (`wireRecoveryPolicy.test.tsx`), but no transport code is written — held pending the server ingress policy.
 
 - [x] T014b **(DONE — FR-011 complete)** The version authority: a stale bulk write can no longer move `meta.version` backwards, and the Store no longer silently drops a real edit.
 
@@ -283,7 +294,7 @@
 ## Phase 7 — Origin policy + binaries off the wire (FR-012, FR-013)
 
 - [x] T022 **(done)** The origin→wire policy has exactly ONE implementation, in `Scene.onDocUpdate`. No shared lookup table: with a single call site it would be indirection, not deduplication. Pairing a structural tombstone with its reveal is the logical-mutation boundary's job, not the origin table's. **Closed**: INV-ORIGIN's table-driven suite is `Scene.originPolicyTable.test.ts` (T029). Note it is a table-driven TEST, not the runtime lookup table this task rejected.
-- [ ] T023 **(PARTIAL — core boundary DONE; one live consumer blocker)** The collaborative document carries `fileId -> opaque locator`; image bytes are out-of-band.
+- [ ] T023 **(FORK SIDE COMPLETE — every remaining item is in the consumer lane)** The collaborative document carries `fileId -> opaque locator`; image bytes are out-of-band.
 
   **The contract, stated directly.** The document stores an opaque host-owned locator string per image and never bytes. Core stores it, round-trips it and garbage-collects it, and never parses it — no URL semantics, no bucket or entity identifiers interpreted. Bytes live in the editor's local cache and in the host's store, moved by the `AssetAdapter`: `store(file) -> locator`, `resolve(fileId, locator) -> BinaryFileData`.
 
@@ -293,7 +304,12 @@
 
   **No protocol/version gate is required.** The byte-carrying document shape was never shipped, so there is no mixed population, no stale client and no compatibility boundary to negotiate. No `documentSchemaVersion`, no join payload field, no rejection path.
 
-  **ON HOLD** — the consumer rollout is paused at Anton's instruction. Facts established by a read-only census of `client-web`, preserved so the work can resume without repeating it:
+  **FORK SIDE CLOSED (2026-08-20).** Two things the consumer needed did not exist and now do; neither was in the original task text, both came out of consumer-side audits:
+
+  - **`flushAssetPublication` — the awaitable boundary.** `addMissingFiles` publishes fire-and-forget, and `adapter.store` resolving is NOT the locator being in the document, so an immediate save or a close could encode an image element with **no locator** — content referencing bytes no peer can resolve. The old client-side save uploader masked this and is being retired. The new API resolves only once every pending file has committed a locator or explicitly not, including uploads a background pass already started, and reports `{published, skipped, failed}` so a host cannot report a successful save over a failed upload. No backoff, no autonomous retry, no queue: retry is the host calling it again. Gate: `assetFlush.test.tsx`, 5 cases, two-way sabotaged.
+  - **`@excalidraw-yjs/excalidraw/headless` — one pin instead of two.** Consumers were coordinating two packages and had **drifted onto different build identifiers** (`server` on one, `client-web` on another). Everything a server needs is now reachable from the single package the client already depends on. Gate: `test:headless`, which imports the BUILT bundle in bare Node and scans the artifact and every chunk it imports for a React import.
+
+  **Remaining work is entirely in the consumer lane** (`client-web` supplies an `AssetAdapter` and deletes the `dataURL`-on-failure fallback; `server` moves to the umbrella `/headless`). Facts from a read-only census, preserved so that work does not repeat them:
 
   - **The pin has DIVERGED, not merely fallen behind — and the divergence is now RESOLVED as a re-authoring.** `client-web` pins only **2** packages (`@excalidraw-yjs/element`, `@excalidraw-yjs/excalidraw`) at `2e7c2f00` via pkg.pr.new. That SHA is **not an ancestor of HEAD** and is contained in no local branch: 31 commits sit on the pin's side, 187 on HEAD's, off a common base of `a5a4d8f4` (the 0.18.x upstream merge). The 31 are not lost work — they are the same native-Yjs line re-authored on a different base. **Verified by subject comparison: 30 of the 31 have a subject-identical counterpart on HEAD; the single unmatched one, the `@excalidraw-yjs` scope rename plus pnpm migration, is also present on HEAD** (the package is named `@excalidraw-yjs/excalidraw` and `pnpm-workspace.yaml` exists there) — it landed under a different commit subject via the PR-stack collapse. **Consequence: nothing needs porting back from the pin. The reconciliation is a forward re-pin to a build of the current branch head, not a merge.** Sanity-check that conclusion before bumping, e.g. `git merge-base --is-ancestor` against the new pin, since it rests on subjects rather than trees.
   - **HOW TO PIN — the rule, then the two traps.** This cost another lane two failed installs; it is written out so nobody repeats it.
@@ -430,6 +446,10 @@
 
   **Closed by `Scene.originPolicyTable.test.ts`** (7): the closed set is enumerated from the module itself and each origin's publish/undo behaviour is asserted against a declared policy. Non-vacuous — adding a `SNEAKY_ORIGIN` export with no policy fails it twice; removing it is clean again. The undo case asserts on the reverted VALUE rather than `undoElements()`'s return, because an untracked write leaves undo free to revert an earlier step, which would prove nothing.
 
+  **PAUSED 2026-08-20, and the reason matters.** The final review must run on a HEAD that includes the client transport / `AssetAdapter` migration and the `collaboration-service` ingress work. Running it before those land would review a tree the product does not yet run, and every finding would have to be re-checked afterwards anyway.
+
+  **A third mutation round was proposed and DECLINED**, correctly. The natural next targets — render counts, transaction counts, transport-message counts — are implementation details unless a named product budget or a logical-atomicity contract makes them observable. Freezing them by mutation survival would pin the suite to how the code happens to work today. The one such quantity that IS a real contract, one transport update per logical creation, is already gated (`commitPlan` — "a creation emits exactly ONE transport delta"). Recorded so the idea is not re-proposed as if it were unexplored.
+
   **PREPARATION — a mutation campaign on the invariant surface (2026-08-20).** Rather than re-reading code hoping to spot something, 12 semantically meaningful mutations were applied one at a time to the core write/merge/GC/history paths, each run against the full suite and reverted. **11 were killed, 1 SURVIVED.**
 
   Killed (with the first test that caught each, so the campaign is auditable): `wouldWriteChange` forced true / forced false; `writeOrigin` forced STRUCTURAL; the publish filter additionally withholding STRUCTURAL; the publish filter no longer withholding REMOTE (the echo loop); dropping the non-local meta bump; the GC cutoff `>=` → `>`; GC skipping the live re-check; the tombstone watermark off-by-one; the UndoManager also tracking REMOTE_ORIGIN; the undo scope dropping the deletion sidecar.
@@ -448,7 +468,7 @@
 
   **What the two rounds say about the suite**: 24 mutations, 22 killed on the first run, and both survivors were of the same kind — a contract whose _state_ outcome is asserted from several directions while the thing that actually varies (which origin was used; how many uploads happened) is asserted nowhere. Both are now covered.
 
-- [ ] T030 SC-003 gate: a fresh FULL adversarial review of the complete HEAD returns ZERO findings of any kind. Ratchet any finding → a new invariant test + back to its phase.
+- [ ] T030 **(PAUSED — deliberately, until the consumer work lands)** SC-003 gate: a fresh FULL adversarial review of the complete HEAD returns ZERO findings of any kind. Ratchet any finding → a new invariant test + back to its phase.
 
 ## Analyze (spec↔plan↔tasks consistency — pre-implement gate)
 
