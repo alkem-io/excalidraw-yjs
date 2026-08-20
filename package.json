@@ -84,7 +84,7 @@
     "rm:node_modules": "rimraf --glob node_modules excalidraw-app/node_modules packages/*/node_modules",
     "clean-install": "pnpm run rm:node_modules && pnpm install",
     "test:headless": "pnpm run build:common && pnpm run build:fractional-indexing && pnpm run build:math && pnpm run build:element && pnpm run build:excalidraw && node scripts/headless-smoke.mjs",
-    "test:gates": "pnpm install --frozen-lockfile && pnpm run test:typecheck && pnpm run test:headless && vitest run"
+    "test:gates": "pnpm install --frozen-lockfile && pnpm run test:other && pnpm run test:code && pnpm run test:typecheck && vitest run --coverage && pnpm run test:headless"
   },
   "resolutions": {
     "strip-ansi": "6.0.1"

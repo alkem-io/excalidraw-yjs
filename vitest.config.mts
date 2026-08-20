@@ -1,6 +1,6 @@
 import path from "path";
 
-import { defineConfig } from "vitest/config";
+import { coverageConfigDefaults, defineConfig } from "vitest/config";
 
 export default defineConfig({
   resolve: {
@@ -78,6 +78,15 @@ export default defineConfig({
       // Since v2, it ignores empty lines by default and we need to disable it as it affects the coverage
       // Additionally the thresholds also needs to be updated slightly as a result of this change
       ignoreEmptyLines: false,
+      // Never count BUILT OUTPUT as source coverage. `pnpm run test:headless`
+      // builds `packages/*/dist`, and with those present the same suite reports
+      // 45.3% lines instead of 67.4% and fails the 60% threshold — a number that
+      // depends on whether you happened to build, and one CI never sees because
+      // it does not build before running coverage. Excluding the artifacts makes
+      // a local run mean what the CI run means. The thresholds themselves are
+      // untouched; this removes double-counted compiled copies of the same
+      // source, not a single line of real code.
+      exclude: [...coverageConfigDefaults.exclude, "**/dist/**"],
       thresholds: {
         lines: 60,
         branches: 70,
