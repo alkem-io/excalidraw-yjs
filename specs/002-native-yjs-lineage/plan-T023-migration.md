@@ -66,7 +66,9 @@ Egress validation alone does not make the rollout safe. An old browser tab is a 
 - rollout drains or rejects existing old sessions rather than tolerating a mixed window;
 - no alias, no dual schema, no fallback.
 
-**Finding: there is no existing handshake field to carry this.** Admission is `socket.emit("join-room", roomId)` (`Portal.tsx:38`) with no version or capability payload, and nothing else in the join path carries one. So the gate needs a new field — which is a consumer and service migration obligation, not necessarily core code, and it must be assigned before anyone bumps.
+**No protocol/version gate is required, and none should be built.** The byte-carrying document shape was never shipped, so there is no mixed deployed population, no stale client and no compatibility boundary. No `documentSchemaVersion`, no join-payload field, no negotiation or rejection path.
+
+For reference on CURRENT behaviour only: the live unified collaboration path is a raw WebSocket per document — `/collab/<documentId>?type=memo|whiteboard` (optional `guestName`), with the server sending SyncStep1 after admission, constructed by `client-web`'s `unifiedCollabProvider`. There is no Socket.IO `join-room` event on this path; `Portal.tsx`'s `join-room` belongs to the retired whiteboard-collaboration-service path, not the live consumer.
 
 ## What must not happen
 

@@ -234,16 +234,15 @@
 ## Phase 7 — Origin policy + binaries off the wire (FR-012, FR-013)
 
 - [x] T022 **(done)** The origin→wire policy has exactly ONE implementation, in `Scene.onDocUpdate`. No shared lookup table: with a single call site it would be indirection, not deduplication. Pairing a structural tombstone with its reveal is the logical-mutation boundary's job, not the origin table's. **Still open**: INV-ORIGIN as a table-driven suite (T010).
-- [ ] T023 **(PARTIAL — the core boundary is DONE; rollout blocked on two external items)** The document carries `fileId -> opaque locator`, never bytes.
+- [ ] T023 **(PARTIAL — core boundary DONE; one live consumer blocker)** The collaborative document carries `fileId -> opaque locator`; image bytes are out-of-band.
 
-  **Done and live**: `AssetLocator` validation on every write and every encode (full state AND delta); `AssetAdapter` (`store`/`resolve`) on `ExcalidrawProps`, forwarded through the `Excalidraw` wrapper; persistence and the wire carry locators; orphan references reclaimed by `collectGarbage`. Cold-load adoption (T020) landed and is NO LONGER a blocker.
+  **The contract, stated directly.** The document stores an opaque host-owned locator string per image and never bytes. Core stores it, round-trips it and garbage-collects it, and never parses it — no URL semantics, no bucket or entity identifiers interpreted. Bytes live in the editor's local cache and in the host's store, moved by the `AssetAdapter`: `store(file) -> locator`, `resolve(fileId, locator) -> BinaryFileData`.
 
-  **Live blockers, both OUTSIDE this repo — no consumer may bump until they land**:
+  **Done and live**: locator validation on every write and on EVERY encode (full state and delta); `AssetAdapter` on `ExcalidrawProps`, forwarded through the `Excalidraw` wrapper; persistence and the wire carry locators; orphan references reclaimed by `collectGarbage`; cold load adopts the stored document (T020).
 
-  1. **client-web** must supply an `AssetAdapter` and delete its `dataURL`-on-upload-failure fallback. Without the adapter an image has no way to reach a store; with the fallback it would write bytes into a document that rejects them.
-  2. **The external WS protocol-version gate.** Admission is `socket.emit("join-room", roomId)` — there is no handshake field carrying a version (verified: no `protocolVersion` anywhere in the app). Until the service rejects pre-cutover clients, a legacy peer can still present a foreign document.
+  **Live blocker — ONE, outside this repo**: `client-web` must supply an `AssetAdapter` and delete its `dataURL`-on-upload-failure fallback (`useWhiteboardFilesManager.getUploadedFiles`, which on upload failure keeps the file with its `dataURL` so peers "receive the dataURL directly"). That fallback writes bytes into a document that rejects them.
 
-  **Settled trust decision**: egress is validated on EVERY encode; ingress is NOT pre-flighted per update (a scratch-doc decode on the hot path is O(document)), so the no-binary guarantee is scoped to protocol-compliant writers — which is precisely what the gate above enforces.
+  **No protocol/version gate is required.** The byte-carrying document shape was never shipped, so there is no mixed population, no stale client and no compatibility boundary to negotiate. No `documentSchemaVersion`, no join payload field, no rejection path.
 
 - [x] T025b **(DONE — landed with T032; see that entry)** The explicit maintenance call sits immediately before the real INIT/resync encode, and the encoder is PURE. No scheduler, no timer.
 
