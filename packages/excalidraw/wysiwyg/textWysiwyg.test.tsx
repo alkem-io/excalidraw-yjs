@@ -1790,7 +1790,12 @@ describe("textWysiwyg", () => {
           strokeWidth: 2,
           type: "rectangle",
           updated: 1,
-          version: 2,
+          // T014b: reconciliation metadata baked into an otherwise-semantic
+          // assertion. The container is written ~7 times during this flow with a
+          // version behind the doc's meta — genuine stale writes, which the
+          // monotonic rule now corrects. Every semantic field here (geometry,
+          // boundElements, isDeleted, updated) is unchanged; measured.
+          version: 9,
           width: 610,
           x: 15,
           y: 12.5,

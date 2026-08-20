@@ -1082,6 +1082,7 @@ export class Scene {
         for (const id of plan.remove) {
           if (this.yElements.has(id)) {
             this.yElements.delete(id);
+            this.reserveTombstoneWatermark(id);
             this.meta.delete(id);
             changedIds.add(id);
           }
@@ -1336,6 +1337,7 @@ export class Scene {
       this.doc.transact(() => {
         for (const id of removedIds) {
           this.yElements.delete(id);
+          this.reserveTombstoneWatermark(id);
           this.meta.delete(id);
           // The element is gone; its deletion marker must go with it, in this
           // same transaction (see {@link syncDeletionMarker}).
@@ -1355,21 +1357,25 @@ export class Scene {
           // from the live `element`: they are non-enumerable (ORIG_ID) so a spread
           // snapshot omits them, and the recompute re-stamps them onto the fresh
           // snapshot, so the live object is the canonical carrier.
-          // KNOWN DEFECT (confirmed, not fixed here) — spec 002 FR-011, task T014b.
-          // `bumpMetaVersionsFor` (undo/redo, remote apply) can raise the local meta
-          // above the version a caller's array carries. A stale action result then
-          // changes a property while carrying a low version, this records it
-          // verbatim, and the editor Store — which detects a change only when
-          // `prev.version < next.version` — silently drops a real edit from the
+          // FR-011 / T014b. `bumpMetaVersionsFor` (undo/redo, remote apply) can
+          // raise the local meta above the version a caller's array carries. A
+          // stale action result then changes a property while carrying a low
+          // version; recording it verbatim moved the version BACKWARDS, and the
+          // editor Store — which detects a change only when
+          // `prev.version < next.version` — silently dropped a real edit from the
           // change set and the history delta.
           //
-          // Not patched here on purpose. Both a blanket `max(record.version,
-          // prev + 1)` and a narrowed regression-only bump change version values
-          // that the Store, the history deltas and ~64 existing tests depend on
-          // (transform/contextmenu/history snapshots encode exact versions). The
-          // fix has to reconcile meta versioning with Store change-detection as a
-          // whole, which is its own piece of work. See the skipped
-          // INV-VERSION-MONOTONIC case in `Scene.native-yjs-write-intent.test.ts`.
+          // The correction is deliberately narrow, and each narrowing was forced
+          // by a measured failure:
+          //  - only when this element actually WROTE to the doc (`writes > 0`);
+          //    otherwise nothing changed and nothing may move (see the no-write
+          //    rule above);
+          //  - only on a STRICT regression. A TIE is the benign re-presentation
+          //    of the same logical write — element creation is a two-phase
+          //    structural-add-then-reveal, so meta is already stamped when the
+          //    same version arrives again. Bumping ties manufactured a
+          //    Store-visible change for one logical creation (measured: 3
+          //    ephemeral increments for 2 updates).
           // NO-WRITE RULE. When this element contributed ZERO document writes,
           // nothing about it changed in the doc, so the doc-derived
           // reconciliation metadata must not move. Recording the caller's values
@@ -1387,8 +1393,11 @@ export class Scene {
           //    produces zero Yjs writes yet must still change what derives.
           const prevMeta = this.meta.get(element.id);
           const carryMeta = writes === 0 && prevMeta !== undefined;
+          const inV = record.version as number;
+          const prevV = prevMeta?.version ?? 0;
+          const monotonicV = writes > 0 && inV < prevV ? prevV + 1 : inV;
           this.meta.set(element.id, {
-            version: carryMeta ? prevMeta.version : (record.version as number),
+            version: carryMeta ? prevMeta.version : monotonicV,
             versionNonce: carryMeta
               ? prevMeta.versionNonce
               : (record.versionNonce as number),
@@ -1398,11 +1407,8 @@ export class Scene {
           });
           // Not advanced on a no-op either: the high-water mark tracks versions
           // the doc has actually seen.
-          if (
-            !carryMeta &&
-            (record.version as number) > this.versionHighWater
-          ) {
-            this.versionHighWater = record.version as number;
+          if (!carryMeta && monotonicV > this.versionHighWater) {
+            this.versionHighWater = monotonicV;
           }
           // Deletion marker, in this SAME transaction so it and the `isDeleted`
           // it describes are one atomic step for undo/redo and for peers.
@@ -1445,6 +1451,38 @@ export class Scene {
    * `"full"` (an unresolvable event path) bumps every currently-known id, erring
    * toward over-notifying rather than dropping a change.
    */
+  /**
+   * Reserve the version the editor Store is ABOUT to synthesize a tombstone at.
+   *
+   * When this Scene HARD-REMOVES an id (the element disappears from the derived
+   * array rather than being flagged `isDeleted`), the Store observes an omission
+   * and synthesizes its own `isDeleted:true` tombstone at `lastVisible + 1`,
+   * retaining it in its snapshot. That number is a real downstream version, but
+   * this Scene used to delete the id's meta without accounting for it — so the
+   * watermark stayed behind the Store's, and a later reappearance could be
+   * seeded at a version the Store already held. Its
+   * `prev.version < next.version` gate then rejects the reveal and keeps the
+   * tombstone.
+   *
+   * Reserving keeps ONE authority: the high-water mark is advanced past the
+   * version the removal causes the Store to mint, so a later
+   * `++versionHighWater` reseed can never collide with it.
+   *
+   * NOT for soft deletion — an `isDeleted` flip leaves the element visible to
+   * the Store, which synthesizes nothing, so reserving there would inflate for
+   * no downstream value.
+   *
+   * NOT for the remote / UndoManager path either: `bumpMetaVersionsFor` already
+   * runs on those ids BEFORE `recomputeFromDoc` drops their meta, and it raises
+   * the watermark itself. Reserving again would double-advance.
+   */
+  private reserveTombstoneWatermark(id: string): void {
+    const meta = this.meta.get(id);
+    if (meta && meta.version >= this.versionHighWater) {
+      this.versionHighWater = meta.version + 1;
+    }
+  }
+
   private bumpMetaVersionsFor(changed: Set<string> | "full") {
     const ids =
       changed === "full" ? new Set<string>(this.meta.keys()) : changed;

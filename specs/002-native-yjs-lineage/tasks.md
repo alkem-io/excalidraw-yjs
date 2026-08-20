@@ -86,272 +86,64 @@
 - [x] T008 INV-WRITE-INTENT (a write through a deliberately stale reference touches only the declared keys; a peer's concurrent edit to another property survives). Cover a simple key, a JSON-leaf (`points`) and a nested one (`boundElements`). **Expected RED** — whole-object flush.
 - [ ] T009 **(SPLIT — its three parts are in different states; "Expected RED" was true of none of them as a whole)** - **INV-HISTORY-LOCKSTEP — DONE (T017)**, and its wording here is the falsified one: "history depths in lockstep" cannot hold for a correct editor, because an appState-only step makes a `History` entry with no `UndoManager` item. The invariant is now stated behaviourally in spec.md and covered. - **`meta.version` never regresses — OPEN and BLOCKED (T014b)**, re-verified at current HEAD: the defect reproduces and the blanket fix still breaks ~71 tests. This is the only genuinely open part. - **"a passive remote edit does not wipe the redo branch" — NOT separately covered.** T017 established that a remote apply contributes zero to both stacks, which is adjacent but not the same claim; the redo-branch half needs its own case and an accessor the harness does not expose. Author it against the behavioural formulation, not the depth one.
 - [ ] T011 **(SPLIT — one done, one restated, one blocked)** - **INV-APPSTATE-UNDO — DONE (T028)**, covered across a linked peer for undo and redo, with `name` narrowed by evidence. - **INV-WIRE-ROBUST — RESTATED, blocked (T027)**. "An invalid update is rejected without desynchronising" is not achievable by catching: Yjs apply is not atomic on a decode failure, measured at 10 of 1056 truncation offsets both throwing AND mutating. Recovery is discard-the-generation-and-resync, owned by the transport, and is gated on demonstrating the session-loss failure at the real transport boundary. - **INV-NO-BINARY-WIRE — BLOCKED on T023.** A live encode carries image bytes verbatim, and this cannot be fixed by filtering a full-state update.
-- [ ] T014b **(found by independent review; confirmed; FR-011 is EXPLICITLY INCOMPLETE until this lands)** `replaceAllElements` records `meta.version` verbatim, so a stale action array changing a property while carrying a low version moves meta BACKWARDS after `bumpMetaVersionsFor` (undo/redo, remote apply) raised it. `Store.update` detects a change only when `prev.version < next.version`, so a genuine edit is silently dropped from the change set and the history delta. T014 fixed only the `mutateElement` path. - **Evidence**: the `it.skip`ped INV-VERSION-MONOTONIC case in `Scene.native-yjs-write-intent.test.ts`. It carries a guard assertion (`raised > base.version`) so it cannot pass or fail for the wrong reason — it fails at `expected 2 to be greater than 3`, i.e. a genuine regression below a genuinely raised meta. Pre-existing (fails against 9cb4a460 too). - **Why the obvious fixes do not work — classified, not a headline number.** A blanket `max(record.version, prev + 1)` produces **70 failing tests**, which emit 68 snapshot-mismatch reasons and 16 non-snapshot reasons — a test can emit more than one, so these do not sum to 70. Snapshot churn is cheap in principle, though each regenerated snapshot must be reviewed to confirm the new version is _correct_ and not merely different. The **semantic** reasons are the actual blockers: `collab.test` "should emit two ephemeral increments" gets 3 instead of 2 (version inflation manufactures extra Store increments), one `linearElementEditor` bound-text deep-equal, one `handleBindTextResize` called-with mismatch, and 13 contextmenu "Found multiple elements with tool name" query failures that look like cascade rather than 13 independent defects. **Note (ruled out, not merely unmeasured): FR-017's double-broadcast is NOT a contributor here.** That fixture never attaches a transport and never replays transport updates — after the initial create it calls `h.app.updateScene` twice on the existing element with `captureUpdate: NEVER`, which are property-only paths emitting one doc update each. Broadcast batching will not shrink this failure set. A narrowed regression-only bump (`writes > 0 && record.version <= prevMeta`) still moves versions that transform snapshots encode exactly. - **The root conflict (independent review's analysis, and it is the real finding).** `element.version` is simultaneously (a) exact action/history data and (b) the universal dirty token. Those requirements conflict. `Store.detectChangedElements` gates on `prev.version < next.version`; `ElementsDelta.calculate` then gates on `versionNonce` and its invariant requires `deleted.version !== inserted.version`; bounds/collision caches key on version too. So no Store-local patch can both fix the regression and leave version values unmoved. - **The only no-version-move shape is a redesign**: a separate local monotonic scene revision / change token (a sidecar, NOT serialized element lineage), with Store delta detection and every cache-invalidation consumer migrated onto it. That is materially larger than T014b as scoped and should be judged on its own merits. - **RE-VERIFIED at current HEAD (2026-08-20), after the action boundary (T016k), the origin taxonomy change (T031) and the appState write-through (T028) all landed.** The defect still reproduces: the `INV-VERSION-MONOTONIC` case fails at `expected 2 to be greater than 3`, i.e. meta regresses below a genuinely raised value. And the blanket `max(record.version, prev + 1)` still breaks the suite at essentially the same scale — **71 failures now against the 70 recorded**, with the same clusters (13 contextmenu "Found multiple elements with tool name", plus transform/history/dragCreate snapshots). So none of the intervening work changed the landscape, and the recorded conclusion stands: no Store-local patch reconciles exact-version history data with the universal dirty token. Unlike T024, T017 and T027, this premise SURVIVES measurement — it is a real open defect, not a phantom.
+- [x] T014b **(DONE — FR-011 complete)** The version authority: a stale bulk write can no longer move `meta.version` backwards, and the Store no longer silently drops a real edit.
 
-  **READ-ONLY DESIGN TRACE (done; no code changed). The authority split, measured.**
+  **Three mechanisms, each narrowing forced by a MEASURED failure** (the earlier
+  rounds' full traces are in the git history of this file):
 
-  *Consumers that need EXACT version arithmetic* — `delta.ts` builds history
-  deltas as adjacent pairs (`prevElement.version + 1`, `nextElement.version - 1`)
-  and requires `deleted.version !== inserted.version`; `mutateElement` advances
-  by exactly one; `newElement` seeds at 1. These need an ordered, per-element
-  counter and would break under any renumbering.
+  1. **No-write rule.** An element contributing zero doc writes moves no
+     doc-derived metadata. `symbols` and `boundElementsEmpty` still refresh —
+     the latter because the CRDT collapses `boundElements: []` and `null`, so
+     that sentinel is the sole carrier of the distinction.
+  2. **Content-gated, STRICT-regression bump.** Only `writes > 0 && incoming <
+     previousMeta` advances, to `previousMeta + 1`. A TIE must NOT bump: element
+     creation is a two-phase structural-add-then-reveal, so meta is already
+     stamped when the same version arrives again, and bumping that benign
+     re-presentation manufactured a Store-visible change for ONE logical creation
+     (measured: 3 ephemeral increments for 2 updates).
+  3. **Tombstone-watermark reservation** — the missing authority transfer, and
+     the reason (2) alone regressed INV-REVEAL. On a HARD removal the editor
+     Store synthesizes its own tombstone at `lastVisible + 1` and retains it, but
+     the Scene deleted the id's meta without accounting for that number, so the
+     watermark fell behind an invisible Store one and a later reseed collided
+     with it (measured: tombstone and reveal both landed on 5, and the Store's
+     `prev < next` gate rejected the reveal). `reserveTombstoneWatermark` now
+     advances past it at the LOCAL hard-removal sites.
 
-  *Consumers that need only CHANGE IDENTITY* — "is this different from what I
-  last saw": `bounds.ts` and `renderElement.ts` use it purely as a cache key,
-  `utils.ts` compares with `!==`, `LibraryMenu` tracks per-element values,
-  `getSceneVersion`'s sum is already demoted to a stored field (T026). None of
-  these care about magnitude or adjacency.
-
-  *The one that straddles* — `store.ts:938` gates change detection with an
-  ORDERING test (`prev.version < next.version`). It is semantically a
-  change-identity consumer, but implemented as ordering, which is precisely why a
-  backwards move becomes silent data loss rather than a redundant update.
-
-  **Measured candidates** (full suite each; anchoring regression = the skipped
-  INV-VERSION-MONOTONIC case):
-  | mechanism at the bulk path | failures | fixes the regression? |
+  **Census of every meta-delete site**, classified by whether the Store observes
+  an omission:
+  | site | reserves? | why |
   |---|---|---|
-  | blanket `max(record.version, prev + 1)` | **70** | — (recorded) |
-  | bump only when incoming `<=` prev | **70** | — |
-  | bump only when the doc CONTENT changed **and** incoming `<=` prev | **61** | **YES** |
+  | `commitPlan` remove | **yes** | local hard removal; Store sees an omission |
+  | `replaceAllElements` removedIds | **yes** | same |
+  | `recomputeFromDoc` cleanup | no | drops meta for ids already gone; the remote/undo path already reserved via `bumpMetaVersionsFor`, which bumps and raises the watermark BEFORE recompute drops meta — reserving again would double-advance |
+  | `collectGarbage` | no | reclaims already SOFT-deleted elements; the Store's view was already a tombstone, so nothing new is synthesized |
 
-  The middle row is the informative one: it costs exactly as much as the blanket
-  patch, which shows the TIE is the common case — `replaceAllElements` routinely
-  reconciles unchanged elements carrying their current version, so any bump-on-tie
-  inflates the whole scene. Content-gating is available for free: `writeChangedKeys`
-  already RETURNS a write count that the bulk path currently discards.
+  **Results**: the anchoring INV-VERSION-MONOTONIC case is un-skipped and green;
+  reappearReveal passes with literal versions (tombstone 5, reveal **6**); the
+  creation-tie phantom is gone; full suite 140 files / **1588 passed**.
 
-  **The remaining 61, classified** (a test can emit several reasons): 59 snapshot
-  reasons; 16 non-snapshot, of which **13 are a single unexplained symptom** —
-  `Found multiple elements with tool name: rectangle`, a harness selector error,
-  which is NOT obviously a versioning consequence and must be attributed before
-  anything lands; and 3 genuinely semantic (`expected true to be false`,
-  `expected 3 to be 2`, one `ObjectContaining` mismatch).
+  **Snapshot changes accepted on the stated criterion**: 194 `"version"` lines
+  across 4 files — no geometry, binding or content key changes anywhere — plus
+  the 10 `"hasElementChange"` lines (5 flips, `false → true`) that were
+  individually adjudicated as CORRECTED recordings: they are all redo-stack
+  entries in the bidirectional-bindings group, `hasElementChange =
+  !delta.elements.isEmpty()`, redoing an unbind/rebind genuinely changes
+  elements, and those tests' behavioural assertions never moved.
 
-  **ATTRIBUTION (round 2, requested before any code — done; tree restored clean).**
+  **`textWysiwyg`'s baked-in `version: 2` → `9`**: metadata only. Every semantic
+  field (geometry, `boundElements`, `isDeleted`, `updated`) is byte-identical on
+  both baselines; the assertion mixed reconciliation metadata into an otherwise
+  semantic `objectContaining`. The **+7 is itself a finding**: that flow writes
+  the container about seven times with a version behind meta — seven genuine
+  stale writes, evidence for the T015/T016 helper work.
 
-  *The 13 "Found multiple elements with tool name: rectangle" are NOT defects —
-  they are a CASCADE, proven causally.* All 13 sit in one file
-  (`contextmenu.test.tsx`). Run that file alone and the FIRST two failures are
-  snapshot mismatches; the selector error appears only from the third test on.
-  Run any ONE of the 13 in isolation and it fails with a plain snapshot
-  mismatch, not the selector error. A snapshot assertion aborts its test before
-  unmount, so every later test in the file then finds two toolbars. Root cause is
-  the same version movement as the snapshot set; independent defect count: zero.
-
-  *The 3 semantic failures all reproduce in isolation*, so they are real:
-  - `collab.test` "should emit two ephemeral increments even though updates get
-    batched" — **3 instead of 2**. Both updates run under
-    `captureUpdate: NEVER`, so an EXTRA Store-visible increment is a phantom
-    change manufactured by the version advance.
-  - `reappearReveal` "the STORE re-detects the reappearing element" — inverted.
-  - `textWysiwyg` container-wrap — element mismatch against `ObjectContaining`.
-
-  *Snapshot classification — NOT merely version movement, which is the finding
-  that matters.* `selection.test.tsx` is clean: the only changed key is
-  `"version"` (3 lines). But `history.test.tsx` changes 112 `"version"` lines AND
-  **10 `"hasElementChange"` lines — 5 entries flipping `false` → `true`**.
-
-  **This direction is genuinely ambiguous and must NOT be assumed either way.**
-  `false → true` is equally consistent with (a) the fix working — history now
-  records element changes that were previously dropped, which is exactly the
-  defect T014b describes — or (b) phantom entries. The `captureUpdate: NEVER`
-  extra increment above leans toward (b) for at least that case. Each of the 5
-  needs adjudicating against whether a real element change occurred; blanket
-  snapshot updates are therefore refused.
-
-  **Conclusion: 70 → 61 is evidence the boundary is NARROWER, not that it is
-  SAFE.** The mechanism demonstrably changes Store-visible change detection.
-
-  **Proposed no-write meta rule** (for the `writes === 0` case, which currently
-  refreshes everything):
-  - refresh **`symbols` only**. Own-Symbols (e.g. `ORIG_ID`) are carried by the
-    live object, are not doc content, and legitimately differ after operations
-    like duplicate — the derived snapshot must expose them.
-  - leave **`version`** untouched — advancing it with no content change is
-    precisely the phantom-change source.
-  - leave **`versionNonce`** untouched — it is the reconciliation partner of
-    `version`; moving it alone is invisible to the Store's gate but still
-    perturbs `hashElementsVersion`.
-  - leave **`updated`** untouched — the deletion marker dates a tombstone from
-    it, so refreshing on a no-op would silently push an expiry into the future.
-  - leave **`boundElementsEmpty`** untouched — it is derived from content that,
-    by definition, did not change.
-
-  **THE FIVE `hasElementChange` FLIPS, ADJUDICATED INDIVIDUALLY (round 3).**
-
-  All five are the **fix WORKING**, not phantom history — and this is decided on
-  evidence, not on the direction of the flag:
-  - They are one coherent cluster: every one is a **redo-stack entry in the
-    `should support bidirectional bindings` group** (unbind on deletion/undo,
-    rebind on the inverse). That is precisely where `bumpMetaVersionsFor` runs on
-    undo and the follow-up write then arrives carrying a stale version.
-  - `hasElementChange = !delta.elements.isEmpty()`, so `true` means the entry's
-    elements delta became genuinely NON-EMPTY. Redoing an unbind/rebind DOES
-    change elements, so recording it is correct and `false` was the dropped edit.
-  - Decisive: those five tests fail **ONLY** on the snapshot. Every behavioural
-    assertion in them — and their whole point is asserting binding state across
-    undo/redo — still passes. Behaviour is unchanged; only the recorded flag now
-    matches what the operation actually did.
-
-  **The `captureUpdate: NEVER` extra increment is a DIFFERENT phenomenon and IS a
-  phantom.** `collab.test` "two ephemeral increments" yields 3, and both updates
-  explicitly declined capture, so a Store-visible increment there cannot be a
-  previously-dropped real edit. The two must not be lumped together: 5 corrected
-  recordings, 1 genuine phantom.
-
-  **NO-WRITE RULE — REACHABLE, so not a hypothetical cleanup**
-  (`Scene.noWriteMeta.test.ts`, committed as `it.fails`). Measured on current
-  code: a bulk replace whose content is UNCHANGED but which carries stale
-  reconciliation metadata drives `version` **2 → -1** and `updated` **1 → 999**,
-  both taken verbatim — a version regression with no content change to justify
-  any movement whatsoever. Re-submitting the same object verbatim is correctly a
-  no-op, so the violation needs a stale carrier, which is exactly what a stale
-  action array is.
-
-  **Correction to my earlier flag, on review**: the `updated` half corrupts only
-  the LOCAL derived element. The durable deletion marker is protected —
-  `syncDeletionMarker` stamps only on the live→deleted transition and never
-  restamps — so there is no tombstone-expiry extension. Claim withdrawn.
-
-  **NO-WRITE META RULE — LANDED** (independent slice; the version-authority
-  mechanism is still NOT implemented).
-
-  When an element contributes ZERO document writes, nothing about it changed, so
-  the doc-derived reconciliation metadata no longer moves: `version`,
-  `versionNonce` and `updated` are carried forward from the previous meta, and
-  `versionHighWater` is not advanced.
-
-  **Two fields DO still refresh — my first rule was too broad and was corrected
-  in review.** `symbols` (own-Symbol props like `ORIG_ID` live on the caller's
-  object, never in the doc). And `boundElementsEmpty`: the CRDT collapses
-  `boundElements: []` and `null` into the SAME empty representation, so that
-  sentinel is the only carrier of the distinction — a caller switching between
-  them produces zero Yjs writes yet must still change what derives. Verified in
-  code before accepting the correction, not taken on trust.
-
-  **Coverage** (`Scene.noWriteMeta.test.ts`, 5): the reachability case (was RED,
-  now green), the same object re-submitted verbatim, BOTH collapsed-representation
-  directions (`null → []` and `[] → null`) with no metadata movement, and Symbols
-  still reaching the freshly derived snapshot.
-
-  **Snapshot impact, classified rather than blanket-updated**: exactly 5 values in
-  `history.test.tsx`, ALL `"version"`, ALL exactly **−1** — one spurious advance
-  removed per element, which is precisely what the rule predicts. **Zero
-  `hasElementChange` flips**, so no history semantics changed, and no behavioural
-  assertion changed in any of the 5 tests. Accepted on that basis.
-
-  **REMEASURED from the post-no-write baseline** (the version-authority mechanism
-  is still NOT implemented; experiment applied and reverted):
-
-  | | old baseline | after the no-write slice |
-  |---|---|---|
-  | failing reason-pairs | 61 | **65** |
-  | snapshot reasons | 59 | **49** |
-  | cascade (`multiple elements`) | 13 | **13** |
-  | semantic | 3 | **3** |
-  | `hasElementChange` flips | 5 (`false→true`) | **5 (`false→true`)** |
-
-  **Nothing was resolved by the no-write slice.** All three semantic failures
-  survive verbatim — the `captureUpdate: NEVER` phantom (3 instead of 2), the
-  `reappearReveal` STORE case, and the `textWysiwyg` container-wrap. So the
-  phantom is NOT a no-write artefact; it comes from the version advance itself
-  and must be explained before the mechanism lands.
-
-  The 13 cascade failures also persist unchanged, consistent with their being
-  downstream of the snapshot aborts rather than of any versioning rule.
-
-  Snapshot reasons fell 59 → 49 because the no-write slice had already removed
-  the spurious advances those encoded; the `hasElementChange` flips are
-  unchanged in count and direction, which is consistent with the round-3
-  adjudication that they are corrected recordings rather than an artefact the
-  no-write rule could have caused.
-
-  **THE PHANTOM, ATTRIBUTED — and it names the minimal correction.**
-  (Instrumented run; experiment applied and REVERTED, nothing implemented.)
-
-  *Wording corrected first*: `captureUpdate: NEVER` means "not durable/undoable",
-  NOT "no Store-visible increment". The phantom conclusion rests on **3
-  increments for 2 explicit `updateScene` calls**, not on `NEVER` itself.
-
-  *Which increment is extra*: not the trailing one — the **leading** one. The
-  three carry `x = 0, 100, 200`; the test expects only the last two. The extra is
-  emitted for the element's CREATION state.
-
-  *Its cause, from the per-write log*: three `replaceAllElements` writes occur,
-  and the bump fires on the FIRST —
-  `writes=1, prevMetaVersion=2, incomingVersion=2 → chosen 3`. That is a **TIE,
-  not a regression**. Element creation is a two-phase write (structural add then
-  reveal, `materializeNewEntry`), so meta is already stamped at 2 when the same
-  logical write re-presents a version-2 record. The `<=` rule reads that benign
-  re-presentation as staleness and manufactures an advance, which the Store then
-  observes as a second change for ONE logical creation. The other two writes
-  (`2→4`, `4→5`) carry advancing versions and never trigger it.
-
-  *Minimal correction, measured*: fire only on a **STRICT regression**
-  (`incoming < prev`), never on a tie.
-
-  | mechanism | failing pairs | snapshot | cascade | semantic | fixes anchor |
-  |---|---|---|---|---|---|
-  | blanket `max` | 70 | — | — | — | — |
-  | content-gated `<=` (pre-no-write) | 61 | 59 | 13 | 3 | yes |
-  | content-gated `<=` (post-no-write) | 65 | 49 | 13 | 3 | yes |
-  | content-gated **strict `<`** | **44** | **29** | **13** | **2** | **yes** |
-
-  **The phantom is GONE under strict `<`**, and the anchoring
-  INV-VERSION-MONOTONIC case still passes. Causality is isolated by the pair:
-  `<=` produces it, `<` does not, and the write log shows the bump firing exactly
-  on the creation-time tie.
-
-  Remaining semantic failures: `textWysiwyg` container-wrap and `reappearReveal`'s
-  STORE case — still unattributed, and 13 of the 44 are the known contextmenu
-  cascade.
-
-  **BOTH SEMANTIC CASES ADJUDICATED under strict `<` (experiment reverted;
-  nothing implemented). ONE IS BLOCKING.**
-
-  **1. `reappearReveal` — BLOCKING. The rule breaks a landed green invariant.**
-  Measured on both baselines:
-  - landed: reveal arrives at **v4**, Store accepts, `isDeleted:false`. PASSES.
-  - strict `<`: Store holds the tombstone at **v5** and the Scene has the element
-    live at **v5** — an exact TIE, so the Store's `prevElement.version <
-    nextElement.version` gate rejects the reveal and keeps the tombstone.
-
-  This is NOT the rule exposing a reveal the old test missed: the Store behaves
-  correctly, and the rule manufactured the equality. The cause is a collision of
-  two authorities that each add one — the Store synthesizes its tombstone at
-  `version + 1` (store.ts:924) while the Scene rule advances to
-  `previousMeta + 1`. They land on the same number, so INV-REVEAL (T005/T024)
-  regresses. **Any version-authority mechanism must be reconciled with the
-  Store's tombstone synthesis, not just with its change-detection gate.**
-
-  **2. `textWysiwyg` container-wrap — metadata only, NOT semantic.** The actual
-  container element differs from the expectation in `version` alone (**2 → 9**);
-  `height` 35, `width` 610, `x` 15, `y` 12.5, `boundElements`, `isDeleted` and
-  `updated` are byte-identical on both baselines. The assertion bakes
-  `version: 2` into an `objectContaining` of otherwise-semantic fields.
-  *Worth noting separately*: +7 means that flow writes the container ~7 times
-  with a version behind meta, i.e. seven genuine stale writes — evidence for the
-  T015/T016 side-effecting-helper work, independent of T014b.
-
-  **Snapshot classification under strict `<`** (4 files): **194 `"version"`
-  lines** plus **10 `"hasElementChange"` (the same 5 flips, same `false → true`
-  direction)**. No geometry, binding or content keys change anywhere. The flips
-  are unchanged from the `<=` measurement, consistent with the round-3
-  adjudication that they are corrected recordings rather than an artefact of any
-  particular threshold.
-
-  **Cascade re-verified under strict `<`**: the first isolated failure in
-  `contextmenu.test.tsx` is still a snapshot mismatch, with the selector error
-  appearing only afterwards. Still cascade, still zero independent defects.
-
-  **Proposed boundary, NOT implemented pending review**: `meta.version` stays the
-  exact ordered per-element counter that history/delta require, and advances iff
-  the element's doc content changed — which is what makes it a faithful change
-  identity for the Store as well. The open question is whether `store.ts`'s
-  ordering gate should become an identity comparison instead, which would let the
-  counter stay untouched on a stale bulk write; that changes a different
-  authority and needs its own review.
+  **Non-vacuity, and a caveat stated rather than glossed**: removing BOTH
+  reservation call sites fails reappearReveal with the exact tie symptom, and
+  restoring them fixes it. But removing ONLY the `commitPlan` site fails nothing
+  — so the `replaceAllElements` site is the one under test, and the `commitPlan`
+  reservation is justified by SYMMETRY, not by evidence. It is a local hard
+  removal by the same definition, but no test currently distinguishes it.
 
 - [ ] T015 Declare intent sets in the side-effecting helpers (`redrawTextBoundingBox`, `updateBoundElements`, `bindOrUnbind`) — see plan R6.
 - [ ] T016 **(PREMISE FALSIFIED — re-scope before doing any of this)** The re-read sites are **not** dead code after FR-009 and must not be bulk-deleted. - **Census correction**: 36 `fresh-snapshot` sites across 17 files (16 literal `*Map.get(id) ?? element` idioms), not the 32/14 first reported. - **Why they survive**: FR-009 scoped `Scene.mutateElement`, but `replaceAllElements` is deliberately unscoped — its contract is "make the doc equal this element set", which is correct for a full reconcile. The stale-read revert class therefore survives at the BULK path: a handler that captures the array, lets a side-effect helper write to the doc, then returns its captured array, reverts that write. Proven by `Scene.replaceAll-wholeObject.test.ts` (with non-vacuity guards on both the staleness of the array and the reality of the doc write). Deleting the re-reads would reintroduce exactly the class `b2f708f5` fixed. - **What the earlier "1/32 done" actually was**: not a bandaid removal. `changeFontSize`'s `editedTextIds` carve-out was an _exception_ to re-reading, removed because the font size became a real doc write — the surrounding re-read stayed. Prior claim withdrawn. - **Re-scope**: removing the re-reads requires first changing the bulk path — either scoping `replaceAllElements` to a declared changed-set, or changing how action handlers return arrays so a stale one never reaches it. That is a new requirement, not a cleanup task, and it interacts with T014b (both are about the bulk write path). Decide the bulk-path design before touching any of the 36 sites.

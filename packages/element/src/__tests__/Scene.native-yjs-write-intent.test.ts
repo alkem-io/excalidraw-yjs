@@ -226,9 +226,7 @@ describe("INV-WRITE-INTENT — a write touches only the declared keys", () => {
 });
 
 describe("INV-VERSION-MONOTONIC — meta.version never regresses", () => {
-  // SKIPPED — confirmed defect, deliberately not yet fixed. See spec 002 FR-011
-  // task T014b and the KNOWN DEFECT comment in `Scene.replaceAllElements`.
-  it.skip("a stale-versioned bulk write still out-versions a raised meta", () => {
+  it("a stale-versioned bulk write still out-versions a raised meta", () => {
     const scene = new Scene();
     scene.replaceAllElements([rect("a", { x: 0 })]);
     const base = scene.getElement("a")!;
