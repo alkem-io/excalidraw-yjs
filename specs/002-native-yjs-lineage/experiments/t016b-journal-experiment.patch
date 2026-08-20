@@ -1,5 +1,5 @@
 diff --git a/packages/element/src/Scene.ts b/packages/element/src/Scene.ts
-index 7b51c8af..c7dc14e8 100644
+index 7b51c8af..601d2c08 100644
 --- a/packages/element/src/Scene.ts
 +++ b/packages/element/src/Scene.ts
 @@ -57,6 +57,7 @@ import {
@@ -33,7 +33,7 @@ index 7b51c8af..c7dc14e8 100644
    private logicalBuffer: { v1: Uint8Array[]; v2: Uint8Array[] } | null = null;
  
    private internalDocHandlers: Array<[string, (...a: never[]) => void]> = [];
-@@ -905,6 +922,19 @@ export class Scene {
+@@ -905,6 +922,28 @@ export class Scene {
      result: readonly ElementRecord[],
      options: {
        declaredIntent?: DeclaredElementIntent;
@@ -50,34 +50,114 @@ index 7b51c8af..c7dc14e8 100644
 +       * result records; this only decides WHICH keys are written.
 +       */
 +      alreadyAppliedIntent?: ReadonlyMap<string, ReadonlySet<string>>;
++      /**
++       * See `DeclaredElementIntent.overlapResolution`. Supplied by the caller
++       * when the DERIVED diff is in use; an explicit `declaredIntent` carries
++       * its own and takes precedence.
++       */
++      overlapResolution?: ReadonlyMap<
++        string,
++        ReadonlyMap<string, "result" | "applied">
++      >;
        recordHistory?: boolean;
      } = {},
    ): { changedIds: ReadonlySet<string> } {
-@@ -913,8 +943,21 @@ export class Scene {
+@@ -913,8 +952,92 @@ export class Scene {
        resultById.set(r.id as string, r);
      }
  
 -    const declared =
 -      options.declaredIntent ?? computeElementIntent(base, result);
 +    let declared = options.declaredIntent ?? computeElementIntent(base, result);
-+    if (!options.declaredIntent && options.alreadyAppliedIntent?.size) {
-+      // DERIVED intent only — see `alreadyAppliedIntent`'s precedence note.
-+      const keysById = new Map<string, Set<string>>();
++
++    // FAIL-CLOSED OWNERSHIP (T016b). A key claimed by BOTH the derived diff and
++    // the action journal, whose result value differs from what the doc already
++    // holds, is AMBIGUOUS: the action may be overriding the helper, or its value
++    // may be stale. Nothing here may guess. Every such key must be resolved
++    // exactly once, and an unresolved one rejects BEFORE any mutation.
++    //
++    // A same-valued overlap is NOT ambiguous — both sides agree, so there is
++    // nothing to choose and no resolution is required.
++    if (options.alreadyAppliedIntent?.size) {
++      const explicit = declared.overlapResolution ?? options.overlapResolution;
++      const unresolved: string[] = [];
++      const suppress = new Map<string, Set<string>>();
++
 +      for (const [id, keys] of declared.keysById) {
 +        const applied = options.alreadyAppliedIntent.get(id);
-+        const remaining = applied
-+          ? new Set([...keys].filter((k) => !applied.has(k)))
-+          : new Set(keys);
-+        if (remaining.size) {
-+          keysById.set(id, remaining);
++        if (!applied) {
++          continue;
++        }
++        const record = resultById.get(id);
++        const current = this.getElement(id as never) as Record<
++          string,
++          unknown
++        > | null;
++        if (!record || !current) {
++          continue;
++        }
++        for (const key of keys) {
++          if (!applied.has(key)) {
++            continue;
++          }
++          // Same comparison the write planner uses to decide "changed".
++          if (
++            JSON.stringify((record as Record<string, unknown>)[key]) ===
++            JSON.stringify(current[key])
++          ) {
++            continue;
++          }
++          const choice = explicit?.get(id)?.get(key);
++          if (choice === undefined) {
++            unresolved.push(`${id}.${key}`);
++            continue;
++          }
++          if (choice === "applied") {
++            let set = suppress.get(id);
++            if (!set) {
++              set = new Set();
++              suppress.set(id, set);
++            }
++            set.add(key);
++          } else if (choice !== "result") {
++            throw new Error(
++              `applyElementChanges: unknown overlap resolution "${String(
++                choice,
++              )}" for ${id}.${key} — expected "result" or "applied".`,
++            );
++          }
 +        }
 +      }
-+      declared = { ...declared, keysById };
++
++      if (unresolved.length) {
++        throw new Error(
++          `applyElementChanges: unresolved ownership for ${unresolved
++            .sort()
++            .join(
++              ", ",
++            )}. Each key written by BOTH this action and a helper it ` +
++            `invoked must declare "result" or "applied"; there is no default.`,
++        );
++      }
++
++      if (suppress.size) {
++        const keysById = new Map<string, ReadonlySet<string>>();
++        for (const [id, keys] of declared.keysById) {
++          const drop = suppress.get(id);
++          const remaining = drop
++            ? new Set([...keys].filter((k) => !drop.has(k)))
++            : new Set(keys);
++          if (remaining.size) {
++            keysById.set(id, remaining);
++          }
++        }
++        declared = { ...declared, keysById };
++      }
 +    }
      assertIntentAgainstResult(declared, resultById);
  
      // T016j — validate ONLY the records this mutation affects: creations, and
-@@ -1165,6 +1208,56 @@ export class Scene {
+@@ -1165,6 +1288,56 @@ export class Scene {
     * Deliberately narrow — the editor's action layer is the only caller. This is
     * not a general mode; see {@link openLogicalMutation} for the join rule.
     */
@@ -134,7 +214,7 @@ index 7b51c8af..c7dc14e8 100644
    beginLogicalMutation(): void {
      this.openLogicalMutation();
    }
-@@ -2213,6 +2306,23 @@ export class Scene {
+@@ -2213,6 +2386,23 @@ export class Scene {
        isDragging: false,
      },
    ): TElement {
@@ -160,10 +240,12 @@ index 7b51c8af..c7dc14e8 100644
      const { version: prevVersion } = element;
 diff --git a/packages/element/src/__tests__/Scene.mutationJournal.test.ts b/packages/element/src/__tests__/Scene.mutationJournal.test.ts
 new file mode 100644
-index 00000000..f5659358
+index 00000000..0a0b04a7
 --- /dev/null
 +++ b/packages/element/src/__tests__/Scene.mutationJournal.test.ts
-@@ -0,0 +1,230 @@
+@@ -0,0 +1,315 @@
++import * as Y from "yjs";
++
 +import { Scene } from "../Scene";
 +import { newElement } from "../newElement";
 +
@@ -363,6 +445,8 @@ index 00000000..f5659358
 +        addedIds: new Set(),
 +        removedIds: new Set(),
 +        keysById: new Map([["a", new Set(["x"])]]),
++        // keysById alone does NOT imply a winner: ownership is explicit.
++        overlapResolution: new Map([["a", new Map([["x", "result"]])]]),
 +      } as never,
 +      alreadyAppliedIntent: journal,
 +    });
@@ -387,19 +471,121 @@ index 00000000..f5659358
 +    const result = base.map((e) => ({ ...e, x: 99 }));
 +    scene.applyElementChanges(base as never, result as never, {
 +      alreadyAppliedIntent: scene.getActionMutationJournal(),
++      overlapResolution: new Map([["a", new Map([["x", "applied"]])]]),
 +    });
 +    scene.endActionMutationJournal();
 +
 +    // The helper's write survives — this is the whole point of the journal.
 +    expect(scene.getElement("a")!.x).toBe(50);
 +  });
++
++  it("REJECTS an unresolved ambiguous overlap, with ZERO mutation", () => {
++    const scene = new Scene();
++    scene.replaceAllElements([rect("a", { x: 0 })]);
++    const base = scene.getElementsIncludingDeleted().map((e) => ({ ...e }));
++
++    scene.beginActionMutationJournal();
++    scene.mutateElement(
++      scene.getElement("a" as never)! as never,
++      {
++        x: 50,
++      } as never,
++    );
++    const before = scene.getElement("a" as never)!.x;
++    const svBefore = Y.encodeStateVector(scene.doc);
++
++    const result = base.map((e) => ({ ...e, x: 99 }));
++    expect(() =>
++      scene.applyElementChanges(base as never, result as never, {
++        alreadyAppliedIntent: scene.getActionMutationJournal(),
++        // no resolution supplied for a.x
++      }),
++    ).toThrow(/unresolved ownership for a\.x/);
++    scene.endActionMutationJournal();
++
++    // Rejected BEFORE any mutation: neither the value nor the document moved.
++    expect(scene.getElement("a" as never)!.x).toBe(before);
++    expect(Y.encodeStateVector(scene.doc)).toEqual(svBefore);
++  });
++
++  it("needs NO resolution when the overlap is same-valued", () => {
++    const scene = new Scene();
++    scene.replaceAllElements([rect("a", { x: 0 })]);
++    const base = scene.getElementsIncludingDeleted().map((e) => ({ ...e }));
++
++    scene.beginActionMutationJournal();
++    scene.mutateElement(
++      scene.getElement("a" as never)! as never,
++      {
++        x: 42,
++      } as never,
++    );
++
++    // The action derives the SAME value the helper already wrote — both sides
++    // agree, so there is nothing to choose.
++    const result = base.map((e) => ({ ...e, x: 42 }));
++    expect(() =>
++      scene.applyElementChanges(base as never, result as never, {
++        alreadyAppliedIntent: scene.getActionMutationJournal(),
++      }),
++    ).not.toThrow();
++    scene.endActionMutationJournal();
++
++    expect(scene.getElement("a" as never)!.x).toBe(42);
++  });
++
++  it("REJECTS an unknown resolution value", () => {
++    const scene = new Scene();
++    scene.replaceAllElements([rect("a", { x: 0 })]);
++    const base = scene.getElementsIncludingDeleted().map((e) => ({ ...e }));
++
++    scene.beginActionMutationJournal();
++    scene.mutateElement(
++      scene.getElement("a" as never)! as never,
++      {
++        x: 50,
++      } as never,
++    );
++    const result = base.map((e) => ({ ...e, x: 99 }));
++
++    expect(() =>
++      scene.applyElementChanges(base as never, result as never, {
++        alreadyAppliedIntent: scene.getActionMutationJournal(),
++        overlapResolution: new Map([
++          ["a", new Map([["x", "whatever"]])],
++        ]) as never,
++      }),
++    ).toThrow(/unknown overlap resolution/);
++    scene.endActionMutationJournal();
++  });
 +});
 diff --git a/packages/element/src/yjs/intent.ts b/packages/element/src/yjs/intent.ts
-index ec786038..271037a4 100644
+index ec786038..1d7c4239 100644
 --- a/packages/element/src/yjs/intent.ts
 +++ b/packages/element/src/yjs/intent.ts
-@@ -42,7 +42,13 @@ export type DeclaredElementIntent = {
+@@ -40,9 +40,34 @@ export type DeclaredElementIntent = {
+    * an added id does not appear here.
+    */
    readonly keysById: ReadonlyMap<string, ReadonlySet<string>>;
++  /**
++   * Ownership for keys claimed by BOTH the derived diff and the action mutation
++   * journal, where the canonical result value differs from what the doc already
++   * holds (spec 002 / T016b).
++   *
++   *  - `"result"`  — write the canonical result value (the action overrides a
++   *                  helper it invoked);
++   *  - `"applied"` — keep the value the helper already wrote to the doc (the
++   *                  action's value was computed from a now-stale base).
++   *
++   * There is NO default. Every ambiguous key must be covered exactly once, or
++   * the apply rejects before touching the document — a silent winner is what
++   * both failed designs did. `keysById` implies `"result"` for a matching
++   * overlap, so an action that explicitly declares a key need not repeat it.
++   */
++  readonly overlapResolution?: ReadonlyMap<
++    string,
++    ReadonlyMap<string, "result" | "applied">
++  >;
  };
  
 -const isIntentKey = (key: string): boolean =>
@@ -480,11 +666,138 @@ index 57ac84fa..9b1dd514 100644
  
          line = h.elements.find(
            (e) => e.id === line.id,
+diff --git a/packages/excalidraw/actions/actionBoundText.tsx b/packages/excalidraw/actions/actionBoundText.tsx
+index 2445d1bd..28b2cc2c 100644
+--- a/packages/excalidraw/actions/actionBoundText.tsx
++++ b/packages/excalidraw/actions/actionBoundText.tsx
+@@ -347,16 +347,14 @@ export const actionWrapTextInContainer = register({
+       }
+     }
+ 
+-    // fresh-snapshot: re-read post-mutation (the just-wrapped TEXT element + any
+-    // re-bound arrows were written to the doc via scene.mutateElement /
+-    // redrawTextBoundingBox, but `updatedElements` carries their stale input
+-    // entries — re-read live so the wrap (containerId/autoResize/boundElements)
+-    // is not reverted. New containers are not yet in the doc, so the `?? element`
+-    // fallback preserves them)
+-    const freshMap = app.scene.getNonDeletedElementsMap();
+-    updatedElements = updatedElements.map(
+-      (element) => freshMap.get(element.id) ?? element,
+-    );
++    // The post-helper re-read that used to sit here is GONE (spec 002 T016b).
++    // It existed to stop stale input entries reverting helper writes — which the
++    // patch route now protects — but it also replaced the just-reindexed text
++    // with the live doc version still carrying its OLD index, tying it against
++    // the freshly-minted container. Measured: `syncMovedIndices` produces
++    // distinct `a1`/`a2`, and the re-read turned them into `a1`/`a1`, which only
++    // looked harmless while authoritative `replaceAllElements` re-indexed
++    // everything on the way in.
+ 
+     return {
+       elements: updatedElements,
 diff --git a/packages/excalidraw/actions/actionFlip.ts b/packages/excalidraw/actions/actionFlip.ts
-index fbf2af52..e0339479 100644
+index fbf2af52..d1f4ed46 100644
 --- a/packages/excalidraw/actions/actionFlip.ts
 +++ b/packages/excalidraw/actions/actionFlip.ts
-@@ -211,8 +211,5 @@ const flipElements = (
+@@ -26,25 +26,57 @@ import { register } from "./register";
+ 
+ import type { AppClassProperties, AppState } from "../types";
+ 
++/**
++ * Ownership for the geometry keys flip both DERIVES and writes through helpers.
++ *
++ * `flipSelectedElements` repositions elements — and their bound texts and
++ * arrows — THROUGH THE DOC via `mutateElement`, then returns the pre-flip
++ * `selectedElements`. Those carry positions computed from the pre-flip base, so
++ * for any geometry key the doc already holds the correct value and the action's
++ * derived one is stale: the helper's write wins.
++ *
++ * Built from the ids the action actually touched — never fixture literals, and
++ * never an action-name branch inside the planner.
++ */
++const flipOverlapResolution = (
++  touched: readonly { id: string }[],
++): ReadonlyMap<string, ReadonlyMap<string, "result" | "applied">> => {
++  const GEOMETRY_KEYS = [
++    "x",
++    "y",
++    "width",
++    "height",
++    "angle",
++    "points",
++  ] as const;
++  const byId = new Map<string, ReadonlyMap<string, "result" | "applied">>();
++  for (const el of touched) {
++    byId.set(el.id, new Map(GEOMETRY_KEYS.map((k) => [k, "applied" as const])));
++  }
++  return byId;
++};
++
+ export const actionFlipHorizontal = register({
+   name: "flipHorizontal",
+   label: "labels.flipHorizontal",
+   icon: flipHorizontal,
+   trackEvent: { category: "element" },
+   perform: (elements, appState, _, app) => {
+-    return {
+-      elements: updateFrameMembershipOfSelectedElements(
+-        flipSelectedElements(
+-          elements,
+-          app.scene.getNonDeletedElementsMap(),
+-          appState,
+-          "horizontal",
+-          app,
+-        ),
++    const next = updateFrameMembershipOfSelectedElements(
++      flipSelectedElements(
++        elements,
++        app.scene.getNonDeletedElementsMap(),
+         appState,
++        "horizontal",
+         app,
+       ),
+       appState,
++      app,
++    );
++    return {
++      elements: next,
++      overlapResolution: flipOverlapResolution(next),
++      appState,
+       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+     };
+   },
+@@ -57,19 +89,21 @@ export const actionFlipVertical = register({
+   icon: flipVertical,
+   trackEvent: { category: "element" },
+   perform: (elements, appState, _, app) => {
+-    return {
+-      elements: updateFrameMembershipOfSelectedElements(
+-        flipSelectedElements(
+-          elements,
+-          app.scene.getNonDeletedElementsMap(),
+-          appState,
+-          "vertical",
+-          app,
+-        ),
++    const next = updateFrameMembershipOfSelectedElements(
++      flipSelectedElements(
++        elements,
++        app.scene.getNonDeletedElementsMap(),
+         appState,
++        "vertical",
+         app,
+       ),
+       appState,
++      app,
++    );
++    return {
++      elements: next,
++      overlapResolution: flipOverlapResolution(next),
++      appState,
+       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+     };
+   },
+@@ -211,8 +245,5 @@ const flipElements = (
    // through the doc rather than mutated in place) are stale in `selectedElements`;
    // returning them would make the action's result clobber the doc's correct
    // post-flip positions.
@@ -516,11 +829,32 @@ index fef8b7ed..5a5c3a5a 100644
        this.app.scene.endLogicalMutation();
      }
    }
+diff --git a/packages/excalidraw/actions/types.ts b/packages/excalidraw/actions/types.ts
+index 3ba94fc4..ef5cdb81 100644
+--- a/packages/excalidraw/actions/types.ts
++++ b/packages/excalidraw/actions/types.ts
+@@ -29,6 +29,16 @@ export type ActionResult =
+       files?: BinaryFiles | null;
+       captureUpdate: CaptureUpdateActionType;
+       replaceFiles?: boolean;
++      /**
++       * Ownership for keys this action BOTH derives and writes through a helper
++       * it invoked (spec 002 / T016b). Required only for genuinely ambiguous
++       * keys — where the result value differs from what the doc already holds —
++       * and rejected before any mutation if one is missing.
++       */
++      overlapResolution?: ReadonlyMap<
++        string,
++        ReadonlyMap<string, "result" | "applied">
++      >;
+     }
+   | false;
+ 
 diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
-index 14544f1f..401f0069 100644
+index 14544f1f..83dc570f 100644
 --- a/packages/excalidraw/components/App.tsx
 +++ b/packages/excalidraw/components/App.tsx
-@@ -2903,95 +2903,125 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2903,95 +2903,126 @@ class App extends React.Component<AppProps, AppState> {
      });
    };
  
@@ -595,6 +929,7 @@ index 14544f1f..401f0069 100644
 +            {
 +              recordHistory,
 +              alreadyAppliedIntent: this.scene.getActionMutationJournal(),
++              overlapResolution: actionResult.overlapResolution,
 +            },
 +          );
 +        } else {

@@ -561,6 +561,54 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
   the rewritten observable test IS a valid gate. The arrow also survives the
   delete (`isDeleted: false`), so it does not pass by the element vanishing.
 
+  **FINAL INTEGRATED EXPERIMENT — built, measured, REVERTED. NOT green yet.**
+
+  **API shape (single selector, no second overlapping channel)**:
+  `DeclaredElementIntent` gains
+  `overlapResolution?: ReadonlyMap<id, ReadonlyMap<key, "result" | "applied">>`,
+  mirrored as an `applyElementChanges` option for the derived-diff path and as
+  `ActionResult.overlapResolution` so an action can supply it. An AMBIGUOUS key
+  is one in `derived ∩ journal` whose result value differs from the CURRENT doc
+  value, compared with the same `JSON.stringify` semantics the write planner
+  uses. Same-valued overlap needs no resolution. Missing → throw naming every
+  unresolved `id.key`; unknown value → throw. **Zero mutation on rejection**,
+  pinned by an unchanged state vector.
+
+  **Flip's resolution producer**: `flipOverlapResolution(next)` in
+  `actionFlip.ts` maps the ids the action actually touched to
+  `x/y/width/height/angle/points → "applied"`. Derived from dynamic ids, no
+  fixture literals, and no action-name branch anywhere in `Scene`.
+
+  **Both proven rereads removed** (flip:216 and the text/container one). No other
+  reread touched.
+
+  **Results**: both flip suites green (43 passed). Full suite **11 failures**:
+  8 snapshot + 3 semantic, of which 2 were my own journal tests still written
+  against the old default-subtraction semantics — updated, now 12 passing. That
+  leaves **8 snapshot + 1 semantic**.
+
+  **Snapshot classification** (3 files): **6 `"version"` + 4 `"versionNonce"`.
+  ZERO `updated`, ZERO `hasElementChange`, ZERO geometry/binding/content, ZERO
+  membership/order.**
+
+  **The 1 remaining semantic** is `textWysiwyg`'s baked-in `version: 9` vs `2`.
+  Per the standing rule it may change ONLY once instrumentation shows the
+  reduction comes from eliminated stale/no-op writes rather than a missed
+  intended write — **that instrumentation has NOT been done**, so it is left
+  failing.
+
+  **Probes that fire**: omit a flip resolution → pre-write throw naming
+  `arr.x, rec1.x, rec2.x`; invert `applied`→`result` → the real flip semantic
+  RED; explicit `result` beats a journaled key; same-value overlap needs no
+  resolution; unknown value rejects; close-without-open throws; a throw
+  mid-action still clears.
+
+  **GAP, stated rather than glossed**: the n=3 order pin is **NOT** the
+  discriminating gate for the text reread — it passes with that reread RESTORED.
+  The `textWysiwyg` assertion is what actually catches the tie. Item 5's
+  requirement is therefore met by that test, not by the pin I built, and the pin
+  should not be described as covering it.
+
   **T015 — HOLD LIFTED (see the discriminating experiment above).** It was held
   because helper intent sets risked being a SECOND unconsumed API, and because
   the textWysiwyg `+7` proved only that stale full writes happen, not that
