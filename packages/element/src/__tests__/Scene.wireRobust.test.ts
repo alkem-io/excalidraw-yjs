@@ -57,9 +57,14 @@ describe("remote-update robustness — measured behaviour", () => {
   });
 
   it("apply is NOT ATOMIC: a truncated update can throw AND still mutate", () => {
-    // This is why `applyRemoteUpdate` must not catch-and-continue. Recovery has
-    // to discard the Scene generation and resync; carrying on with the same doc
-    // means carrying on with a partially-applied, internally inconsistent one.
+    // This is why `applyRemoteUpdate` must not catch-and-continue: carrying on
+    // would mean carrying on with a partially-applied doc the caller believes is
+    // up to date. The bytes here are injected DIRECTLY — no shipped caller can
+    // produce a fragment (see the note on `Scene.applyRemoteUpdate`), so this
+    // pins the guard, not an open recovery gap. An earlier version of this
+    // comment said recovery "has to discard the Scene generation and resync";
+    // that is wrong twice over and is retracted — a resync alone repairs it, and
+    // there is nothing in the shipped stack to repair.
     const source = new Scene();
     source.replaceAllElements([mk("a"), mk("b")]);
     source.setAssetLocators({ f1: "asset://f1" });

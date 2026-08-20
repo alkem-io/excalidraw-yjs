@@ -1848,14 +1848,23 @@ export class Scene {
     // dropped connection produces. Swallowing that would continue on a doc the
     // caller believes is up to date when it is not.
     //
-    // Recovery is a state-vector RESYNC, not a discard: the fragment is a valid
-    // PREFIX of the sender's structs, so the doc is incomplete rather than
-    // corrupt, and the CRDT's own catch-up (`SyncStep1` -> `SyncStep2`) repairs
-    // it. Measured: 27 of 27 converge, with local work the authority has not yet
-    // seen preserved — which discarding the generation and re-seeding destroys.
-    // The resync belongs to the transport that owns the session, not to a catch
-    // block in the element layer, and needs no API beyond what is already
-    // exported. See T027 and `wireRecoveryPolicy.test.tsx`.
+    // NO SHIPPED CALLER CAN PRODUCE A TRUNCATED UPDATE, so this is a guard, not a
+    // pending feature. Every receiver in this repo hands over a COMPLETE payload:
+    // `Collab`'s INIT and UPDATE apply a decrypted socket message, and cold-load
+    // adoption applies an `encodedScene` the host supplies whole. Downstream, the
+    // production transport frames whole messages and both the client and the hub
+    // candidate-apply before broadcasting, and checkpoint restore validates
+    // before serving — traced through the landed client + service by the
+    // collab-assists session, not re-verified here.
+    //
+    // If a future caller ever does hand over a fragment, the remedy is a
+    // state-vector RESYNC, not a discard: the fragment is a valid PREFIX of the
+    // sender's structs, so the doc is incomplete rather than corrupt, and the
+    // CRDT's own catch-up repairs it (measured: 27 of 27 converge, with local
+    // work the authority has not yet seen preserved — which discarding the
+    // generation would destroy). That needs no API beyond what is already
+    // exported. Nobody owes an implementation of it today. See T027 and
+    // `wireRecoveryPolicy.test.tsx`, which keep the measurement as evidence.
     if (format === "v2") {
       Y.applyUpdateV2(this.doc, update, REMOTE_ORIGIN);
     } else {

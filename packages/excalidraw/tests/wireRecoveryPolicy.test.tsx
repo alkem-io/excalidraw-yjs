@@ -11,40 +11,40 @@ import { act, render } from "./test-utils";
 const { h } = window;
 
 /**
- * INV-WIRE-ROBUST (T027) — the RECEIVER RECOVERY POLICY, stated as tests.
+ * INV-WIRE-ROBUST (T027) — receiver recovery, EVIDENCE rather than an open gate.
  *
- * `remoteUpdateRobustness.test.tsx` measures what goes wrong at the receiver
- * boundary. This file pins what a receiver must DO afterwards, and — for the
- * class no receiver can handle — records the open hole rather than papering
- * over it.
+ * **No shipped caller can produce a truncated update.** These tests inject
+ * malformed bytes DIRECTLY into `Scene.applyRemoteUpdate`. Every receiver in
+ * this repo hands over a complete payload — `Collab`'s INIT and UPDATE apply a
+ * decrypted socket message, cold-load adoption applies an `encodedScene` the
+ * host supplies whole. Downstream, the transport frames whole messages, client
+ * and hub candidate-apply before broadcasting, and checkpoint restore validates
+ * before serving; that half was traced through the landed client and service by
+ * the collab-assists session and is not re-verified here.
  *
- * The policy rests on one measured fact, proved by the first two tests: an
- * ANNOUNCED partial apply is not corruption, it is INCOMPLETENESS. Yjs
- * integrates a prefix of valid structs, so the CRDT's own catch-up — a state
- * vector out, the authority's delta back (`SyncStep1` -> `SyncStep2`, which the
- * transport already speaks) — repairs it exactly.
+ * So this file does NOT describe work anybody owes. It was written when the
+ * class looked live, and an earlier revision of this comment said the
+ * implementation "belongs to the embedder's provider (`UnifiedCollabProvider`,
+ * client-web)" — **that is withdrawn; nobody is implementing a client resync.**
+ * The file is kept for two reasons: the measurements are the evidence for that
+ * conclusion, and if a caller ever does hand over a fragment, these pin what the
+ * remedy is and prove it needs no new API.
  *
- * SCOPE, decided rather than drifted into. The recovery policy covers ANNOUNCED
- * decode failure only. Silent semantic corruption — a flipped bit that still
- * decodes — is an **accepted risk**, deliberately outside this bounded recovery:
- * TLS already covers accidental wire flips, and the residual is a malicious or
+ * The measured fact, if that day comes: an announced partial apply is not
+ * corruption, it is INCOMPLETENESS. Yjs integrates a prefix of valid structs, so
+ * a state vector out and the authority's delta back repairs it exactly — 23 of
+ * 23 truncation offsets that both threw and mutated converge, with acknowledged
+ * AND unacknowledged local work intact and still publishable. RESYNC, not
+ * REPLACE: discarding the generation would also converge but destroys local
+ * edits the authority has not yet seen.
+ *
+ * SILENT SEMANTIC CORRUPTION is a separate class and an **accepted risk** — a
+ * flipped bit that still decodes, which no resync can repair and nothing
+ * announces. TLS covers accidental wire flips; the residual is a malicious or
  * buggy peer, which needs a product contract and an ingress owner rather than a
- * generic integrity layer bolted into the editor. The three `it.fails` cases
- * below therefore measure a gap nobody is currently assigned to close. They are
- * kept, not deleted, because the measurements are the evidence for that decision
- * — and because `it.fails` inverts: if someone ever does close the gap, the
- * suite goes RED and forces this scope note to be revisited consciously.
- *
- * Implementation of the resync itself does NOT live here. It belongs to the
- * embedder's provider (`UnifiedCollabProvider`, client-web), and needs no API
- * beyond what this package already exports — proven by the second test below.
- *
- * That is why the policy is RESYNC, not REPLACE. Discarding the Scene
- * generation and re-seeding would also converge, but it is strictly worse: it
- * destroys local edits the authority has not yet seen, which the resync
- * preserves. Measured over every truncation offset that both threw and mutated:
- * 23/23 repaired to an exact match, with acknowledged AND unacknowledged local
- * work intact and still publishable.
+ * generic integrity layer in the editor. The three `it.fails` cases measure that
+ * gap. They are kept, not deleted, because `it.fails` inverts: if anyone ever
+ * closes it the suite goes RED and forces this note to be revisited consciously.
  */
 
 const summarise = (s: Scene) =>

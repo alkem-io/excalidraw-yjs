@@ -8,12 +8,14 @@
 
 | task | why it is still open |
 | --- | --- |
-| T011 | its remaining half IS T027 |
+| T011 | CLOSED — both halves done |
 | T023 | fork side complete; `client-web` / `server` migration is the consumer lane. Packaging contract DECIDED — Route A, see `audit-one-artifact-feasibility.md`: one direct package per consumer (client → umbrella, server → slim `element`), same build identifier, five internals are transitives. One manifest cleanup is prepared and HELD until the client slice lands. |
-| T027 | policy settled and gated; the resync itself belongs to `UnifiedCollabProvider` |
+| T027 | CLOSED — truncation has no shipped producer; nothing owed |
 | T030 | paused by design until the consumer + ingress work lands, then run fresh |
 
-T002 is closed by replacement, not repair — see its entry before reading its "36 failures" as debt.
+T002 is closed by replacement, not repair — see its entry before reading its "36 failures" as debt. T027 is closed by _unreachability_: the truncation class it measured has no shipped producer, so the measurements are evidence and not an open gate.
+
+T030's precondition is now specifically collab-unification's clean-1000 corrective; once that lands the full cross-repo state is ready for the final review.
 
 **Revised order (2026-08-19): the write path comes BEFORE the wire.** The reordering was originally argued from the 34 re-enabled `multiplayer undo/redo` tests gating FR-009/010/011 rather than FR-001. **That premise is withdrawn (T002 — the block never exercised a second replica and is now deleted)**, but the order it produced is right for an independent reason that survives: the write path is where lineage is destroyed, so INV-CONVERGE cannot go green while every local write clobbers it. Fixing the write path first also deletes 32 bandaid sites, shrinking what every later phase must keep green.
 
@@ -102,7 +104,7 @@ T002 is closed by replacement, not repair — see its entry before reading its "
   - **The original "history depths stay in lockstep" wording is FALSIFIED and must not be restored**: an appState-only step makes a `History` entry with no `UndoManager` item, so equal depths cannot hold for a correct editor. Stated behaviourally instead — a remote apply contributes nothing to local history — and green (`historyLockstep.test.tsx`).
   - **`meta.version` never regresses** — closed by T014b. Live gate: the un-skipped INV-VERSION-MONOTONIC case in `Scene.native-yjs-write-intent.test.ts`, plus the reservation pin in `reappearReveal.test.tsx`.
 
-- [ ] T011 **(SPLIT — one done; the other is settled and owned elsewhere)** - **INV-APPSTATE-UNDO — DONE (T028)**: undo/redo of background/name survives the next scene update, verified across a linked peer, with `name` narrowed by evidence. Live gate: `appStateUndo.test.tsx`. - **INV-WIRE-ROBUST — tracked as T027, where the policy is now SETTLED and the implementation belongs to the embedder's provider, not this repo.** Its original wording ("an invalid update is rejected without desynchronising") is unachievable by catching: Yjs apply is not atomic on a decode failure, measured at 10 of 1056 truncation offsets both throwing AND mutating. Generation replacement now exists with a live consumer, so the dependency is gone; the transport-level reproduction is built and the receiver policy is drafted and measured (`wireRecoveryPolicy.test.tsx`), but no transport code is written — held pending the server ingress policy.
+- [x] T011 **(SPLIT — both halves now closed)** - **INV-APPSTATE-UNDO — DONE (T028)**: undo/redo of background/name survives the next scene update, verified across a linked peer, with `name` narrowed by evidence. Live gate: `appStateUndo.test.tsx`. - **INV-WIRE-ROBUST — tracked as T027, now CLOSED: the truncation class has no shipped producer, so no handler is owed anywhere.** Its original wording ("an invalid update is rejected without desynchronising") is unachievable by catching: Yjs apply is not atomic on a decode failure, measured at 10 of 1056 truncation offsets both throwing AND mutating. Generation replacement now exists with a live consumer, so the dependency is gone; the transport-level reproduction is built and the receiver policy is drafted and measured (`wireRecoveryPolicy.test.tsx`), but no transport code is written — held pending the server ingress policy.
 
 - [x] T014b **(DONE — FR-011 complete)** The version authority: a stale bulk write can no longer move `meta.version` backwards, and the Store no longer silently drops a real edit.
 
@@ -349,7 +351,7 @@ T002 is closed by replacement, not repair — see its entry before reading its "
 
   **Deliberately NOT done, and why.** The cold-load path no longer marks the room saved. Since T020 a cold load ADOPTS the stored document, and that adoption is itself a doc-changing transaction occurring after `loadFromFirebase` returns, so no revision available there corresponds to the post-adoption scene. The reviewer's richer rule (adoption may establish a clean baseline _only if_ the fresh generation was clean, staying dirty if a remote update landed during the fetch) is a real improvement and is NOT implemented — deferral reviewed and approved as a bounded follow-up, not a blocker. Cost of the omission is one redundant save after a cold load — the harmless direction. Guessing a baseline would risk the dangerous one: a false-skip, which is silent data loss with nothing to retry it.
 
-- [ ] T027 **(POLICY SETTLED; IMPLEMENTATION IS NOT THIS REPO'S)** INV-WIRE-ROBUST.
+- [x] T027 **(CLOSED — the truncation class has NO SHIPPED PRODUCER; nothing is owed)** INV-WIRE-ROBUST.
 
   **Receiver census** — every production receiver of remote bytes funnels to `Scene.applyRemoteUpdate`: `Collab`'s INIT (`Collab.tsx:710`) and UPDATE (`:724`) handlers via `App.applyRemoteSceneUpdate`, and the cold-load adoption path (`App.tsx:3286`). Three entry points, one boundary.
 
@@ -417,6 +419,19 @@ T002 is closed by replacement, not repair — see its entry before reading its "
 
   **And this is the one path with no authority to resync FROM.** The drafted policy assumes a live peer or server answering `SyncStep1`. At cold load the stored document IS the authority, so a corrupted snapshot has nothing to be repaired against. The recovery policy therefore does NOT cover the adoption path, and it must not be described as if it did. Pinned by a fifth RED asserting v2 is no worse than v1, which fails today.
 
+  **CLOSED 2026-08-20 — the class is unreachable through shipped ingress and transport.** This supersedes the ownership note below, which assigned a client resync to `UnifiedCollabProvider`. **That assignment is WITHDRAWN. Nobody owes an implementation.**
+
+  Traced end to end after the client transport and `collaboration-service` ingress landed (the downstream half by the collab-assists session; the fork half re-verified here):
+
+  - **In this repo**, all three receivers hand `Scene.applyRemoteUpdate` a COMPLETE payload — `Collab`'s INIT and UPDATE apply a decrypted socket message, cold-load adoption applies an `encodedScene` the host supplies whole. Nothing constructs a partial update.
+  - **Downstream**, WebSocket frames whole messages, client and hub candidate-apply before broadcast, and checkpoint restore validates before serving.
+
+  So the truncation measurements were taken by injecting bytes DIRECTLY into `Scene.applyRemoteUpdate` — a path no shipped caller takes. Building a recovery handler for it would have been exactly the overengineering this spec is meant to avoid.
+
+  **What is kept, and why**: the measurements stay as evidence for the conclusion, and `wireRecoveryPolicy.test.tsx` stays as a pin on what the remedy WOULD be (a state-vector resync, needing no new API) if a future caller ever hands over a fragment. `Scene.applyRemoteUpdate` stays deliberately unguarded — swallowing a decode failure would still be wrong. The three `it.fails` cases stay as the accepted-risk record for silent semantic corruption, which is a different class and genuinely unrepairable by resync.
+
+  **Corrected alongside this**, so no comment promises a handler: the doc comment on `Scene.applyRemoteUpdate`, the docblock on `wireRecoveryPolicy.test.tsx`, and a comment in `Scene.wireRobust.test.ts` that was stale twice over — it still said recovery "has to discard the Scene generation and resync", which was wrong about the remedy before it was wrong about the need.
+
   **OWNERSHIP AND SCOPE — decided 2026-08-20, so this does not drift.**
 
   - **The resync implementation is NOT in this repo.** It belongs to the embedder's provider (`UnifiedCollabProvider`, client-web), which owns the socket and the session. **No fork API change is needed** — `applyRemoteSceneUpdate` already throws through and `encodeSceneStateVector` is already exported, proven by a test that runs the whole recovery through the public API only. This repo's deliverable for T027 is therefore the measurement, the RED, and the corrected policy — all landed. It is held here on purpose, not forgotten.
@@ -437,7 +452,7 @@ T002 is closed by replacement, not repair — see its entry before reading its "
 
   **Prettier — scoped, with the exception named.** Every file this work touches is clean. A repo-wide check reports 5 tracked source files unclean — `textWrapping.ts`, `polyfill.ts`, `harfbuzz-wasm.ts`, `woff2-bindings.ts`, `woff2-wasm.ts` — all **pre-existing upstream drift**: verified `polyfill.ts` was already unclean at `96f9bce3`, the 002 RED baseline, before any work here. `.prettierignore` is empty. Deliberately NOT reformatted: they are upstream files, and rewriting them would manufacture merge conflicts against a repo whose stated process is to minimise divergence.
 
-  **Invariant → live suite map, verified file by file** (not from task names): | invariant | live suite | |---|---| | INV-CONVERGE / INV-NO-RESURRECT | `Scene.convergence.property.test.ts` + `Scene.multiplayerHistory.property.test.ts` | | INV-PERSIST-MERGE / INV-SAVE-SKIP | `firebasePersistence.test.tsx` | | INV-COLD-LOAD-LINEAGE | `coldLoadLineage.test.tsx` | | INV-REVEAL | `reappearReveal.test.tsx` | | INV-BOUNDED | `Scene.boundedGC.test.ts` | | INV-WRITE-INTENT / INV-VERSION-MONOTONIC | `Scene.native-yjs-write-intent.test.ts` | | INV-HISTORY-LOCKSTEP | `historyLockstep.test.tsx` | | INV-NO-BINARY-WIRE | `Scene.noBinaryWire.test.ts` | | INV-APPSTATE-UNDO | `appStateUndo.test.tsx` | | INV-ORIGIN | `Scene.originPolicy.test.ts` + `Scene.originPolicyTable.test.ts` | | INV-WIRE-ROBUST | **none — T027, open** |
+  **Invariant → live suite map, verified file by file** (not from task names): | invariant | live suite | |---|---| | INV-CONVERGE / INV-NO-RESURRECT | `Scene.convergence.property.test.ts` + `Scene.multiplayerHistory.property.test.ts` | | INV-PERSIST-MERGE / INV-SAVE-SKIP | `firebasePersistence.test.tsx` | | INV-COLD-LOAD-LINEAGE | `coldLoadLineage.test.tsx` | | INV-REVEAL | `reappearReveal.test.tsx` | | INV-BOUNDED | `Scene.boundedGC.test.ts` | | INV-WRITE-INTENT / INV-VERSION-MONOTONIC | `Scene.native-yjs-write-intent.test.ts` | | INV-HISTORY-LOCKSTEP | `historyLockstep.test.tsx` | | INV-NO-BINARY-WIRE | `Scene.noBinaryWire.test.ts` | | INV-APPSTATE-UNDO | `appStateUndo.test.tsx` | | INV-ORIGIN | `Scene.originPolicy.test.ts` + `Scene.originPolicyTable.test.ts` | | INV-WIRE-ROBUST | `wireRecoveryPolicy.test.tsx` + `Scene.wireRobust.test.ts` — evidence, not an open gate (T027 closed) |
 
   **Two map defects found and fixed:**
 
