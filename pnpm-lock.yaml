@@ -283,9 +283,6 @@ importers:
       clsx:
         specifier: 1.1.1
         version: 1.1.1
-      cross-env:
-        specifier: 7.0.3
-        version: 7.0.3
       es6-promise-pool:
         specifier: 2.5.0
         version: 2.5.0
@@ -346,9 +343,6 @@ importers:
       roughjs:
         specifier: 4.6.4
         version: 4.6.4
-      sass:
-        specifier: 1.51.0
-        version: 1.51.0
       tunnel-rat:
         specifier: 0.1.2
         version: 0.1.2(@types/react@19.0.10)(react@19.0.0)
@@ -383,6 +377,9 @@ importers:
       autoprefixer:
         specifier: 10.4.7
         version: 10.4.7(postcss@8.5.15)
+      cross-env:
+        specifier: 7.0.3
+        version: 7.0.3
       dotenv:
         specifier: 16.0.1
         version: 16.0.1
@@ -407,6 +404,9 @@ importers:
       jest-diff:
         specifier: 29.7.0
         version: 29.7.0
+      sass:
+        specifier: 1.51.0
+        version: 1.51.0
       typescript:
         specifier: 5.9.3
         version: 5.9.3

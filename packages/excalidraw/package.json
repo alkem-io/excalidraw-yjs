@@ -99,7 +99,6 @@
     "browser-fs-access": "0.38.0",
     "canvas-roundrect-polyfill": "0.0.1",
     "clsx": "1.1.1",
-    "cross-env": "7.0.3",
     "es6-promise-pool": "2.5.0",
     "fuzzy": "0.1.3",
     "image-blob-reduce": "3.0.1",
@@ -118,7 +117,6 @@
     "pwacompat": "2.0.17",
     "radix-ui": "1.4.3",
     "roughjs": "4.6.4",
-    "sass": "1.51.0",
     "tunnel-rat": "0.1.2"
   },
   "devDependencies": {
@@ -141,6 +139,7 @@
     "fonteditor-core": "2.4.1",
     "harfbuzzjs": "0.3.6",
     "jest-diff": "29.7.0",
+    "sass": "1.51.0",
     "typescript": "5.9.3"
   }
 }
