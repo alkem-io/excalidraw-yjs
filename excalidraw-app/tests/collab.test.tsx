@@ -13,6 +13,7 @@ import {
   render,
   waitFor,
 } from "@excalidraw-yjs/excalidraw/tests/test-utils";
+
 import { vi } from "vitest";
 
 import { StoreIncrement } from "@excalidraw-yjs/element";
@@ -25,6 +26,8 @@ import type {
   DurableIncrement,
   EphemeralIncrement,
 } from "@excalidraw-yjs/element";
+
+import { DELETED_ELEMENT_TIMEOUT } from "../app_constants";
 
 import ExcalidrawApp from "../App";
 
@@ -414,5 +417,48 @@ describe("collaboration", () => {
     });
 
     expect(updateSpy).not.toHaveBeenCalled();
+  });
+
+  /**
+   * T032/T025b — the PRODUCTION cutoff arithmetic.
+   *
+   * The tombstone-window semantics ("marker older than the cutoff is reclaimed")
+   * are pinned in `collabWireFilter.test.tsx` by moving the cutoff, because this
+   * harness cannot produce realistic markers: `getUpdatedTimestamp()` returns a
+   * constant `1` in test env by upstream design, so every deletion marker is 1.
+   *
+   * That leaves exactly one thing unpinned — that the wire seed passes the real
+   * cutoff — and this covers it. A wrong value here would silently stop
+   * deletions propagating (too old) or re-broadcast tombstones forever (too new),
+   * with nothing else to catch it.
+   */
+  it("the wire seed prunes with Date.now() - DELETED_ELEMENT_TIMEOUT, and encodes PURELY", async () => {
+    await render(<ExcalidrawApp />);
+
+    const collab = window.collab;
+    const api = collab.excalidrawAPI;
+
+    const gcSpy = vi.spyOn(api, "collectSceneGarbage");
+    const encodeSpy = vi.spyOn(api, "encodeSceneStateAsUpdate");
+
+    const before = Date.now();
+    collab.encodeSceneAsUpdate();
+    const after = Date.now();
+
+    expect(gcSpy).toHaveBeenCalledTimes(1);
+    const { deletedBefore } = gcSpy.mock.calls[0][0];
+    expect(deletedBefore).toBeGreaterThanOrEqual(
+      before - DELETED_ELEMENT_TIMEOUT,
+    );
+    expect(deletedBefore).toBeLessThanOrEqual(after - DELETED_ELEMENT_TIMEOUT);
+
+    // Maintenance must run BEFORE the encode, or the seed would carry the very
+    // tombstones the sweep exists to drop.
+    expect(gcSpy.mock.invocationCallOrder[0]).toBeLessThan(
+      encodeSpy.mock.invocationCallOrder[0],
+    );
+
+    gcSpy.mockRestore();
+    encodeSpy.mockRestore();
   });
 });

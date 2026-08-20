@@ -114,8 +114,15 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
   the harness mocks `getUpdatedTimestamp()` to a constant `1` for deterministic
   snapshots. Every tombstone therefore carries marker `1`, and the PRODUCTION
   cutoff reclaims all of them — measured. The tombstone-window case moves the
-  cutoff instead of the clock, so the window invariant is covered, but the
-  production cutoff arithmetic itself is NOT exercised end-to-end here.
+  cutoff instead of the clock, so the window invariant is covered.
+
+  **Gap since CLOSED**: the production cutoff arithmetic is now pinned separately
+  in `collab.test.tsx` — the wire seed must prune with
+  `Date.now() - DELETED_ELEMENT_TIMEOUT`, and maintenance must run BEFORE the
+  encode. Non-vacuous in both directions: passing `Date.now()` fails it, and so
+  does swapping the order. Between the two files the path is covered — semantics
+  where realistic markers are impossible, arithmetic and ordering where they are
+  not needed.
 
 - [x] T019 **(DONE — folded into the T032/T025b slice)** `encodeSyncableSceneAsUpdate` deleted once it had no production caller; Portal INIT and resync both confirmed to ship live state.
 
