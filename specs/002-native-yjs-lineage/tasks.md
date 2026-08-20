@@ -114,10 +114,10 @@
   an omission:
   | site | reserves? | why |
   |---|---|---|
-  | `commitPlan` remove | **yes** | local hard removal; Store sees an omission |
-  | `replaceAllElements` removedIds | **yes** | same |
-  | `recomputeFromDoc` cleanup | no | drops meta for ids already gone; the remote/undo path already reserved via `bumpMetaVersionsFor`, which bumps and raises the watermark BEFORE recompute drops meta — reserving again would double-advance |
-  | `collectGarbage` | no | reclaims already SOFT-deleted elements; the Store's view was already a tombstone, so nothing new is synthesized |
+  | `replaceAllElements` removedIds | **yes** | local hard removal; the Store sees an omission and mints a tombstone |
+  | `commitPlan` remove | no | `applyElementChanges`/`commitPlan` has **zero production consumers** — verified repo-wide, only Scene-internal references. Reserving there froze behaviour for an unconsumed API on symmetry alone, and removing it fails nothing. Add it when T016b wires a real consumer and the reappearance property can be driven through that boundary — not before, and not via a synthetic test written to preserve it |
+  | `recomputeFromDoc` cleanup | no | the remote/undo path already reserved: `bumpMetaVersionsFor` bumps and raises the watermark BEFORE recompute drops meta, so reserving again would double-advance |
+  | `collectGarbage` | no | **not** for the reason first recorded. "The element was already soft-deleted so the Store synthesizes nothing" is FALSE — `detectChangedElements` synthesizes `newElementWith(prev, {isDeleted:true})` for ANY previously-known element missing from the next set, with no check on `prev.isDeleted`, and that increments its version. The real reason is that GC is FINAL structural reclamation with no supported reappearance consumer, so no later reseed can collide with the watermark the Store minted. Any future same-id revival after GC needs its own watermark contract and this exclusion would then be wrong |
 
   **Results**: the anchoring INV-VERSION-MONOTONIC case is un-skipped and green;
   reappearReveal passes with literal versions (tombstone 5, reveal **6**); the
@@ -138,12 +138,12 @@
   the container about seven times with a version behind meta — seven genuine
   stale writes, evidence for the T015/T016 helper work.
 
-  **Non-vacuity, and a caveat stated rather than glossed**: removing BOTH
-  reservation call sites fails reappearReveal with the exact tie symptom, and
-  restoring them fixes it. But removing ONLY the `commitPlan` site fails nothing
-  — so the `replaceAllElements` site is the one under test, and the `commitPlan`
-  reservation is justified by SYMMETRY, not by evidence. It is a local hard
-  removal by the same definition, but no test currently distinguishes it.
+  **Non-vacuity**: removing the single landed reservation fails reappearReveal
+  with the exact tie symptom, and restoring it fixes it. There is exactly ONE
+  reservation call site and exactly one test pinning it — no unpinned behaviour
+  was frozen. (An earlier draft also reserved in `commitPlan` on symmetry
+  grounds; that was removed, because symmetry is not evidence and the API has no
+  production consumer.)
 
 - [ ] T015 Declare intent sets in the side-effecting helpers (`redrawTextBoundingBox`, `updateBoundElements`, `bindOrUnbind`) — see plan R6.
 - [ ] T016 **(PREMISE FALSIFIED — re-scope before doing any of this)** The re-read sites are **not** dead code after FR-009 and must not be bulk-deleted. - **Census correction**: 36 `fresh-snapshot` sites across 17 files (16 literal `*Map.get(id) ?? element` idioms), not the 32/14 first reported. - **Why they survive**: FR-009 scoped `Scene.mutateElement`, but `replaceAllElements` is deliberately unscoped — its contract is "make the doc equal this element set", which is correct for a full reconcile. The stale-read revert class therefore survives at the BULK path: a handler that captures the array, lets a side-effect helper write to the doc, then returns its captured array, reverts that write. Proven by `Scene.replaceAll-wholeObject.test.ts` (with non-vacuity guards on both the staleness of the array and the reality of the doc write). Deleting the re-reads would reintroduce exactly the class `b2f708f5` fixed. - **What the earlier "1/32 done" actually was**: not a bandaid removal. `changeFontSize`'s `editedTextIds` carve-out was an _exception_ to re-reading, removed because the font size became a real doc write — the surrounding re-read stayed. Prior claim withdrawn. - **Re-scope**: removing the re-reads requires first changing the bulk path — either scoping `replaceAllElements` to a declared changed-set, or changing how action handlers return arrays so a stale one never reaches it. That is a new requirement, not a cleanup task, and it interacts with T014b (both are about the bulk write path). Decide the bulk-path design before touching any of the 36 sites.

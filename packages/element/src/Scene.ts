@@ -1082,7 +1082,6 @@ export class Scene {
         for (const id of plan.remove) {
           if (this.yElements.has(id)) {
             this.yElements.delete(id);
-            this.reserveTombstoneWatermark(id);
             this.meta.delete(id);
             changedIds.add(id);
           }
@@ -1442,16 +1441,6 @@ export class Scene {
   }
 
   /**
-   * Bump the local reconciliation `meta` (`version`/`versionNonce`/`updated`) for
-   * every element id changed by a non-local (undo/redo, or M3 remote) doc
-   * transaction, so the next `recomputeFromDoc` re-derives the element with a
-   * strictly-greater `version` — making the editor's change-detection treat it as
-   * a fresh change (the old history bumped `version` on undo for the same reason).
-   *
-   * `"full"` (an unresolvable event path) bumps every currently-known id, erring
-   * toward over-notifying rather than dropping a change.
-   */
-  /**
    * Reserve the version the editor Store is ABOUT to synthesize a tombstone at.
    *
    * When this Scene HARD-REMOVES an id (the element disappears from the derived
@@ -1475,6 +1464,16 @@ export class Scene {
    * NOT for the remote / UndoManager path either: `bumpMetaVersionsFor` already
    * runs on those ids BEFORE `recomputeFromDoc` drops their meta, and it raises
    * the watermark itself. Reserving again would double-advance.
+   *
+   * NOT for `collectGarbage`. The tempting rationale — "the element was already
+   * soft-deleted, so the Store synthesizes nothing" — is FALSE:
+   * `detectChangedElements` synthesizes `newElementWith(prev, {isDeleted:true})`
+   * for ANY previously-known element missing from the next set, with no check on
+   * `prev.isDeleted`, and that increments its version. The real reason is that GC
+   * is FINAL structural reclamation with no supported reappearance consumer:
+   * nothing revives a reclaimed id, so no later reseed can collide with the
+   * watermark the Store minted. Any future same-id revival after GC would need
+   * its own Store watermark contract, and this exclusion would then be wrong.
    */
   private reserveTombstoneWatermark(id: string): void {
     const meta = this.meta.get(id);
@@ -1483,6 +1482,16 @@ export class Scene {
     }
   }
 
+  /**
+   * Bump the local reconciliation `meta` (`version`/`versionNonce`/`updated`) for
+   * every element id changed by a non-local (undo/redo, or M3 remote) doc
+   * transaction, so the next `recomputeFromDoc` re-derives the element with a
+   * strictly-greater `version` — making the editor's change-detection treat it as
+   * a fresh change (the old history bumped `version` on undo for the same reason).
+   *
+   * `"full"` (an unresolvable event path) bumps every currently-known id, erring
+   * toward over-notifying rather than dropping a change.
+   */
   private bumpMetaVersionsFor(changed: Set<string> | "full") {
     const ids =
       changed === "full" ? new Set<string>(this.meta.keys()) : changed;
