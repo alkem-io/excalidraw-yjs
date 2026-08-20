@@ -4754,33 +4754,46 @@ class App extends React.Component<AppProps, AppState> {
     if (!adapter) {
       return;
     }
-    const published = this.scene.getAssetLocators();
     const pending = Object.values(this.files).filter(
-      (file) => !published[file.id] && !this.assetStoresInFlight.has(file.id),
+      (file) =>
+        !this.scene.getAssetLocators()[file.id] &&
+        !this.assetStoresInFlight.has(file.id),
     );
     if (!pending.length) {
       return;
     }
 
-    const locators: Record<string, string> = {};
     await Promise.all(
       pending.map(async (file) => {
         this.assetStoresInFlight.add(file.id);
         try {
-          locators[file.id] = await adapter.store(file);
+          const locator = await adapter.store(file);
+
+          // Re-check at COMMIT, not from the snapshot taken before the await.
+          // During an upload a peer's locator can arrive, or the cached file can
+          // be replaced; publishing the stale result would clobber newer state.
+          if (this.unmounted) {
+            return;
+          }
+          if (this.scene.getAssetLocators()[file.id]) {
+            return; // a remote locator won the race
+          }
+          if (this.files[file.id] !== file) {
+            return; // the cached file is no longer the one we uploaded
+          }
+          // Validate here so a bad adapter cannot reject inside an unawaited
+          // write. `setAssetLocators` throws, and this is the only caller that
+          // could turn that into an unhandled rejection.
+          this.scene.setAssetLocators({ [file.id]: locator });
         } catch (error) {
-          // Local and retryable: no locator is written, so the next publish
-          // tries again. Never a byte fallback.
+          // Retained locally, retried on a later publish pass. There is no
+          // autonomous retry — see `assetAdapter` docs.
           console.error(`assetAdapter.store failed for ${file.id}`, error);
         } finally {
           this.assetStoresInFlight.delete(file.id);
         }
       }),
     );
-
-    if (Object.keys(locators).length && !this.unmounted) {
-      this.scene.setAssetLocators(locators);
-    }
   };
 
   /** Insert bytes into the local cache WITHOUT publishing a reference. */
@@ -4949,9 +4962,9 @@ class App extends React.Component<AppProps, AppState> {
       return;
     }
     const missing = Object.entries(this.scene.getAssetLocators()).filter(
-      ([fileId]) =>
+      ([fileId, locator]) =>
         !this.files[fileId as keyof BinaryFiles] &&
-        !this.assetResolvesInFlight.has(fileId),
+        !this.assetResolvesInFlight.has(`${fileId}\u0000${locator}`),
     );
     if (!missing.length) {
       return;
@@ -4960,7 +4973,8 @@ class App extends React.Component<AppProps, AppState> {
       const resolved: BinaryFileData[] = [];
       await Promise.all(
         missing.map(async ([fileId, locator]) => {
-          this.assetResolvesInFlight.add(fileId);
+          const key = `${fileId}\u0000${locator}`;
+          this.assetResolvesInFlight.add(key);
           try {
             const file = await adapter.resolve(fileId as FileId, locator);
             // The locator can change while a resolve is in flight. Dropping a
@@ -4978,7 +4992,7 @@ class App extends React.Component<AppProps, AppState> {
           } catch (error) {
             console.error(`assetAdapter.resolve failed for ${fileId}`, error);
           } finally {
-            this.assetResolvesInFlight.delete(fileId);
+            this.assetResolvesInFlight.delete(key);
           }
         }),
       );
@@ -4987,10 +5001,15 @@ class App extends React.Component<AppProps, AppState> {
         // to the host and re-publish a locator for something we just fetched.
         this.cacheResolvedFiles(resolved);
       }
+      // Reconcile again: a locator that changed mid-flight had its result
+      // discarded above, and nothing else would re-trigger a fetch for it.
+      if (!this.unmounted) {
+        this.refreshFilesFromScene();
+      }
     })();
   };
 
-  /** Ids whose `resolve` is in flight, so an observer burst fetches once. */
+  /** `fileId\u0000locator` pairs in flight, so a changed locator refetches. */
   private assetResolvesInFlight = new Set<string>();
 
   /**

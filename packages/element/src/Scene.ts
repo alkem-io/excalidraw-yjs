@@ -1715,6 +1715,22 @@ export class Scene {
     }, LOCAL_ORIGIN);
   }
 
+  /**
+   * Throw if the asset root holds anything that is not a valid locator.
+   *
+   * Call this before a FULL-STATE egress — a persistence checkpoint or an
+   * INIT/resync seed. A remote peer can put an arbitrary value in the asset root
+   * (see the trust boundary in `Scene.noBinaryWire.test.ts`), and without this
+   * check a checkpoint would quietly serialize it, making one open client's
+   * injection permanent for everyone who loads that document afterwards.
+   *
+   * It is a validation, not a repair: it reports rather than editing shared
+   * state, because silently dropping another replica's data is its own hazard.
+   */
+  assertAssetRootValid(): void {
+    readAssetLocators(this.yAssets);
+  }
+
   /** The document's `fileId -> locator` references. Never bytes. */
   getAssetLocators(): Record<string, AssetLocator> {
     return readAssetLocators(this.yAssets);

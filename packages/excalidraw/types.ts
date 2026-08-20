@@ -580,6 +580,13 @@ export type OnExportProgress = {
  * Deliberately two operations. There is no `delete`: the editor's GC drops
  * references, and deleting the underlying asset is the host's decision, not the
  * editor's. Do not add operations here without a consumer that needs them.
+ *
+ * FAILURE CONTRACT, stated narrowly: if `store` rejects, the image is retained
+ * locally and no reference is published — it is never downgraded to inline
+ * bytes. It is retried on a LATER PUBLISH PASS, which happens when files are
+ * next added. There is no autonomous retry, no backoff and no observable
+ * failure state yet; a host needing those should track them itself around
+ * `store`.
  */
 export interface AssetAdapter {
   /** Persist the bytes and return an opaque locator for them. */

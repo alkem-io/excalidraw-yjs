@@ -183,4 +183,48 @@ describe("INV-NO-BINARY-WIRE", () => {
     victim.destroy();
     hostile.destroy();
   });
+
+  it("a poisoned asset root fails a full-state egress check", () => {
+    // Detection on read is not enough on its own: a persistence checkpoint that
+    // serialized the poisoned root would make one open client's injection
+    // permanent for every later loader.
+    const victim = new Scene();
+    const hostile = new Y.Doc();
+    hostile.transact(() => {
+      hostile.getMap("files").set("f1", "data:image/png;base64,AAAA");
+    });
+    victim.applyRemoteUpdate(Y.encodeStateAsUpdate(hostile));
+
+    expect(() => victim.assertAssetRootValid()).toThrow(/data URL/);
+
+    victim.destroy();
+    hostile.destroy();
+  });
+
+  it("a clean asset root passes the egress check", () => {
+    // Non-vacuity: the check is not simply always throwing.
+    const scene = new Scene();
+    scene.setAssetLocators({ f1: "asset://f1" });
+    expect(() => scene.assertAssetRootValid()).not.toThrow();
+    scene.destroy();
+  });
+
+  it("the wire carries the locator VALUE, decoded from the root", () => {
+    // Decoding the root rather than searching the encoded bytes as text — a
+    // substring search can pass or fail for reasons unrelated to the schema.
+    const a = new Scene();
+    a.replaceAllElements([mk("img", { type: "image", fileId: "f1" })]);
+    a.setAssetLocators({ f1: "asset://f1" });
+
+    const probe = new Y.Doc();
+    Y.applyUpdate(probe, a.encodeStateAsUpdate());
+    const root = probe.getMap<unknown>("files");
+
+    expect([...root.keys()]).toEqual(["f1"]);
+    expect(root.get("f1")).toBe("asset://f1");
+    expect(typeof root.get("f1")).toBe("string");
+
+    a.destroy();
+    probe.destroy();
+  });
 });

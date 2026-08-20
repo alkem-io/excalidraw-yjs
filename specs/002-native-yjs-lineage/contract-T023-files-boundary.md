@@ -61,4 +61,4 @@ Stated here because a downstream consumer is building a clone against this contr
 
 ## Adapter surface — only what a consumer demands
 
-`store(bytes) -> locator` and `resolve(locator) -> bytes`. Nothing else. `delete` is deliberately absent: nothing in this repo deletes a host asset, and GC drops the reference only. Host-side deletion, copy and de-duplication stay with the host.
+`store(file: BinaryFileData) -> Promise<string>` and `resolve(fileId, locator: string) -> Promise<BinaryFileData>`. Nothing else — the implementation signatures, not a paraphrase. `delete` is deliberately absent: nothing in this repo deletes a host asset, and GC drops the reference only. Host-side deletion, copy and de-duplication stay with the host.

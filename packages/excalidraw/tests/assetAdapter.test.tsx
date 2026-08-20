@@ -132,6 +132,58 @@ describe("assetAdapter", () => {
     );
   });
 
+  it("an invalid locator from store writes nothing and does not reject", async () => {
+    // A bad adapter must not poison the document, and must not surface as an
+    // unhandled rejection out of an unawaited publish.
+    const bad: AssetAdapter = {
+      store: async () => "data:image/png;base64,AAAA",
+      resolve: async (id) => file(id),
+    };
+    await render(<Excalidraw assetAdapter={bad} />);
+
+    act(() => {
+      h.app.addFiles([file("f1")]);
+    });
+    await flush();
+
+    expect(h.scene.getAssetLocators()).toEqual({});
+    expect(h.app.files.f1).toBeDefined(); // retained locally
+  });
+
+  it("a remote locator arriving mid-upload is not overwritten", async () => {
+    const gate: { release?: () => void } = {};
+    const slow: AssetAdapter = {
+      store: async (f) => {
+        await new Promise<void>((r) => {
+          gate.release = r;
+        });
+        return `asset://local-${f.id}`;
+      },
+      resolve: async (id) => file(id),
+    };
+    await render(<Excalidraw assetAdapter={slow} />);
+
+    act(() => {
+      h.app.addFiles([file("f1")]);
+    });
+    await flush();
+
+    // a peer publishes a locator for the same id while the upload is pending
+    const peer = new Scene(undefined, { doc: new Y.Doc() });
+    peer.applyRemoteUpdate(h.app.encodeSceneAsUpdate());
+    peer.setAssetLocators({ f1: "asset://remote-f1" });
+    act(() => {
+      h.app.applyRemoteSceneUpdate(peer.encodeStateAsUpdate());
+    });
+
+    gate.release?.();
+    await flush();
+
+    // the slower local upload must not clobber the peer's newer reference
+    expect(h.scene.getAssetLocators().f1).toBe("asset://remote-f1");
+    peer.destroy();
+  });
+
   // SKIPPED — a real gap, recorded rather than hacked around. A cold load
   // returns the stored scene's asset references, but the app's initialize path
   // discards them and the fresh Scene generation never receives them, so the

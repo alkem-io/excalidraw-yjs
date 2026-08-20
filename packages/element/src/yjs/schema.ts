@@ -484,19 +484,26 @@ export type AssetLocator = string;
 /**
  * Maximum locator size, in UTF-8 bytes.
  *
- * Generous for any real reference — a UUID, a path, a signed URL — and far below
- * anything that could carry image data. The bound is what makes "opaque token"
- * enforceable rather than aspirational: without it, `string` accepts an entire
- * base64 payload.
+ * This is a SCHEMA bound, not a proof that no bytes can be encoded: a short
+ * base64 string without a `data:` prefix is indistinguishable from an opaque
+ * token, and no length check can separate them. What the bound does is keep the
+ * value in the size class of a reference so a payload cannot be smuggled at
+ * scale, and give a document schema a definite shape.
+ *
+ * 2048 is a starting value chosen to clear common identifiers — UUIDs, paths,
+ * most signed URLs — with headroom. It is NOT derived from a measured consumer
+ * requirement; a host using long signed URLs may need it raised, and that should
+ * be a deliberate, recorded change rather than a silent bump.
  */
 export const MAX_ASSET_LOCATOR_BYTES = 2048;
 
 /**
- * Reject anything that is not a plausible opaque reference.
+ * Reject anything that is not a well-formed bounded locator string.
  *
- * A bare `typeof value === "string"` is NOT sufficient, and assuming it was is
- * how a dataURL — the exact shape of the fallback this boundary exists to
- * remove — could be stored verbatim and reach the wire.
+ * The `data:` guard targets the KNOWN retired fallback specifically. It is not
+ * a general binary detector — see {@link MAX_ASSET_LOCATOR_BYTES} — so read this
+ * as "the document's asset root has a definite, bounded schema", not as
+ * "bytes are mathematically excluded".
  */
 export const validateAssetLocator = (
   id: string,
