@@ -493,6 +493,15 @@ export class Scene {
   /** Detaches the `observeDeep` handler on `destroy()`. */
   private readonly detachObserver: () => void;
 
+  /**
+   * Monotonic count of transactions that changed this document — see
+   * {@link contentRevision}.
+   */
+  private _contentRevision = 0;
+
+  /** Detaches the content-revision handler on `destroy()`. */
+  private readonly detachRevisionCounter: () => void;
+
   // ---------------------------------------------------------------------------
   // derived caches (recomputed from the doc)
   // ---------------------------------------------------------------------------
@@ -668,6 +677,20 @@ export class Scene {
       this.yElements.unobserveDeep(observer);
       this.yAssets.unobserve(assetsObserver);
       this.yAppState.unobserve(appStateObserver);
+    };
+
+    // `afterTransaction` rather than `doc.on("update")`: registering an update
+    // listener makes Yjs encode the v1 update on EVERY transaction, and this
+    // counter needs no bytes — only whether anything changed. Covers elements,
+    // asset references and appState alike, since all three live on this doc.
+    const revisionCounter = (transaction: Y.Transaction) => {
+      if (transaction.changed.size > 0) {
+        this._contentRevision++;
+      }
+    };
+    this.doc.on("afterTransaction", revisionCounter);
+    this.detachRevisionCounter = () => {
+      this.doc.off("afterTransaction", revisionCounter);
     };
 
     if (options?.doc) {
@@ -1934,8 +1957,39 @@ export class Scene {
     };
   }
 
+  /**
+   * A monotonic counter of document-changing transactions — the exact "has
+   * anything changed since?" token for persistence.
+   *
+   * Compare a value captured before a save against this afterwards: equal means
+   * nothing changed in between. That is what makes save-skipping sound, and it
+   * replaces summing element `version`s, which was broken in BOTH directions
+   * (T007):
+   *  - a sum COLLIDES whenever one element's version rises as much as another's
+   *    falls, and versions do move backwards here — a false-skip is silent data
+   *    loss with nothing to retry it;
+   *  - and the compared values had been renormalised by `restoreElements`, so
+   *    the live and stored sums never matched at all and every save was
+   *    redundant.
+   *
+   * Counts transactions from EVERY origin, deliberately. A peer's edit applied
+   * under `REMOTE_ORIGIN` leaves the durable store just as stale as a local one;
+   * scoping this to `LOCAL_ORIGIN` would let a client skip persisting a peer's
+   * change that no one else saved.
+   *
+   * It is a change COUNTER, not a content hash: a change and its exact reversal
+   * both count, so this can report "changed" for a document that is byte-identical
+   * to the stored one. That direction is safe (a redundant save), and the
+   * opposite direction — reporting "unchanged" for a document that differs — is
+   * the one that loses work.
+   */
+  get contentRevision(): number {
+    return this._contentRevision;
+  }
+
   destroy() {
     this.detachObserver();
+    this.detachRevisionCounter();
     this.undoManager.destroy();
     this.doc.destroy();
 

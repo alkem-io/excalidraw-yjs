@@ -301,27 +301,41 @@ const decryptScene = async (
   };
 };
 
-class FirebaseSceneVersionCache {
+/**
+ * The scene `contentRevision` (see `Scene.contentRevision`) captured at the last
+ * successful save, per socket.
+ *
+ * This replaces a cache of summed element `version`s, which T007 measured broken
+ * in BOTH directions:
+ *  - the sum was taken over elements returned through `restoreElements`, which
+ *    RENORMALISES versions, so the cached and live sums never matched and every
+ *    save was redundant (measured: live sum 10 stored as sum 4);
+ *  - and a sum COLLIDES whenever one element's version rises as much as
+ *    another's falls — which does happen here — so a genuinely dirty scene could
+ *    report clean and be dropped with nothing to retry it.
+ */
+class FirebaseSavedRevisionCache {
   private static cache = new WeakMap<Socket, number>();
   static get = (socket: Socket) => {
-    return FirebaseSceneVersionCache.cache.get(socket);
+    return FirebaseSavedRevisionCache.cache.get(socket);
   };
-  static set = (
-    socket: Socket,
-    elements: readonly SyncableExcalidrawElement[],
-  ) => {
-    FirebaseSceneVersionCache.cache.set(socket, getSceneVersion(elements));
+  static set = (socket: Socket, contentRevision: number) => {
+    FirebaseSavedRevisionCache.cache.set(socket, contentRevision);
   };
 }
 
+/**
+ * Whether the scene at `contentRevision` has already been persisted.
+ *
+ * The caller passes the CURRENT revision; a match means no document-changing
+ * transaction has happened since the last successful save.
+ */
 export const isSavedToFirebase = (
   portal: Portal,
-  elements: readonly ExcalidrawElement[],
+  contentRevision: number,
 ): boolean => {
   if (portal.socket && portal.roomId && portal.roomKey) {
-    const sceneVersion = getSceneVersion(elements);
-
-    return FirebaseSceneVersionCache.get(portal.socket) === sceneVersion;
+    return FirebaseSavedRevisionCache.get(portal.socket) === contentRevision;
   }
   // if no room exists, consider the room saved so that we don't unnecessarily
   // prevent unload (there's nothing we could do at that point anyway)
@@ -367,6 +381,10 @@ const createFirebaseSceneDocument = async (
    * concurrent writer's element is not lost and no deletion is resurrected. */
   priorDocBytes?: Uint8Array,
 ) => {
+  // Still written as a field of the stored document (part of its schema), but no
+  // longer the save-skip AUTHORITY — that is the scene's `contentRevision`
+  // (T026). A sum cannot decide "has anything changed": it collides, and the
+  // values compared had been renormalised by `restoreElements`.
   const sceneVersion = getSceneVersion(elements);
   const { ciphertext, iv } = await encryptScene(
     roomKey,
@@ -387,6 +405,17 @@ export const saveToFirebase = async (
   elements: readonly SyncableExcalidrawElement[],
   appState: AppState,
   assets: Readonly<Record<string, string>> = {},
+  /**
+   * The scene's `contentRevision` AT THE MOMENT `elements`/`assets`/`appState`
+   * were captured — see `Scene.contentRevision`.
+   *
+   * It is recorded as saved only on success, and only as this value: anything
+   * that changed the document while the save was in flight advanced the live
+   * revision past it, so the scene correctly stays dirty and the next pass
+   * persists it. Reading the revision after the await instead would mark that
+   * concurrent change saved when it never was.
+   */
+  contentRevision: number,
 ): Promise<readonly SyncableExcalidrawElement[] | null> => {
   const { roomId, roomKey, socket } = portal;
   if (
@@ -394,7 +423,7 @@ export const saveToFirebase = async (
     !roomId ||
     !roomKey ||
     !socket ||
-    isSavedToFirebase(portal, elements)
+    isSavedToFirebase(portal, contentRevision)
   ) {
     return null;
   }
@@ -454,7 +483,7 @@ export const saveToFirebase = async (
     restoreElements((await decryptScene(storedScene, roomKey)).elements, null),
   );
 
-  FirebaseSceneVersionCache.set(socket, storedElements);
+  FirebaseSavedRevisionCache.set(socket, contentRevision);
 
   return storedElements;
 };
@@ -499,9 +528,13 @@ export const loadFromFirebase = async (
     }),
   );
 
-  if (socket) {
-    FirebaseSceneVersionCache.set(socket, elements);
-  }
+  // Deliberately NOT marking the room saved here. Since T020 a cold load ADOPTS
+  // the stored document into the live scene, and that adoption is itself a
+  // document-changing transaction that happens AFTER this function returns — so
+  // no revision known here corresponds to the post-adoption scene. Guessing one
+  // would risk the dangerous direction (a false-skip: a dirty scene reported
+  // clean, dropped with nothing to retry it). The cost of omitting it is one
+  // redundant save after a cold load, which is the harmless direction.
 
   return {
     docBytes: decrypted.docBytes,

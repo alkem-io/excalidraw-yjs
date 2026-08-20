@@ -130,9 +130,54 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
 - [x] T022 **(done)** The origin→wire policy has exactly ONE implementation, in `Scene.onDocUpdate`. No shared lookup table: with a single call site it would be indirection, not deduplication. Pairing a structural tombstone with its reveal is the logical-mutation boundary's job, not the origin table's. **Still open**: INV-ORIGIN as a table-driven suite (T010).
 - [ ] T023 **(PARTIAL — core boundary landed; NO consumer may bump)** The document carries `fileId -> opaque locator`, never bytes written by this editor. - **What is guaranteed, narrowly**: supported writers publish only validated, bounded locator strings; the whole batch is prevalidated so one bad value writes nothing; decoders and a full-state egress check (`assertAssetRootValid`) reject a malformed asset root instead of serializing it; no path turns a failed upload into inline data; async adapter results cannot overwrite newer state. - **What is NOT guaranteed**: a universal "no bytes can enter Yjs". A remote peer can put an arbitrary value in the asset root — as it can in any element property — and it persists in CRDT history. Closing that needs an ingress trust decision across the whole accepted schema, not an asset-only guard, and is NOT done. The `data:` check targets the known retired fallback; `MAX_ASSET_LOCATOR_BYTES` is a schema bound, not a binary exclusion, since a short base64 string without the prefix is indistinguishable from a token. - **Failure contract, narrowly**: a failed `store` retains the image locally and publishes nothing, and is retried on a LATER PUBLISH PASS (when files are next added). There is no autonomous retry, no backoff, no observable failure state. - **BLOCKERS before any consumer bumps**: (1) cold load discards the stored references so a persisted image never resolves — needs T020's doc adoption, RED committed skipped; (2) the ingress/rolling-client decision above; (3) client-web must supply an adapter and delete its `dataURL` fallback. - **`MAX_ASSET_LOCATOR_BYTES = 2048`** is a starting value, not derived from a measured consumer; a host with long signed URLs may need it raised deliberately.
 - [ ] T025b **(the trigger — approved shape, not yet built)** No scheduler. Put an explicit maintenance call immediately before the real Collab raw INIT/resync encode and keep the encoder itself PURE (no mutate-on-encode). Confirm that call site is the actual producer before adding anything else; if a cold-load/persistence path needs the same guarantee, show that concrete path rather than adding a timer. Lands together with T032.
-- [ ] T026 `dirtySinceLastSave` flag (LOCAL_ORIGIN update observer sets, successful save clears); replace `getSceneVersion`-sum cache. `isSaved ⇔ !dirty`. Green **INV-SAVE-SKIP**.
+- [x] T026 **(DONE — the task's stated design was wrong in two ways and was corrected before coding)** Replace the `getSceneVersion`-sum cache. `isSaved ⇔ nothing changed since the last successful save`. Green **INV-SAVE-SKIP**.
 
-## Phase 11 — Robustness + appState undo (FR-014, FR-015)
+  **Two corrections to the task as written**, both agreed with the reviewer:
+  - *Not LOCAL_ORIGIN-scoped.* A peer's edit applied under `REMOTE_ORIGIN`
+    leaves the durable store just as stale as a local one, and this replica may
+    be the one that has to persist it. `Scene.contentRevision` counts
+    transactions from EVERY origin — local, structural, remote, UndoManager —
+    and covers all doc roots (elements, asset references, appState, the deletion
+    sidecar), not elements alone.
+  - *Not a boolean.* A bare dirty flag cannot survive an async save: a change
+    landing mid-flight would be cleared by the save that never included it. The
+    token is a monotonic counter; a save captures revision R with the exact state
+    being saved and records only R on success. Anything that moved the doc
+    meanwhile left the live revision past R, so the scene correctly stays dirty.
+    A failed save records nothing.
+
+  **Implementation.** `Scene.contentRevision` is bumped from an
+  `afterTransaction` handler — deliberately not `doc.on("update")`, which would
+  make Yjs encode a v1 update on every transaction when the counter needs no
+  bytes. Exposed as `getSceneContentRevision()`. `FirebaseSceneVersionCache`
+  became `FirebaseSavedRevisionCache`; `isSavedToFirebase(portal, revision)`.
+  `getSceneVersion` remains a field of the stored document but is no longer the
+  skip authority.
+
+  **Coverage**: `Scene.contentRevision.test.ts` (8) — remote apply, asset-only,
+  appState-only, delete/undo/redo, the version-sum collision, adopted docs, and
+  that local UI state which never reaches the doc does NOT dirty.
+  `firebasePersistence.test.tsx` `INV-SAVE-SKIP` (6) — clean after save,
+  redundant save skipped, in-flight change stays dirty, FAILED save stays dirty
+  and the retry then succeeds, sum-collision cannot false-clear, unknown socket
+  is dirty rather than saved.
+
+  **Non-vacuity, proven by sabotage**: reverting `contentRevision` to the summed
+  version token fails 3 of the 8 Scene tests, including the collision case. The
+  failed-save test asserts the write really failed rather than asserting against
+  a save that quietly succeeded — the first draft did the latter and was vacuous
+  (measured: `failedSave=false`).
+
+  **Deliberately NOT done, and why.** The cold-load path no longer marks the room
+  saved. Since T020 a cold load ADOPTS the stored document, and that adoption is
+  itself a doc-changing transaction occurring after `loadFromFirebase` returns,
+  so no revision available there corresponds to the post-adoption scene. The
+  reviewer's richer rule (adoption may establish a clean baseline *only if* the
+  fresh generation was clean, staying dirty if a remote update landed during the
+  fetch) is a real improvement and is NOT implemented. Cost of the omission is
+  one redundant save after a cold load — the harmless direction. Guessing a
+  baseline would risk the dangerous one: a false-skip, which is silent data loss
+  with nothing to retry it.
 
 - [ ] T027 **(REVERTED — its central premise is FALSE; blocked behind generation-replacement)** The first attempt wrapped `applyRemoteUpdate` in try/catch, logged, and returned a boolean, justified as "an unguarded throw wedges the collaboration session". Decorrelated review rejected it and was right on the decisive point. - **MEASURED: Yjs apply is NOT atomic on a decode failure.** Over every truncation offset of a real 1057-byte delta, **10 of 1056 both THREW and left the doc MUTATED** — all of them near the tail, which is exactly what a dropped connection produces. Inspected concretely, one such case integrated four new elements while the file, the deletion marker and the property edit belonging to the SAME logical update never arrived: a partially-applied, internally inconsistent doc. The measurement's own control passes (fingerprinting the same doc twice is identical), so the mutations are real, not an artifact of non-deterministic encoding. - **Therefore catch-and-continue is not merely unproven, it is HARMFUL**: it would carry on with a maybe-corrupt doc and hide the corruption, which is strictly worse than failing loudly. The earlier "doc unchanged" assertions compared element ids and encoded byte LENGTH — equal length is not equal state, and they ignored files, appState, the deletion sidecar and delete sets entirely. That is how a false premise passed as verified. - **Reverted**: `applyRemoteUpdate` throws again, with the measurement recorded at the call site. `Scene.wireRobust.test.ts` now pins the two MEASURED facts (malformed bytes throw; an all-zeroes payload is a valid empty update and is accepted; apply is non-atomic) rather than testing a guard. Both branches of the non-atomicity count are asserted non-zero so it cannot pass for the wrong reason. - **The other premise remains UNMEASURED**: nothing has demonstrated that a throw in the real Collab/Portal Socket.IO handler actually removes the listener or wedges the session. Prove that at the real transport boundary before building anything. - **Correct shape when it is built**: recovery is "discard this Scene generation and resync", which belongs to the transport that owns the session — and it needs the generation-replacement machinery from **T031**, so T027 lands after it. No error framework, no `console.error` of network bytes in a library, and no boolean that erases which failure occurred (malformed bytes / wrong codec / programming defect / partial application are different situations).
 - [x] T028 **(done — 4 tests, `appStateUndo.test.tsx`)** Green **INV-APPSTATE-UNDO**. Undo/redo writes the reverted collaborative appState through to `yAppState` at `history.ts`, the one point where an undo/redo appState change converges — only the two actions (`actionCanvas`, `actionExport`) wrote through before, and undo does not go through them. Without it the appState mirror pushed the document's stale value back into React state on the next scene update, so the undo silently un-did itself and peers never saw the revert. - **Scoped to the DELTA, not the current state.** Only the keys the entry actually reverted are written, read from `entry.appState.delta.inserted` (`ObservedStandaloneAppState` is exactly `{name, viewBackgroundColor}`). Writing the whole subset instead publishes the background on every element-only undo AND introduces appState into a document that never had any — measured: it fails the zero-traffic test plus two existing history tests, one of which ("should not collapse when applying corrupted history entry") catches it purely as an extra render. - **Two-way non-vacuity**: removing the write-through fails the undo and redo peer cases; writing the whole subset instead of the delta fails the element-only case and the two history tests. - **Coverage across a linked peer** (via `onLocalSceneUpdate`, with delivery counts asserted so an unlinked peer cannot pass vacuously): background undo, background redo, and an element-only undo proving the collaborative appState is byte-identical afterwards. - **`name` claim NARROWED with evidence**, not covered: `changeProjectName` returns `CaptureUpdateAction.EVENTUALLY`, so a name change never becomes its own history entry and there is no name undo to propagate. The write-through is keyed off the delta so it carries `name` if an entry ever holds one, but no action produces that today — pinned by a test asserting the action's capture behaviour.

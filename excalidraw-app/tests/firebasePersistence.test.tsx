@@ -45,6 +45,9 @@ vi.mock("@excalidraw-yjs/excalidraw/data/encryption", () => ({
 // Minimal Bytes shim + an in-memory firestore "scenes" collection and a no-op
 // storage, matching exactly the firebase API surface firebase.ts touches.
 const store = new Map<string, unknown>();
+/** Injects a transaction failure, so a FAILED save can be tested for real
+ * rather than asserted against a save that quietly succeeded. */
+const faults = { failTransaction: false };
 
 class FakeBytes {
   private constructor(private readonly u8: Uint8Array) {}
@@ -85,6 +88,9 @@ vi.mock("firebase/firestore", () => {
       set: (ref: { id: string }, value: unknown) => store.set(ref.id, value),
       update: (ref: { id: string }, value: unknown) => store.set(ref.id, value),
     };
+    if (faults.failTransaction) {
+      throw new Error("firestore unavailable");
+    }
     return fn(transaction);
   };
   return {
@@ -99,6 +105,22 @@ vi.mock("firebase/firestore", () => {
 const { saveToFirebase, loadFromFirebase, isSavedToFirebase } = await import(
   "../data/firebase"
 );
+
+/**
+ * `saveToFirebase` takes the scene `contentRevision` its input was captured at
+ * (T026). Most cases here only need "some revision that differs from whatever
+ * was last saved", so the helper supplies a fresh monotonic one; the
+ * INV-SAVE-SKIP cases pass explicit values because the revision IS what they
+ * are testing.
+ */
+let testRevision = 0;
+const saveScene = (
+  portal: Portal,
+  elements: readonly SyncableExcalidrawElement[],
+  appState: AppState,
+  assets: Readonly<Record<string, string>> = {},
+  contentRevision: number = ++testRevision,
+) => saveToFirebase(portal, elements, appState, assets, contentRevision);
 
 const ROOM = "room-1";
 const KEY = "0123456789abcdefghijkl"; // 22 chars, shape of a room key
@@ -161,18 +183,8 @@ describe("firebase persistence boundary", () => {
 
   it("FINDING #2 (disjoint adds): a concurrent writer's new element is NOT lost", async () => {
     // B committed {a, b}; A saves from a stale view {a, c} that never saw b.
-    await saveToFirebase(
-      portalFor(),
-      [rect("a"), rect("b")],
-      appStateWith({}),
-      {},
-    );
-    await saveToFirebase(
-      portalFor(),
-      [rect("a"), rect("c")],
-      appStateWith({}),
-      {},
-    );
+    await saveScene(portalFor(), [rect("a"), rect("b")], appStateWith({}), {});
+    await saveScene(portalFor(), [rect("a"), rect("c")], appStateWith({}), {});
 
     const loaded = await loadFromFirebase(ROOM, KEY, null);
     const ids = (loaded!.elements as readonly OrderedExcalidrawElement[])
@@ -198,7 +210,7 @@ describe("firebase persistence boundary", () => {
     for (let i = 0; i < RACE_ITERATIONS; i++) {
       const room = `same-edit-${i}`;
       // B committed e1 with a red stroke.
-      await saveToFirebase(
+      await saveScene(
         portalForRoom(room),
         [rect("e1", { strokeColor: "#ff0000" })],
         appStateWith({}),
@@ -209,7 +221,7 @@ describe("firebase persistence boundary", () => {
       // dropped. The fresh-doc `applyUpdateV2` merge keeps ONE element-map by
       // `clientID` tiebreak, so it drops A's whole blue map (red survives) whenever
       // the stored doc wins the tiebreak.
-      await saveToFirebase(
+      await saveScene(
         portalForRoom(room),
         [rect("e1", { strokeColor: "#0000ff" })],
         appStateWith({}),
@@ -229,7 +241,7 @@ describe("firebase persistence boundary", () => {
     for (let i = 0; i < RACE_ITERATIONS; i++) {
       const room = `del-live-${i}`;
       // B committed e1 alive.
-      await saveToFirebase(
+      await saveScene(
         portalForRoom(room),
         [rect("e1", { strokeColor: "#ff0000" })],
         appStateWith({}),
@@ -239,12 +251,7 @@ describe("firebase persistence boundary", () => {
       const deleted = rect("e1");
       (deleted as unknown as { isDeleted: boolean }).isDeleted = true;
       (deleted as unknown as { updated: number }).updated = Date.now();
-      await saveToFirebase(
-        portalForRoom(room),
-        [deleted],
-        appStateWith({}),
-        {},
-      );
+      await saveScene(portalForRoom(room), [deleted], appStateWith({}), {});
 
       const loaded = await loadFromFirebase(room, KEY, null);
       // The deletion-union keeps e1 tombstoned (load drops it, or returns it with
@@ -265,16 +272,11 @@ describe("firebase persistence boundary", () => {
       const bDeleted = rect("e1");
       (bDeleted as unknown as { isDeleted: boolean }).isDeleted = true;
       (bDeleted as unknown as { updated: number }).updated = Date.now();
-      await saveToFirebase(
-        portalForRoom(room),
-        [bDeleted],
-        appStateWith({}),
-        {},
-      );
+      await saveScene(portalForRoom(room), [bDeleted], appStateWith({}), {});
 
       // A saves e1 ALIVE — A's view never saw B's deletion. The deletion must still
       // win (union), so A's stale alive does not revive the element.
-      await saveToFirebase(
+      await saveScene(
         portalForRoom(room),
         [rect("e1", { strokeColor: "#00ff00" })],
         appStateWith({}),
@@ -301,12 +303,7 @@ describe("firebase persistence boundary", () => {
       "f-deleted": "asset://f-deleted",
     };
 
-    await saveToFirebase(
-      portalFor(),
-      [live, deleted],
-      appStateWith({}),
-      assets,
-    );
+    await saveScene(portalFor(), [live, deleted], appStateWith({}), assets);
 
     const loaded = await loadFromFirebase(ROOM, KEY, null);
     // the orphaned image's REFERENCE never reached the store (and bytes were
@@ -316,7 +313,7 @@ describe("firebase persistence boundary", () => {
   });
 
   it("FINDING #4: persisted viewBackgroundColor + name survive a cold load", async () => {
-    await saveToFirebase(
+    await saveScene(
       portalFor(),
       [rect("a")],
       appStateWith({ viewBackgroundColor: "#123456", name: "Persisted Board" }),
@@ -366,19 +363,19 @@ describe("firebase persistence boundary", () => {
     // `buildSnapshotDoc` rebuild. Not rewritten to assert the loss.
     it.skip("a concurrent edit to a DIFFERENT property of the same element survives", async () => {
       const room = "persist-merge";
-      await saveToFirebase(
+      await saveScene(
         portalForRoom(room),
         [rect("e1", { x: 0, y: 0 })],
         appStateWith({}),
         {},
       );
-      await saveToFirebase(
+      await saveScene(
         portalForRoom(room),
         [rect("e1", { x: 100, y: 0 })],
         appStateWith({}),
         {},
       );
-      await saveToFirebase(
+      await saveScene(
         portalForRoom(room),
         [rect("e1", { x: 0, y: 200 })],
         appStateWith({}),
@@ -402,23 +399,13 @@ describe("firebase persistence boundary", () => {
       const A = [rect("e1", { x: 100, y: 0 })];
       const B = [rect("e1", { x: 0, y: 200 })];
 
-      await saveToFirebase(
-        portalForRoom("order-ab"),
-        seed,
-        appStateWith({}),
-        {},
-      );
-      await saveToFirebase(portalForRoom("order-ab"), A, appStateWith({}), {});
-      await saveToFirebase(portalForRoom("order-ab"), B, appStateWith({}), {});
+      await saveScene(portalForRoom("order-ab"), seed, appStateWith({}), {});
+      await saveScene(portalForRoom("order-ab"), A, appStateWith({}), {});
+      await saveScene(portalForRoom("order-ab"), B, appStateWith({}), {});
 
-      await saveToFirebase(
-        portalForRoom("order-ba"),
-        seed,
-        appStateWith({}),
-        {},
-      );
-      await saveToFirebase(portalForRoom("order-ba"), B, appStateWith({}), {});
-      await saveToFirebase(portalForRoom("order-ba"), A, appStateWith({}), {});
+      await saveScene(portalForRoom("order-ba"), seed, appStateWith({}), {});
+      await saveScene(portalForRoom("order-ba"), B, appStateWith({}), {});
+      await saveScene(portalForRoom("order-ba"), A, appStateWith({}), {});
 
       const semantic = async (room: string) => {
         const l = await loadFromFirebase(room, KEY, null);
@@ -438,9 +425,9 @@ describe("firebase persistence boundary", () => {
       const room = "persist-idempotent-lineage";
       const elements = [rect("e1", { x: 42, y: 7 })];
 
-      await saveToFirebase(portalForRoom(room), elements, appStateWith({}), {});
+      await saveScene(portalForRoom(room), elements, appStateWith({}), {});
       const first = storedFingerprint(room);
-      await saveToFirebase(portalForRoom(room), elements, appStateWith({}), {});
+      await saveScene(portalForRoom(room), elements, appStateWith({}), {});
       const second = storedFingerprint(room);
 
       expect(first).not.toBeNull(); // guard: something was stored
@@ -453,9 +440,9 @@ describe("firebase persistence boundary", () => {
       const room = "persist-idempotent-semantic";
       const elements = [rect("e1", { x: 42, y: 7 })];
 
-      await saveToFirebase(portalForRoom(room), elements, appStateWith({}), {});
+      await saveScene(portalForRoom(room), elements, appStateWith({}), {});
       const first = await loadFromFirebase(room, KEY, null);
-      await saveToFirebase(portalForRoom(room), elements, appStateWith({}), {});
+      await saveScene(portalForRoom(room), elements, appStateWith({}), {});
       const second = await loadFromFirebase(room, KEY, null);
 
       const shape = (r: typeof first) =>
@@ -478,7 +465,7 @@ describe("firebase persistence boundary", () => {
   describe("cold load adopts the stored document", () => {
     it("returns the stored asset references", async () => {
       const room = "cold-load-refs";
-      await saveToFirebase(
+      await saveScene(
         portalForRoom(room),
         [imageEl("img", "f1")],
         appStateWith({}),
@@ -499,7 +486,7 @@ describe("firebase persistence boundary", () => {
 
     it("exposes the stored bytes so the Scene can adopt them", async () => {
       const room = "cold-load-adopt";
-      await saveToFirebase(
+      await saveScene(
         portalForRoom(room),
         [imageEl("img", "f1")],
         appStateWith({}),
@@ -515,72 +502,104 @@ describe("firebase persistence boundary", () => {
   });
 
   /**
-   * INV-SAVE-SKIP (T007) — `isSaved` must mean live == stored.
+   * INV-SAVE-SKIP (T007 RED → T026 GREEN) — `isSaved` must mean "everything in
+   * the live document has reached the store".
    *
-   * MEASURED, both halves broken, for two independent reasons:
-   *
-   * 1. FALSE-DIRTY (every save redundant). The cache is set from the elements
-   *    that came back through `restoreElements`, which RENORMALISES versions.
-   *    Measured: live `[a:5, b:5]` (sum 10) stores as `[a:2, b:2]` (sum 4). The
-   *    cached sum therefore never equals the live sum, so `isSavedToFirebase`
-   *    is false immediately after a successful save — every cycle pays a full
-   *    firestore transaction, and the unload guard always claims unsaved work.
-   *
-   * 2. FALSE-SKIP (silent loss). `getSceneVersion` is a plain SUM, which
-   *    collides whenever one element's version rises as much as another's
-   *    falls. T014b established versions DO move backwards here, so the
-   *    collision is a recorded mechanism, not a contrivance. A false-skip drops
-   *    the save with nothing to retry it.
-   *
-   * Both are why T026 replaces the sum-cache with an explicit dirty flag.
-   *
-   * These are `it.fails` rather than `it.skip`: the defect stays EXECUTABLE and
-   * the suite stays green, and the moment T026 makes either assertion hold the
-   * test fails loudly instead of sitting silently skipped.
+   * T007 measured the old summed-version cache broken in BOTH directions: it
+   * compared live sums against sums of `restoreElements`-renormalised elements
+   * (so every save was redundant), and a sum collides whenever one element's
+   * version rises as much as another's falls (so a dirty scene could report
+   * clean and be dropped with nothing to retry it). Both are gone now that the
+   * token is the scene's monotonic `contentRevision`.
    */
   describe("INV-SAVE-SKIP", () => {
-    it.fails("reports saved immediately after a successful save", async () => {
+    it("reports saved immediately after a successful save", async () => {
       const portal = portalFor();
-      const live = [rect("a", { version: 5 }), rect("b", { version: 5 })];
+      const stored = await saveScene(
+        portal,
+        [rect("a"), rect("b")],
+        appStateWith({}),
+        {},
+        7,
+      );
 
-      const stored = await saveToFirebase(portal, live, appStateWith({}), {});
-
-      // GUARD: the save really happened, so `false` below is a live-vs-stored
-      // mismatch and not an empty/aborted save.
+      // GUARD: the save really happened, so a mismatch below is a live-vs-stored
+      // failure and not an empty save.
       expect(stored).not.toBeNull();
       expect(stored!.map((e) => e.id).sort()).toEqual(["a", "b"]);
 
-      expect(isSavedToFirebase(portal, live)).toBe(true);
+      expect(isSavedToFirebase(portal, 7)).toBe(true);
     });
 
-    it.fails(
-      "does not report saved when content changed but the version SUM collides",
-      async () => {
-        const portal = portalFor();
-        const stored = await saveToFirebase(
-          portal,
-          [rect("a", { version: 5 }), rect("b", { version: 5 })],
-          appStateWith({}),
-          {},
-        );
+    it("skips the redundant save at the same revision", async () => {
+      const portal = portalFor();
+      await saveScene(portal, [rect("a")], appStateWith({}), {}, 3);
 
-        // GUARD (non-vacuity): anchor on the set the cache was actually built
-        // from, so this reports `true` and the assertion below is a real
-        // transition rather than the permanent `false` of defect 1.
-        expect(isSavedToFirebase(portal, stored!)).toBe(true);
+      // A second save at an unchanged revision must not touch the store.
+      expect(
+        await saveScene(portal, [rect("a")], appStateWith({}), {}, 3),
+      ).toBe(null);
+    });
 
-        // One version up, one down — identical sum, genuinely different content.
-        const byId = (id: string) => stored!.find((e) => e.id === id)!;
-        const collided = [
-          { ...byId("a"), version: byId("a").version + 1, x: 999 },
-          { ...byId("b"), version: byId("b").version - 1 },
-        ] as unknown as typeof stored;
-        expect(collided!.reduce((n, e) => n + e.version, 0)).toBe(
-          stored!.reduce((n, e) => n + e.version, 0),
-        );
+    it("stays dirty when the document changed while the save was in flight", async () => {
+      const portal = portalFor();
+      // The save captured revision 4; by the time it completed the scene had
+      // moved on to 5. Recording 5 as saved would mark a change that was never
+      // persisted.
+      await saveScene(portal, [rect("a")], appStateWith({}), {}, 4);
 
-        expect(isSavedToFirebase(portal, collided!)).toBe(false);
-      },
-    );
+      expect(isSavedToFirebase(portal, 5)).toBe(false);
+    });
+
+    it("stays dirty when the save FAILED", async () => {
+      const portal = portalFor();
+
+      faults.failTransaction = true;
+      let failed = false;
+      try {
+        await saveScene(portal, [rect("a")], appStateWith({}), {}, 9);
+      } catch {
+        failed = true;
+      }
+      faults.failTransaction = false;
+
+      // GUARD (non-vacuity): the write really has to have failed, or this case
+      // would be asserting against a save that quietly succeeded.
+      expect(failed).toBe(true);
+
+      // A failed save must never record its revision as saved — doing so would
+      // drop the content permanently, since nothing retries a "saved" scene.
+      expect(isSavedToFirebase(portal, 9)).toBe(false);
+
+      // ...and the very next attempt at that same revision must go through.
+      expect(
+        await saveScene(portal, [rect("a")], appStateWith({}), {}, 9),
+      ).not.toBeNull();
+      expect(isSavedToFirebase(portal, 9)).toBe(true);
+    });
+
+    it("cannot false-clear on a change whose version SUM collides", async () => {
+      const portal = portalFor();
+      // The exact T007 false-skip: `a` up one, `b` down one — identical sum,
+      // genuinely different content. Under the old cache this reported saved.
+      await saveScene(
+        portal,
+        [rect("a", { version: 5 }), rect("b", { version: 5 })],
+        appStateWith({}),
+        {},
+        11,
+      );
+      expect(isSavedToFirebase(portal, 11)).toBe(true);
+
+      // Any real mutation advances the revision, so the collision is
+      // unreachable: the token no longer derives from element versions at all.
+      expect(isSavedToFirebase(portal, 12)).toBe(false);
+    });
+
+    it("treats an unknown socket as dirty, never as saved", async () => {
+      // A room that was never saved must not report clean, or its first save
+      // would be skipped and its content never persisted.
+      expect(isSavedToFirebase(portalForRoom("never-saved"), 0)).toBe(false);
+    });
   });
 });
