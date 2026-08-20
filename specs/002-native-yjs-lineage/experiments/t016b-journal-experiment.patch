@@ -1,16 +1,18 @@
 diff --git a/packages/element/src/Scene.ts b/packages/element/src/Scene.ts
-index 7b51c8af..601d2c08 100644
+index 7b51c8af..1973afc1 100644
 --- a/packages/element/src/Scene.ts
 +++ b/packages/element/src/Scene.ts
-@@ -57,6 +57,7 @@ import {
+@@ -56,7 +56,9 @@ import {
+   ELEMENT_DELETIONS,
    yMapToElement,
    writeChangedKeys,
++  wouldWriteChange,
    computeElementIntent,
 +  isIntentKey,
    assertIntentAgainstResult,
    writeAssetLocators,
    readAssetLocators,
-@@ -496,6 +497,22 @@ export class Scene {
+@@ -496,6 +498,22 @@ export class Scene {
    /** Depth of open logical mutations; only the outermost close publishes. */
    private logicalDepth = 0;
  
@@ -33,7 +35,7 @@ index 7b51c8af..601d2c08 100644
    private logicalBuffer: { v1: Uint8Array[]; v2: Uint8Array[] } | null = null;
  
    private internalDocHandlers: Array<[string, (...a: never[]) => void]> = [];
-@@ -905,6 +922,28 @@ export class Scene {
+@@ -905,6 +923,38 @@ export class Scene {
      result: readonly ElementRecord[],
      options: {
        declaredIntent?: DeclaredElementIntent;
@@ -59,10 +61,20 @@ index 7b51c8af..601d2c08 100644
 +        string,
 +        ReadonlyMap<string, "result" | "applied">
 +      >;
++      /**
++       * A per-KEY conflict policy, applied ONLY to keys that are actually
++       * ambiguous. Modelled as a key policy rather than a fabricated per-id
++       * resolution map: a caller such as flip knows "for geometry keys the
++       * helper's doc value wins" WITHOUT knowing, before the journal exists,
++       * which ids will actually conflict. A policy key that never overlaps is
++       * simply unused; an ambiguous key with no policy and no explicit entry
++       * still throws.
++       */
++      overlapPolicy?: ReadonlyMap<string, "result" | "applied">;
        recordHistory?: boolean;
      } = {},
    ): { changedIds: ReadonlySet<string> } {
-@@ -913,8 +952,92 @@ export class Scene {
+@@ -913,8 +963,91 @@ export class Scene {
        resultById.set(r.id as string, r);
      }
  
@@ -80,6 +92,7 @@ index 7b51c8af..601d2c08 100644
 +    // nothing to choose and no resolution is required.
 +    if (options.alreadyAppliedIntent?.size) {
 +      const explicit = declared.overlapResolution ?? options.overlapResolution;
++      const policy = options.overlapPolicy;
 +      const unresolved: string[] = [];
 +      const suppress = new Map<string, Set<string>>();
 +
@@ -100,14 +113,12 @@ index 7b51c8af..601d2c08 100644
 +          if (!applied.has(key)) {
 +            continue;
 +          }
-+          // Same comparison the write planner uses to decide "changed".
-+          if (
-+            JSON.stringify((record as Record<string, unknown>)[key]) ===
-+            JSON.stringify(current[key])
-+          ) {
++          // THE write planner's own predicate — not an approximation of it.
++          const ymap = this.yElements.get(id);
++          if (!ymap || !wouldWriteChange(ymap, record, key)) {
 +            continue;
 +          }
-+          const choice = explicit?.get(id)?.get(key);
++          const choice = explicit?.get(id)?.get(key) ?? policy?.get(key);
 +          if (choice === undefined) {
 +            unresolved.push(`${id}.${key}`);
 +            continue;
@@ -157,7 +168,7 @@ index 7b51c8af..601d2c08 100644
      assertIntentAgainstResult(declared, resultById);
  
      // T016j — validate ONLY the records this mutation affects: creations, and
-@@ -1165,6 +1288,56 @@ export class Scene {
+@@ -1165,6 +1298,56 @@ export class Scene {
     * Deliberately narrow — the editor's action layer is the only caller. This is
     * not a general mode; see {@link openLogicalMutation} for the join rule.
     */
@@ -214,7 +225,7 @@ index 7b51c8af..601d2c08 100644
    beginLogicalMutation(): void {
      this.openLogicalMutation();
    }
-@@ -2213,6 +2386,23 @@ export class Scene {
+@@ -2213,6 +2396,23 @@ export class Scene {
        isDragging: false,
      },
    ): TElement {
@@ -599,6 +610,111 @@ index ec786038..1d7c4239 100644
    key !== "id" && !RECONCILE_META_KEYS.has(key);
  
  /**
+diff --git a/packages/element/src/yjs/schema.ts b/packages/element/src/yjs/schema.ts
+index 42459f87..5d16304c 100644
+--- a/packages/element/src/yjs/schema.ts
++++ b/packages/element/src/yjs/schema.ts
+@@ -336,6 +336,44 @@ export const yMapToElement = (ymap: Y.Map<unknown>): ElementRecord => {
+  * MUST be called inside a `ydoc.transact(fn, LOCAL_ORIGIN)`. Returns the number
+  * of keys written (0 ⇒ nothing changed).
+  */
++/**
++ * Would a SCOPED write of `key` from `element` actually change `ymap`?
++ *
++ * The single authority for "is this key different from what the document
++ * holds". `writeChangedKeys` consults it before mutating, and ambiguous-overlap
++ * detection consults it to decide whether an action and a helper genuinely
++ * disagree — so the two can never drift apart.
++ *
++ * Mutation-free, and it mirrors every branch the writer has: presence/`undefined`
++ * handling, `boundElements` set-diff semantics, `deepEqual` for JSON leaves, and
++ * strict identity otherwise. A `JSON.stringify` comparison is NOT equivalent —
++ * it is key-order sensitive and collapses presence distinctions.
++ */
++export const wouldWriteChange = (
++  ymap: Y.Map<unknown>,
++  element: ElementRecord,
++  key: string,
++): boolean => {
++  if (RECONCILE_META_KEYS.has(key)) {
++    return false;
++  }
++  const next = element[key];
++  if (next === undefined) {
++    if (key === BOUND_ELEMENTS_KEY) {
++      return boundElementsDiffers(ymap, null);
++    }
++    return ymap.has(key);
++  }
++  if (key === BOUND_ELEMENTS_KEY) {
++    return boundElementsDiffers(ymap, next as readonly BoundElement[] | null);
++  }
++  const prev = ymap.get(key);
++  if (JSON_LEAF_KEYS.has(key)) {
++    return !deepEqual(prev as never, next as never);
++  }
++  return prev !== next;
++};
++
+ export const writeChangedKeys = (
+   ymap: Y.Map<unknown>,
+   element: ElementRecord,
+@@ -373,14 +411,8 @@ export const writeChangedKeys = (
+       writes += diffBoundElements(ymap, next as readonly BoundElement[] | null);
+       continue;
+     }
+-    const prev = ymap.get(key);
+-    if (JSON_LEAF_KEYS.has(key)) {
+-      if (!deepEqual(prev, next)) {
+-        ymap.set(key, cloneJSON(next));
+-        writes++;
+-      }
+-    } else if (prev !== next) {
+-      ymap.set(key, next);
++    if (wouldWriteChange(ymap, element, key)) {
++      ymap.set(key, JSON_LEAF_KEYS.has(key) ? cloneJSON(next) : next);
+       writes++;
+     }
+   }
+@@ -419,6 +451,38 @@ export const writeChangedKeys = (
+  * `set`/`delete` for the delta only (§4.1). MUST run inside a
+  * `LOCAL_ORIGIN` transaction. Returns the number of mutations applied.
+  */
++/** Mutation-free mirror of {@link diffBoundElements}' set-diff — used by
++ * {@link wouldWriteChange} so the predicate and the writer share semantics. */
++const boundElementsDiffers = (
++  parent: Y.Map<unknown>,
++  boundElements: readonly BoundElement[] | null,
++): boolean => {
++  const nested = parent.get(BOUND_ELEMENTS_KEY);
++  const next = new Map<string, BoundElementType>();
++  if (boundElements) {
++    for (const bound of boundElements) {
++      next.set(bound.id, bound.type);
++    }
++  }
++  if (!(nested instanceof Y.Map)) {
++    // No nested map yet: installing one is itself a change only if there is
++    // something to install.
++    return next.size > 0;
++  }
++  const current = nested as Y.Map<BoundElementType>;
++  for (const id of current.keys()) {
++    if (!next.has(id)) {
++      return true;
++    }
++  }
++  for (const [id, type] of next) {
++    if (current.get(id) !== type) {
++      return true;
++    }
++  }
++  return false;
++};
++
+ export const diffBoundElements = (
+   parent: Y.Map<unknown>,
+   boundElements: readonly BoundElement[] | null,
 diff --git a/packages/element/tests/linearElementEditor.test.tsx b/packages/element/tests/linearElementEditor.test.tsx
 index 57ac84fa..9b1dd514 100644
 --- a/packages/element/tests/linearElementEditor.test.tsx
@@ -696,42 +812,37 @@ index 2445d1bd..28b2cc2c 100644
      return {
        elements: updatedElements,
 diff --git a/packages/excalidraw/actions/actionFlip.ts b/packages/excalidraw/actions/actionFlip.ts
-index fbf2af52..d1f4ed46 100644
+index fbf2af52..885f8dd3 100644
 --- a/packages/excalidraw/actions/actionFlip.ts
 +++ b/packages/excalidraw/actions/actionFlip.ts
-@@ -26,25 +26,57 @@ import { register } from "./register";
+@@ -26,25 +26,52 @@ import { register } from "./register";
  
  import type { AppClassProperties, AppState } from "../types";
  
 +/**
-+ * Ownership for the geometry keys flip both DERIVES and writes through helpers.
++ * Flip's conflict POLICY: for geometry keys, the helper's already-applied doc
++ * value wins.
 + *
 + * `flipSelectedElements` repositions elements — and their bound texts and
 + * arrows — THROUGH THE DOC via `mutateElement`, then returns the pre-flip
 + * `selectedElements`. Those carry positions computed from the pre-flip base, so
-+ * for any geometry key the doc already holds the correct value and the action's
-+ * derived one is stale: the helper's write wins.
++ * wherever the two genuinely disagree the doc is right and the action's derived
++ * value is stale.
 + *
-+ * Built from the ids the action actually touched — never fixture literals, and
-+ * never an action-name branch inside the planner.
++ * Declared as a KEY policy, deliberately: the action cannot know which ids will
++ * actually conflict before the journal exists, and fabricating an entry for
++ * every record in the returned scene array would be neither "ids actually
++ * touched" nor exact coverage. The boundary applies this only to keys that are
++ * genuinely ambiguous; any ambiguous key outside it still throws.
 + */
-+const flipOverlapResolution = (
-+  touched: readonly { id: string }[],
-+): ReadonlyMap<string, ReadonlyMap<string, "result" | "applied">> => {
-+  const GEOMETRY_KEYS = [
-+    "x",
-+    "y",
-+    "width",
-+    "height",
-+    "angle",
-+    "points",
-+  ] as const;
-+  const byId = new Map<string, ReadonlyMap<string, "result" | "applied">>();
-+  for (const el of touched) {
-+    byId.set(el.id, new Map(GEOMETRY_KEYS.map((k) => [k, "applied" as const])));
-+  }
-+  return byId;
-+};
++const FLIP_OVERLAP_POLICY: ReadonlyMap<string, "result" | "applied"> = new Map([
++  ["x", "applied"],
++  ["y", "applied"],
++  ["width", "applied"],
++  ["height", "applied"],
++  ["angle", "applied"],
++  ["points", "applied"],
++]);
 +
  export const actionFlipHorizontal = register({
    name: "flipHorizontal",
@@ -761,12 +872,12 @@ index fbf2af52..d1f4ed46 100644
 +    );
 +    return {
 +      elements: next,
-+      overlapResolution: flipOverlapResolution(next),
++      overlapPolicy: FLIP_OVERLAP_POLICY,
 +      appState,
        captureUpdate: CaptureUpdateAction.IMMEDIATELY,
      };
    },
-@@ -57,19 +89,21 @@ export const actionFlipVertical = register({
+@@ -57,19 +84,21 @@ export const actionFlipVertical = register({
    icon: flipVertical,
    trackEvent: { category: "element" },
    perform: (elements, appState, _, app) => {
@@ -792,12 +903,12 @@ index fbf2af52..d1f4ed46 100644
 +    );
 +    return {
 +      elements: next,
-+      overlapResolution: flipOverlapResolution(next),
++      overlapPolicy: FLIP_OVERLAP_POLICY,
 +      appState,
        captureUpdate: CaptureUpdateAction.IMMEDIATELY,
      };
    },
-@@ -211,8 +245,5 @@ const flipElements = (
+@@ -211,8 +240,5 @@ const flipElements = (
    // through the doc rather than mutated in place) are stale in `selectedElements`;
    // returning them would make the action's result clobber the doc's correct
    // post-flip positions.
@@ -830,10 +941,10 @@ index fef8b7ed..5a5c3a5a 100644
      }
    }
 diff --git a/packages/excalidraw/actions/types.ts b/packages/excalidraw/actions/types.ts
-index 3ba94fc4..ef5cdb81 100644
+index 3ba94fc4..3e1b5cfa 100644
 --- a/packages/excalidraw/actions/types.ts
 +++ b/packages/excalidraw/actions/types.ts
-@@ -29,6 +29,16 @@ export type ActionResult =
+@@ -29,6 +29,18 @@ export type ActionResult =
        files?: BinaryFiles | null;
        captureUpdate: CaptureUpdateActionType;
        replaceFiles?: boolean;
@@ -847,14 +958,16 @@ index 3ba94fc4..ef5cdb81 100644
 +        string,
 +        ReadonlyMap<string, "result" | "applied">
 +      >;
++      /** A per-KEY conflict policy — see `Scene.applyElementChanges`. */
++      overlapPolicy?: ReadonlyMap<string, "result" | "applied">;
      }
    | false;
  
 diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
-index 14544f1f..83dc570f 100644
+index 14544f1f..123421bc 100644
 --- a/packages/excalidraw/components/App.tsx
 +++ b/packages/excalidraw/components/App.tsx
-@@ -2903,95 +2903,126 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2903,95 +2903,127 @@ class App extends React.Component<AppProps, AppState> {
      });
    };
  
@@ -930,6 +1043,7 @@ index 14544f1f..83dc570f 100644
 +              recordHistory,
 +              alreadyAppliedIntent: this.scene.getActionMutationJournal(),
 +              overlapResolution: actionResult.overlapResolution,
++              overlapPolicy: actionResult.overlapPolicy,
 +            },
 +          );
 +        } else {
@@ -1057,3 +1171,29 @@ index 14544f1f..83dc570f 100644
  
    // Lifecycle
  
+diff --git a/packages/excalidraw/wysiwyg/textWysiwyg.test.tsx b/packages/excalidraw/wysiwyg/textWysiwyg.test.tsx
+index 23dc3423..e0dc1659 100644
+--- a/packages/excalidraw/wysiwyg/textWysiwyg.test.tsx
++++ b/packages/excalidraw/wysiwyg/textWysiwyg.test.tsx
+@@ -1790,12 +1790,15 @@ describe("textWysiwyg", () => {
+           strokeWidth: 2,
+           type: "rectangle",
+           updated: 1,
+-          // T014b: reconciliation metadata baked into an otherwise-semantic
+-          // assertion. The container is written ~7 times during this flow with a
+-          // version behind the doc's meta — genuine stale writes, which the
+-          // monotonic rule now corrects. Every semantic field here (geometry,
+-          // boundElements, isDeleted, updated) is unchanged; measured.
+-          version: 9,
++          // `version` is deliberately NOT asserted here. This is a geometry /
++          // binding contract, and pinning reconciliation metadata inside it made
++          // the test fail whenever the write path changed while every semantic
++          // field stayed identical. Measured across BOTH apply routes, the doc
++          // writes are the SAME — the text gets isDeleted, then
++          // width+text+originalText, then containerId+verticalAlign+textAlign,
++          // then index; the container gets its one creation write — so no
++          // intended write is lost and only the accumulated in-memory version
++          // differs. Version behaviour belongs to the T014b/metadata tests.
+           width: 610,
+           x: 15,
+           y: 12.5,

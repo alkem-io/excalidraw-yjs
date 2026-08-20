@@ -609,6 +609,52 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
   requirement is therefore met by that test, not by the pin I built, and the pin
   should not be described as covering it.
 
+  **ROUND-7 — two defects in my own patch corrected; the experiment now has ZERO
+  semantic failures.** (Reverted; patch refreshed.)
+
+  **Correction A — my "same comparison the write planner uses" comment was
+  FALSE.** I compared with `JSON.stringify`, while `writeChangedKeys` uses
+  presence/`undefined` handling, `diffBoundElements` set-diff, `deepEqual` for
+  JSON leaves and strict `!==` otherwise. `JSON.stringify` is key-order sensitive
+  and collapses presence distinctions. Fixed by extracting ONE mutation-free
+  predicate, `wouldWriteChange(ymap, element, key)`, in `schema.ts` — with a
+  non-mutating mirror of the boundElements set-diff — and routing BOTH the writer
+  and ambiguity detection through it. No second comparator exists.
+
+  **Correction B — `flipOverlapResolution(next)` was not "ids actually
+  touched".** It mapped geometry keys for EVERY record in the returned
+  whole-scene array, and the boundary silently ignored the extra entries.
+  Replaced with an explicit per-KEY policy: `overlapPolicy` (key → choice),
+  applied by the boundary ONLY to keys that are genuinely ambiguous. This is
+  honest to what flip knows — "for geometry keys the helper's doc value wins" —
+  without inventing ids before the journal exists. An ambiguous key outside the
+  policy still throws.
+
+  **The version question, RESOLVED by measurement** (item 3/4). Logged every
+  write pass on both routes:
+  ```
+  patch route  : id3:1[isDeleted] … id3:3[width+text+originalText] …
+                 id3:3[containerId+verticalAlign+textAlign] … id3:1[index], id6:1[isDeleted]
+  authoritative: IDENTICAL write set, differing only in pass ORDER and one extra
+                 zero-write pass on an untouched element
+  ```
+  The doc writes are the SAME; no intended write is lost. The `9` vs `2` is
+  accumulated in-memory version, not doc content. So per the rule the baked-in
+  `version` was **REMOVED from that geometry assertion** rather than swapped for
+  another incidental number — version behaviour belongs to the T014b/metadata
+  tests, not a geometry contract.
+
+  **Suite now: 8 failures, ALL snapshot, ZERO semantic.** Classification
+  unchanged and re-confirmed: **6 `"version"` + 4 `"versionNonce"` across 3
+  files; zero `updated`, `hasElementChange`, geometry/binding/content, or
+  membership/order.**
+
+  **All probes re-run after the corrections and still fire**: dropping a policy
+  key throws naming `arr.x, rec1.x, rec2.x`; inverting `applied`→`result` gives
+  the real flip RED; explicit `result` beats a journaled key; same-value overlap
+  needs no resolution; unknown value rejects; close-without-open throws; a throw
+  mid-action clears. Typecheck 0, lint 0.
+
   **T015 — HOLD LIFTED (see the discriminating experiment above).** It was held
   because helper intent sets risked being a SECOND unconsumed API, and because
   the textWysiwyg `+7` proved only that stale full writes happen, not that
