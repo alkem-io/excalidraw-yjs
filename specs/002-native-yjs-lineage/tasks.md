@@ -241,6 +241,32 @@
   `hasElementChange` flips**, so no history semantics changed, and no behavioural
   assertion changed in any of the 5 tests. Accepted on that basis.
 
+  **REMEASURED from the post-no-write baseline** (the version-authority mechanism
+  is still NOT implemented; experiment applied and reverted):
+
+  | | old baseline | after the no-write slice |
+  |---|---|---|
+  | failing reason-pairs | 61 | **65** |
+  | snapshot reasons | 59 | **49** |
+  | cascade (`multiple elements`) | 13 | **13** |
+  | semantic | 3 | **3** |
+  | `hasElementChange` flips | 5 (`false→true`) | **5 (`false→true`)** |
+
+  **Nothing was resolved by the no-write slice.** All three semantic failures
+  survive verbatim — the `captureUpdate: NEVER` phantom (3 instead of 2), the
+  `reappearReveal` STORE case, and the `textWysiwyg` container-wrap. So the
+  phantom is NOT a no-write artefact; it comes from the version advance itself
+  and must be explained before the mechanism lands.
+
+  The 13 cascade failures also persist unchanged, consistent with their being
+  downstream of the snapshot aborts rather than of any versioning rule.
+
+  Snapshot reasons fell 59 → 49 because the no-write slice had already removed
+  the spurious advances those encoded; the `hasElementChange` flips are
+  unchanged in count and direction, which is consistent with the round-3
+  adjudication that they are corrected recordings rather than an artefact the
+  no-write rule could have caused.
+
   **Proposed boundary, NOT implemented pending review**: `meta.version` stays the
   exact ordered per-element counter that history/delta require, and advances iff
   the element's doc content changed — which is what makes it a faithful change
