@@ -307,6 +307,44 @@
   STORE case — still unattributed, and 13 of the 44 are the known contextmenu
   cascade.
 
+  **BOTH SEMANTIC CASES ADJUDICATED under strict `<` (experiment reverted;
+  nothing implemented). ONE IS BLOCKING.**
+
+  **1. `reappearReveal` — BLOCKING. The rule breaks a landed green invariant.**
+  Measured on both baselines:
+  - landed: reveal arrives at **v4**, Store accepts, `isDeleted:false`. PASSES.
+  - strict `<`: Store holds the tombstone at **v5** and the Scene has the element
+    live at **v5** — an exact TIE, so the Store's `prevElement.version <
+    nextElement.version` gate rejects the reveal and keeps the tombstone.
+
+  This is NOT the rule exposing a reveal the old test missed: the Store behaves
+  correctly, and the rule manufactured the equality. The cause is a collision of
+  two authorities that each add one — the Store synthesizes its tombstone at
+  `version + 1` (store.ts:924) while the Scene rule advances to
+  `previousMeta + 1`. They land on the same number, so INV-REVEAL (T005/T024)
+  regresses. **Any version-authority mechanism must be reconciled with the
+  Store's tombstone synthesis, not just with its change-detection gate.**
+
+  **2. `textWysiwyg` container-wrap — metadata only, NOT semantic.** The actual
+  container element differs from the expectation in `version` alone (**2 → 9**);
+  `height` 35, `width` 610, `x` 15, `y` 12.5, `boundElements`, `isDeleted` and
+  `updated` are byte-identical on both baselines. The assertion bakes
+  `version: 2` into an `objectContaining` of otherwise-semantic fields.
+  *Worth noting separately*: +7 means that flow writes the container ~7 times
+  with a version behind meta, i.e. seven genuine stale writes — evidence for the
+  T015/T016 side-effecting-helper work, independent of T014b.
+
+  **Snapshot classification under strict `<`** (4 files): **194 `"version"`
+  lines** plus **10 `"hasElementChange"` (the same 5 flips, same `false → true`
+  direction)**. No geometry, binding or content keys change anywhere. The flips
+  are unchanged from the `<=` measurement, consistent with the round-3
+  adjudication that they are corrected recordings rather than an artefact of any
+  particular threshold.
+
+  **Cascade re-verified under strict `<`**: the first isolated failure in
+  `contextmenu.test.tsx` is still a snapshot mismatch, with the selector error
+  appearing only afterwards. Still cascade, still zero independent defects.
+
   **Proposed boundary, NOT implemented pending review**: `meta.version` stays the
   exact ordered per-element counter that history/delta require, and advances iff
   the element's doc content changed — which is what makes it a faithful change
