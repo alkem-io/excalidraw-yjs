@@ -4,7 +4,7 @@
 
 **Strategy** (plan §Migration): suite-first (author each invariant RED against current HEAD, proving non-vacuity), single-owner (one author holds the lineage seam — no parallel-agent edge edits), edge-by-edge (each FR keeps the whole suite + typecheck + lint green before the next). Land on `split/native-yjs-core`, superseding the throwaway-detour code (commit `96f9bce3`, retained as the RED baseline).
 
-**Revised order (2026-08-19): the write path comes BEFORE the wire.** The 34 re-enabled `multiplayer undo/redo` tests gate FR-009/010/011, not FR-001 — so the original order would have gone RED in Phase 1 for reasons the plan never named. Fixing the write path first also deletes 32 bandaid sites, shrinking what every later phase must keep green.
+**Revised order (2026-08-19): the write path comes BEFORE the wire.** The reordering was originally argued from the 34 re-enabled `multiplayer undo/redo` tests gating FR-009/010/011 rather than FR-001. **That premise is withdrawn (T002 — the block never exercised a second replica and is now deleted)**, but the order it produced is right for an independent reason that survives: the write path is where lineage is destroyed, so INV-CONVERGE cannot go green while every local write clobbers it. Fixing the write path first also deletes 32 bandaid sites, shrinking what every later phase must keep green.
 
 ## Phase 1 — RED suite (the deterministic gate, authored against HEAD first)
 

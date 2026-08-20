@@ -279,18 +279,30 @@ describe("SC-002: multiplayer outcomes at the production boundary", () => {
   });
 
   // (e)
-  it("bound text and arrow bindings stay referentially consistent across a remote change and a local undo", () => {
+  it("bound-text and arrow bindings keep their INVERSE relations across a remote change and a local undo", () => {
+    // The relationship graph is seeded BIDIRECTIONALLY — container <-> label and
+    // arrow <-> both endpoints — because a one-way seed cannot detect a lost
+    // inverse. And the assertions check the relations themselves, not merely
+    // that referenced ids still exist: a predicate that only resolves ids stays
+    // green when a binding is silently DROPPED, which is the likelier failure.
     const container = API.createElement({
       type: "rectangle",
       id: "container",
-      boundElements: [{ id: "label", type: "text" }],
+      boundElements: [
+        { id: "label", type: "text" },
+        { id: "arrow", type: "arrow" },
+      ],
     });
     const label = API.createElement({
       type: "text",
       id: "label",
       containerId: "container",
     });
-    const target = API.createElement({ type: "rectangle", id: "target" });
+    const target = API.createElement({
+      type: "rectangle",
+      id: "target",
+      boundElements: [{ id: "arrow", type: "arrow" }],
+    });
     const arrow = API.createElement({
       type: "arrow",
       id: "arrow",
@@ -299,8 +311,40 @@ describe("SC-002: multiplayer outcomes at the production boundary", () => {
     });
     seed([container, label, target, arrow]);
 
+    const boundIds = (id: string) =>
+      (
+        byId(id) as unknown as { boundElements?: { id: string }[] | null }
+      )?.boundElements?.map((b) => b.id) ?? [];
+    const bindingOf = (key: "startBinding" | "endBinding") =>
+      (
+        byId("arrow") as unknown as Record<
+          string,
+          { elementId?: string } | null
+        >
+      )?.[key]?.elementId;
+    const containerOf = (id: string) =>
+      (byId(id) as unknown as { containerId?: string | null })?.containerId;
+
+    /** Every inverse relation the seed established must still hold. */
+    const relationsIntact = () => ({
+      labelContainer: containerOf("label"),
+      containerBound: [...boundIds("container")].sort(),
+      targetBound: boundIds("target"),
+      arrowStart: bindingOf("startBinding"),
+      arrowEnd: bindingOf("endBinding"),
+    });
+    const EXPECTED = {
+      labelContainer: "container",
+      containerBound: ["arrow", "label"],
+      targetBound: ["arrow"],
+      arrowStart: "container",
+      arrowEnd: "target",
+    };
+
     const { peer, detach, deliver } = linkPeer();
     try {
+      expect(relationsIntact()).toEqual(EXPECTED);
+
       act(() => {
         API.updateScene({
           elements: h.elements.map((e) =>
@@ -314,40 +358,16 @@ describe("SC-002: multiplayer outcomes at the production boundary", () => {
         els.map((e) => (e.id === "target" ? { ...e, y: 300 } : e)),
       );
       deliver();
+      expect(relationsIntact()).toEqual(EXPECTED);
 
-      const dangling = () => {
-        const ids = new Set(h.elements.map((e) => e.id));
-        const bad: string[] = [];
-        for (const el of h.elements) {
-          const cid = (el as { containerId?: string | null }).containerId;
-          if (cid && !ids.has(cid)) {
-            bad.push(`${el.id}.containerId -> ${cid}`);
-          }
-          for (const b of (el as { boundElements?: { id: string }[] | null })
-            .boundElements ?? []) {
-            if (!ids.has(b.id)) {
-              bad.push(`${el.id}.boundElements -> ${b.id}`);
-            }
-          }
-          for (const key of ["startBinding", "endBinding"] as const) {
-            const bind = (
-              el as unknown as Record<string, { elementId?: string } | null>
-            )[key];
-            if (bind?.elementId && !ids.has(bind.elementId)) {
-              bad.push(`${el.id}.${key} -> ${bind.elementId}`);
-            }
-          }
-        }
-        return bad;
-      };
-
-      expect(dangling()).toEqual([]);
       Keyboard.undo();
       expect(byId("container")?.x).toBe(0); // control: our move was reverted
-      expect(dangling()).toEqual([]);
+      expect(relationsIntact()).toEqual(EXPECTED);
+
       Keyboard.redo();
       expect(byId("container")?.x).toBe(40); // control: redo re-applied it
-      expect(dangling()).toEqual([]);
+      expect(relationsIntact()).toEqual(EXPECTED);
+
       // and the peer's move is still there
       expect(byId("target")?.y).toBe(300);
     } finally {
