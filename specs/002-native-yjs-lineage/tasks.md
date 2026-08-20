@@ -480,6 +480,10 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
   with `keysById` implying `"result"` for matching overlaps. Not built pending
   the re-attribution above.
 
+  **ROUND-4 — SUPERSEDED IN PART BY ROUND-5 BELOW.** The classification
+  (ordering/index) is right; the CAUSE stated here — that `syncMovedIndices`
+  minted the tie — is WRONG. See round 5.
+
   **ROUND-4 — `textWysiwyg` ATTRIBUTED: ordering / index normalization. T016j was
   RIGHT ALL ALONG.** (Experiment reverted; only the test rewrite kept.)
 
@@ -519,6 +523,43 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
   up" sense, but no mutation has yet been found that breaks it. It needs a
   sharper assertion or a narrower sabotage before it can be treated as a
   regression gate.
+
+  **ROUND-5 — the four-point trace settles the contradiction. THE REREAD makes
+  the tie, not `syncMovedIndices`.** (Reverted; only the already-committed delete-test
+  rewrite is kept.)
+
+  Logged the literal ids/indices at four points on the failing path, authoritative
+  repair disabled:
+  ```
+  P1 before syncMovedIndices : id1@a0, id6@null, id3@a1
+  P2 after  syncMovedIndices : id1@a0, id6@a1,   id3@a2   <- DISTINCT, correct
+  P3 before reread           : id1@a0, id6@a1,   id3@a2
+  P4 after  reread           : id1@a0, id6@a1,   id3@a1   <- TIE
+  ```
+  `syncMovedIndices` mints DISTINCT indices. The `freshMap` reread then replaces
+  the text with the live doc version, which still carries `a1` because the write
+  had not happened yet — restoring the stale index and tying it against the new
+  container. **The earlier T016j trace was correct and round 4's cause was wrong**;
+  round 4 inferred the cause from the boundary result without instrumenting the
+  intermediate points.
+
+  **The fix is therefore the bounded removal of THAT reread** — not an index mint
+  and not a planner repair. Measured under the patch route with only that reread
+  removed:
+  - order CORRECT locally and at a linked peer (the n=3 pin passes);
+  - full suite **17 → 9 failures** (8 snapshot, 1 semantic);
+  - the single semantic残 is the baked-in `version: 9` vs `2` expectation —
+    reconciliation metadata, and the patch route's lower value reflects fewer
+    spurious bumps, not lost content.
+
+  **`actionDeleteSelected` — NON-VACUITY NOW ESTABLISHED; my earlier "could not
+  establish" was wrong.** Instrumenting write provenance (rather than guessing
+  again) named the exact owner: `actionDeleteSelected.tsx`'s
+  `app.scene.mutateElement(bound, { startBinding … })` on the bound elbow.
+  Sabotaging THAT site fails both tests (`expected 'id0' to be null`). The three
+  earlier sabotages were simply mis-aimed — the null is NOT over-determined, and
+  the rewritten observable test IS a valid gate. The arrow also survives the
+  delete (`isDeleted: false`), so it does not pass by the element vanishing.
 
   **T015 — HOLD LIFTED (see the discriminating experiment above).** It was held
   because helper intent sets risked being a SECOND unconsumed API, and because
