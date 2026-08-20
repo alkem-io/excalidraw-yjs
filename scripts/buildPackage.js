@@ -107,7 +107,12 @@ function buildProd(config) {
 
 const createESMRawBuild = async () => {
   const chunksConfig = {
-    entryPoints: ["index.tsx", "**/*.chunk.ts"],
+    // `headless.ts` is a SECOND entry so `@excalidraw-yjs/excalidraw/headless`
+    // resolves to its own file. Bundling it into `index.tsx` would make a Node
+    // consumer load this package's React barrel — the exact thing the entry
+    // exists to avoid. Mirrors `scripts/buildBase.js`, which does this for
+    // `@excalidraw-yjs/element/headless`.
+    entryPoints: ["index.tsx", "headless.ts", "**/*.chunk.ts"],
     entryNames: "[name]",
   };
 

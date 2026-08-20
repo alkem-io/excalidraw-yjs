@@ -56,6 +56,20 @@ Step 1 is independent of 2 and 3 and can land first.
 
 **Real in source, in both directions, and barely load-bearing.** `common/src/{colors,utils,points}.ts` import from `math`; `math/src/range.ts` imports exactly **one** symbol back — `toBrandedType`. Moving that single symbol to a leaf (or into `math`) breaks the cycle. Worth doing while the package boundary is being tidied, but it blocks nothing above and should not be bundled into the same change.
 
+## Landed from this audit
+
+**Step 2 is built and green** — `@excalidraw-yjs/excalidraw/headless`, a pure re-export of `@excalidraw-yjs/element/headless`, as its own esbuild entry. `test:headless` now covers **both** entries: **14/14**, including a snapshot round-trip (the server's actual use), a bare-Node import, and a scan of the emitted artifact _and every chunk it imports_ for a React import. Measured: the emitted `headless.js` is **103 bytes** plus two shared chunks totalling 2.2 KB (the env-vars object and esbuild's CJS interop shim) with **zero** React references. Sabotage: pointing the entry at the React barrel makes the bare-Node import fail immediately.
+
+**The `common` ↔ `math` cycle is broken.** `math` now declares **no** `@excalidraw-yjs` dependencies at all. `range.ts` uses a local `toInclusiveRange` instead of `common`'s `toBrandedType`. Deliberately concrete rather than a copy of the generic: reproducing that signature faithfully would mean duplicating `UnbrandForValue` (~30 lines of recursive conditional type), which is not a clean trade — and since every call site brands a number pair, the concrete helper is both simpler and _tighter_ than the generic it replaces.
+
+### A trap found while doing it — a built `dist/` fails 10 suite tests
+
+**`packages/excalidraw/dist/` being present makes 10 Sidebar/DefaultSidebar tests fail**, all on a ~1000 ms `waitFor` timeout ("not initialized yet"), not a resolution error — the vitest aliases already point every `@excalidraw-yjs/*` specifier at source. Delete `dist/` and the same 19 tests pass.
+
+**Pre-existing, not introduced here**: `build:excalidraw` predates this work and `build:packages` already invoked it, so anyone building the packages and then running the suite hit it. What changed is that `test:headless` now builds the umbrella too — necessary, since the umbrella bundle is what it tests — which makes it a second route to the same state.
+
+**Practical consequence: `pnpm run test:headless` and `pnpm test` cannot both be green in the same working tree without `rm -rf packages/excalidraw/dist` in between.** Recorded rather than papered over. Not fixed here: the cause looks like startup cost rather than wrong resolution, the fix would be in vitest config, and this task was scoped to the headless export.
+
 ## What is deliberately NOT proposed
 
 Renaming or republishing the internal packages, changing what `pkg-pr-new` publishes, or "pin the same SHA everywhere" — the last being the current headache rather than a fix.

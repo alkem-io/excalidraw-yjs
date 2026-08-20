@@ -6,6 +6,12 @@
   "main": "./dist/prod/index.js",
   "module": "./dist/prod/index.js",
   "exports": {
+    "./headless": {
+      "types": "./dist/types/excalidraw/headless.d.ts",
+      "development": "./dist/dev/headless.js",
+      "production": "./dist/prod/headless.js",
+      "default": "./dist/prod/headless.js"
+    },
     "./common/*": {
       "types": "./dist/types/common/src/*.d.ts"
     },
