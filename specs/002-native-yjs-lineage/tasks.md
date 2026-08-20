@@ -58,7 +58,7 @@
   - **The original "history depths stay in lockstep" wording is FALSIFIED and must not be restored**: an appState-only step makes a `History` entry with no `UndoManager` item, so equal depths cannot hold for a correct editor. Stated behaviourally instead — a remote apply contributes nothing to local history — and green (`historyLockstep.test.tsx`).
   - **`meta.version` never regresses** — closed by T014b. Live gate: the un-skipped INV-VERSION-MONOTONIC case in `Scene.native-yjs-write-intent.test.ts`, plus the reservation pin in `reappearReveal.test.tsx`.
 
-- [ ] T011 **(SPLIT — one done, one open)** - **INV-APPSTATE-UNDO — DONE (T028)**: undo/redo of background/name survives the next scene update, verified across a linked peer, with `name` narrowed by evidence. Live gate: `appStateUndo.test.tsx`. - **INV-WIRE-ROBUST — OPEN, tracked as T027.** Its original wording ("an invalid update is rejected without desynchronising") is unachievable by catching: Yjs apply is not atomic on a decode failure, measured at 10 of 1056 truncation offsets both throwing AND mutating. Generation replacement now exists with a live consumer, so the dependency is gone; the transport-level reproduction and the receiver policy are not built.
+- [ ] T011 **(SPLIT — one done, one open)** - **INV-APPSTATE-UNDO — DONE (T028)**: undo/redo of background/name survives the next scene update, verified across a linked peer, with `name` narrowed by evidence. Live gate: `appStateUndo.test.tsx`. - **INV-WIRE-ROBUST — OPEN, tracked as T027.** Its original wording ("an invalid update is rejected without desynchronising") is unachievable by catching: Yjs apply is not atomic on a decode failure, measured at 10 of 1056 truncation offsets both throwing AND mutating. Generation replacement now exists with a live consumer, so the dependency is gone; the transport-level reproduction is built and the receiver policy is drafted and measured (`wireRecoveryPolicy.test.tsx`), but no transport code is written — held pending the server ingress policy.
 
 - [x] T014b **(DONE — FR-011 complete)** The version authority: a stale bulk write can no longer move `meta.version` backwards, and the Store no longer silently drops a real edit.
 
@@ -288,7 +288,7 @@
 
   **Deliberately NOT done, and why.** The cold-load path no longer marks the room saved. Since T020 a cold load ADOPTS the stored document, and that adoption is itself a doc-changing transaction occurring after `loadFromFirebase` returns, so no revision available there corresponds to the post-adoption scene. The reviewer's richer rule (adoption may establish a clean baseline _only if_ the fresh generation was clean, staying dirty if a remote update landed during the fetch) is a real improvement and is NOT implemented — deferral reviewed and approved as a bounded follow-up, not a blocker. Cost of the omission is one redundant save after a cold load — the harmless direction. Guessing a baseline would risk the dangerous one: a false-skip, which is silent data loss with nothing to retry it.
 
-- [ ] T027 **(MEASURED — three distinct failure classes; policy still undesigned)** INV-WIRE-ROBUST.
+- [ ] T027 **(POLICY DRAFTED — one class ready to implement, two not ours)** INV-WIRE-ROBUST.
 
   **Receiver census** — every production receiver of remote bytes funnels to `Scene.applyRemoteUpdate`: `Collab`'s INIT (`Collab.tsx:710`) and UPDATE (`:724`) handlers via `App.applyRemoteSceneUpdate`, and the cold-load adoption path (`App.tsx:3286`). Three entry points, one boundary.
 
