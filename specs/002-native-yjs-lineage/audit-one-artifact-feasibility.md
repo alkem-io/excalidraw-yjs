@@ -61,7 +61,7 @@ asset boundary OK from the slim package | locator stored: asset://f1 | data: URL
 - **`element/headless` resolves and runs in bare Node** via `await import(...)`, which is the form `server` actually uses (`whiteboard-fork.ts`).
 - All ten server-facing exports present; `renderElement` / `elementWithCanvasCache` absent; `window` and `document` undefined.
 - Snapshot round-trip preserves geometry; the full `Scene` workflow works (replace, per-property mutate, updates emitted).
-- **The T023 asset boundary is intact in the slim package too**: a locator round-trips, and a `data:` URL is rejected. That matters — the egress guard is not a UI-layer feature, and a server writing content must hit the same wall.
+- **The T023 asset boundary is intact in the slim package too**: a locator round-trips, and a `data:` URL is rejected. That matters — the egress guard is not a UI-layer feature, and a server writing content must hit the same wall. **Now part of the standing contract** rather than an ad-hoc probe: `test:headless` asserts it for BOTH entries (16 checks), and sabotaging the guard fails both.
 - **Cost: 18 MB, 10 packages, 82 lockfile lines, ONE identifier, and zero React in the tree** — against 267 MB / 289 / 3125 for the umbrella.
 
 So the corrective is a swap back to a path that is measured working, not a hopeful revert.

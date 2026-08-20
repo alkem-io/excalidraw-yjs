@@ -165,6 +165,40 @@ for (const [label, bundle] of BUNDLES) {
   );
 
   await check(
+    `${label}: enforces the asset boundary — locators in, bytes out`,
+    async () => {
+      // T023's egress guard is NOT a UI-layer feature. A server writing content
+      // through this entry must hit the same wall a browser client does, or the
+      // one path with no UI review becomes the way bytes get into documents.
+      // Verified through the built bundle rather than assumed from the source.
+      const Y = await import("yjs");
+      const scene = new mod.Scene(undefined, { doc: new Y.Doc() });
+      try {
+        scene.setAssetLocators({ f1: "asset://f1" });
+        if (scene.getAssetLocators().f1 !== "asset://f1") {
+          throw new Error("locator did not round-trip");
+        }
+
+        let rejected = false;
+        try {
+          scene.setAssetLocators({ f2: "data:image/png;base64,AAAA" });
+        } catch {
+          rejected = true;
+        }
+        if (!rejected) {
+          throw new Error("a data: URL was accepted as a locator");
+        }
+        // and the rejection left nothing behind
+        if (scene.getAssetLocators().f2 !== undefined) {
+          throw new Error("the rejected locator was stored anyway");
+        }
+      } finally {
+        scene.destroy();
+      }
+    },
+  );
+
+  await check(
     `${label}: round-trips a snapshot — the server's actual use`,
     () => {
       // `server` reaches for this surface to read and rewrite whiteboard content;
