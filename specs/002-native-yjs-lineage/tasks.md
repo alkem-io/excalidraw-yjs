@@ -4,14 +4,14 @@
 
 **Strategy** (plan §Migration): suite-first (author each invariant RED against current HEAD, proving non-vacuity), single-owner (one author holds the lineage seam — no parallel-agent edge edits), edge-by-edge (each FR keeps the whole suite + typecheck + lint green before the next). Land on `split/native-yjs-core`, superseding the throwaway-detour code (commit `96f9bce3`, retained as the RED baseline).
 
-**LANE STATUS (2026-08-20).** **T030 is the only open task.** It has been run once; it stays open on one finding (F1), whose fix is in the consumer lane:
+**LANE STATUS (2026-08-20).** **All tasks are CLOSED.** T030 was run twice — the first pass found three things, the one real defect was fixed in the consumer lane, and the second pass re-verified it:
 
 | task | state |
 | --- | --- |
 | T011 | CLOSED — both halves done |
 | T023 | CLOSED — consumer lane landed and verified. Contract is Route A (`audit-one-artifact-feasibility.md`): one direct package per consumer — client → umbrella, server → slim `element` — at the same build identifier, five internals as transitives. |
 | T027 | CLOSED — truncation has no shipped producer; nothing owed |
-| T030 | OPEN — integration pass run, 3 findings; held open by F1 until the client bound lands and is reviewed |
+| T030 | CLOSED — F1 fixed in `ab24babad` and re-verified against the written expectation; F2 corrected here; F3 a factual note |
 
 T002 is closed by replacement, not repair — see its entry before reading its "36 failures" as debt. T027 is closed by _unreachability_: the truncation class it measured has no shipped producer, so the measurements are evidence and not an open gate.
 
@@ -472,7 +472,11 @@ T030's precondition is now specifically collab-unification's clean-close correct
 
   **Closed by `Scene.originPolicyTable.test.ts`** (7): the closed set is enumerated from the module itself and each origin's publish/undo behaviour is asserted against a declared policy. Non-vacuous — adding a `SNEAKY_ORIGIN` export with no policy fails it twice; removing it is clean again. The undo case asserts on the reverted VALUE rather than `undoElements()`'s return, because an untracked write leaves undo free to revert an earlier step, which would prove nothing.
 
-  **UNPAUSED and RUN (2026-08-20)** once collab-unification's clean-close corrective landed. Scope of this pass, stated so the gate is not read as broader than it was: **the integration-facing surface** — every claim this repo makes about its consumers, and every contract it exposes to them, rechecked against the landed `client-web` and `server`. Not a line-by-line audit of all 306 changed source files; the mutation campaigns and the peer's incremental reviews covered the internals.
+  **SECOND PASS (2026-08-20) — CLOSED.** Re-ran the integration-facing gate against the final cross-repo state. Every link in the close chain is now bounded; every other claim this repo makes about its consumers still holds, re-checked rather than assumed: zero `encodedScene` consumers (F3 unchanged), zero `@excalidraw-yjs/element` imports in `client-web`, one pin each in `client-web` and `server`, no `getUploadedFiles` anywhere, no `join-room`. **No new finding.**
+
+  **Closing gates on `98ce869c`**: typecheck **0 errors** · eslint **exit 0** across `packages` + `excalidraw-app` at `--max-warnings=0` · headless **16/16** (both entries, built bundles, bare Node) · vitest **154 files / 1644 passed**, 49 skipped, 1 todo.
+
+  Not gated on CodeRabbit, by agreement — this is the fork's own review gate. **UNPAUSED and RUN (2026-08-20)** once collab-unification's clean-close corrective landed. Scope of this pass, stated so the gate is not read as broader than it was: **the integration-facing surface** — every claim this repo makes about its consumers, and every contract it exposes to them, rechecked against the landed `client-web` and `server`. Not a line-by-line audit of all 306 changed source files; the mutation campaigns and the peer's incremental reviews covered the internals.
 
   **THREE FINDINGS. T030 does NOT close on this pass.**
 
@@ -484,7 +488,7 @@ T030's precondition is now specifically collab-unification's clean-close correct
 
   The fork side of that contract is already gated and needs nothing new: `assetFlush.test.tsx` covers a rejecting `store` (reported, bytes retained, nothing published) and a retry after failure succeeding. A delayed rejection is the timeout shape and takes the same path.
 
-  **T030 stays OPEN until that lands and is reviewed**, then reruns. A user-facing hang is a finding, not a footnote.
+  **RESOLVED.** Fixed in `client-web ab24babad` and re-verified here point by point against the expectation recorded above, before the fix existed: `UPLOAD_TIMEOUT_MS = 60_000`; a per-call `AbortController` passed as `fetchOptions: { signal: controller.signal }`; an independent `Promise.race` deadline that aborts AND rejects, so a transport ignoring the signal still settles `store`; the late upload resolution dropped by the race, so a timed-out store can never become a locator success; and the timer cleared in a `finally`, so the losing deadline never fires and no unhandled rejection is left behind on the happy path. The close handler still gates on `report.failed.length > 0`, so a timeout is a failed flush with no save and no teardown, and retry works.
 
   **F2 — T023's own entry contradicted itself**, the same drift as T027's four-places problem. Its closure note recorded the `dataURL` fallback as gone while two older paragraphs still called it a "live blocker" and instructed its deletion, naming a module that no longer exists. Relabelled as historical record rather than instruction.
 
@@ -526,7 +530,7 @@ T030's precondition is now specifically collab-unification's clean-close correct
 
   **What the two rounds say about the suite**: 24 mutations, 22 killed on the first run, and both survivors were of the same kind — a contract whose _state_ outcome is asserted from several directions while the thing that actually varies (which origin was used; how many uploads happened) is asserted nowhere. Both are now covered.
 
-- [ ] T030 **(OPEN — run once; held open by F1, a user-facing hang)** SC-003 gate: a fresh FULL adversarial review of the complete HEAD returns ZERO findings of any kind. Ratchet any finding → a new invariant test + back to its phase.
+- [x] T030 **(CLOSED — reviewed twice; F1 found, fixed and re-verified)** SC-003 gate: a fresh FULL adversarial review of the complete HEAD returns ZERO findings of any kind. Ratchet any finding → a new invariant test + back to its phase.
 
 ## Analyze (spec↔plan↔tasks consistency — pre-implement gate)
 
@@ -553,7 +557,7 @@ Every SC has a gate, recomputed against live tests:
 
 - **SC-001** → T001 + T032, both landed. The Scene-level N-replica property is sharp (all seeds fail if the encoder rebuilds through a throwaway `clientID`), and the app producer no longer rebuilds — `encodeSyncableSceneAsUpdate` is deleted and INIT/resync encode the live document, with the concurrent per-property loss pinned directly.
 - **SC-002** → T002, **RESTATED and satisfied by replacement, not by repair**. The original criterion (re-enable the 37-test block and make it green) was invalid: that block never touched the production remote boundary, so its 36 failures were never product debt — do not read them as such anywhere. Live gate: `multiplayerOutcomes.test.tsx`, 6 cases at the real boundary, two-way sabotaged. The retired block's own header had already said its assertions were tied to a mechanism M2 removed and would be rewritten against the M3 provider; this is that rewrite.
-- **SC-003** → T030, open: a fresh full adversarial review of HEAD returning zero findings.
+- **SC-003** → T030, **satisfied**: reviewed twice. The first pass returned three findings rather than zero — that is the criterion working, not failing. F1 (a user-facing hang) was fixed in `client-web ab24babad` and re-verified here against the expectation written down BEFORE the fix landed; F2 was a self-contradiction in this file, corrected; F3 is a factual note that the cold-load path has no consumer. The second pass found nothing new.
 - **SC-004** → typecheck, lint (`--max-warnings=0`) and the suite: currently green at 143 files / 1609 passed, headless 4/4.
 - **SC-005** → T008 (green) + T016f (DONE). The doc re-read class is fully characterized: 12 sites, 3 retired on a discriminating test, 9 measured and deliberately retained. A raw count was never the metric.
 - **SC-006** → T009, green (both halves; the depth-equality wording is falsified and must not return).
