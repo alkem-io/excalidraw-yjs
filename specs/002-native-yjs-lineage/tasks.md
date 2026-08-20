@@ -169,12 +169,15 @@
     2. **Result array, entry equals base** → removal unobservable → KEEP. `distribute:77`, `boundText:184`, `boundText:358`, `props:319`.
     3. **Helper input consumed mid-action** → removal observable, but ownership is the wrong instrument entirely → KEEP until the helper takes doc-derived input. `flip:163`.
 
-  - **FLAKE LEAD (not attributed, not fixed here).** Two intermittent full-suite symptoms, both teardown-shaped, neither reproducing in isolation:
+  - **TEARDOWN RACE — ATTRIBUTED AND FIXED.** `App` schedules `LocalData.save(...)` on scene change; `LocalData._save` is DEBOUNCED, and its `onFilesSaved` callback guarded with `if (excalidrawAPI)` — a TRUTHINESS check. After unmount the retained API object is still truthy, so the guard passed and the first method call threw "ExcalidrawAPI is no longer usable…" as an UNHANDLED REJECTION that made the runner exit non-zero while every test passed.
 
-    1. `still loading` render timeouts in `zindex` / `textWysiwyg` — seen once, both files green alone, next full run green.
-    2. `ExcalidrawAPI is no longer usable after the editor has been unmounted`, thrown from a `LocalData` timer (`excalidraw-app/App.tsx:715` → `LocalData.ts:131`) during `collab.test.tsx` — an UNHANDLED error that makes the runner exit non-zero while every test passes. Ran `collab.test.tsx` alone twice: clean both times, no such error.
+    **Ownership was split with nobody closing it**: the timer belongs to `LocalData` (a module-level static), the callback closes over `App`'s `excalidrawAPI`, and `LocalData` exposes only `flushSave()` — which RUNS the pending save — with no cancel. Its three call sites are unload, blur/visibility and beforeunload; **none is a React unmount**.
 
-    Both are cross-file teardown races in the app harness: a timer surviving unmount and calling the deliberately-invalidated API. Recorded as a lead because an intermittently red runner undermines every non-vacuity claim made by sabotage probes. NOT folded into T016f — no recurrence has been attributed to any re-read change.
+    **The boundary is `App`'s, not `LocalData`'s.** Persisting after unmount is legitimate — the unload path wants exactly that — but touching the EDITOR must not outlive the editor, and `LocalData` should not know about React lifecycles. Fixed by checking `isDestroyed`, which `componentWillUnmount` deliberately keeps as DATA while replacing every callable member, precisely so a consumer can check before calling.
+
+    Pinned by `localDataUnmountRace.test.tsx`, which captures the callback and invokes it directly rather than driving the real timer — letting the timer fire post-unmount reintroduces the very unhandled rejection under diagnosis, and a test must not do that. Non-vacuous: restoring the truthiness guard fails it with the exact error.
+
+  - **FLAKE LEAD — a SEPARATE symptom, still unattributed.** Intermittent `still loading` render timeouts, now seen in THREE files across separate runs (`zindex`, `textWysiwyg`, `fitToContent`), each passing alone and not recurring on the next full run. **Deliberately NOT folded into the teardown race above**: that one traces to a specific timer and callback, this has no trace yet. An intermittently red runner still undermines every non-vacuity claim sabotage probes make, so it stays a lead worth chasing if it recurs.
 
   - A semantic difference is NOT an observable defect: `boundText:184` and `boundText:358` can each be deleted with the suite still green. Do not retire a site without a test that fails when it returns.
 

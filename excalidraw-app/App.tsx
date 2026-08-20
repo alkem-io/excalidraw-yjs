@@ -708,7 +708,13 @@ const ExcalidrawWrapper = () => {
     // not to evaludate the nested expression every time
     if (!LocalData.isSavePaused()) {
       LocalData.save(elements, appState, files, () => {
-        if (excalidrawAPI) {
+        // `isDestroyed`, not truthiness. The save is DEBOUNCED, so this callback
+        // can run after the editor unmounted — persisting the data is still
+        // correct (the unload path wants exactly that), but touching the editor
+        // is not. The retained API object is still truthy after unmount; every
+        // method throws, and `isDestroyed` is kept as data precisely so a
+        // consumer can check before calling.
+        if (excalidrawAPI && !excalidrawAPI.isDestroyed) {
           let didChange = false;
 
           const elements = excalidrawAPI
