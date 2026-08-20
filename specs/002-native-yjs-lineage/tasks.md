@@ -43,18 +43,23 @@
   **Scope, stated**: the cold-load side runs through the real `saveToFirebase`/`loadFromFirebase`. The INIT side MIRRORS `Collab.encodeSceneAsUpdate` rather than calling it (driving the collab layer needs a mounted app); that producer is pinned directly in `collab.test.tsx`. So these prove the doors interoperate given a faithful seed, not that the seed is built correctly.
 
 - [x] T005 **(done — covered by the Store-level case in `reappearReveal.test.tsx`; its "Expected RED (ties at V+1)" is FALSIFIED)** INV-REVEAL. A reappearing element must be re-detected by the editor Store, which retains the synthesized `isDeleted:true` tombstone and gates on `prevElement.version < nextElement.version`. The Store case passes on current code and fails when the reseed is pinned to a constant or to a value equal to the high-water mark, so it is non-vacuous in both directions. The Scene and a peer converge regardless of the seeded version, which is why assertions on them cannot cover this invariant. See T024 for the accompanying finding that no `+= 2` fix is needed.
-- [ ] T007 **(RED LANDED — and the dominant defect is NOT the one this task predicted)** INV-SAVE-SKIP (isSaved ⇔ live==stored; no redundant save, no false-skip).
+- [x] T007 **(DONE — closed by T026)** INV-SAVE-SKIP: `isSaved` means everything in the live document has reached the store.
 
-  Two independent breakages, both **measured** through the real save path (`firebasePersistence.test.tsx`, `describe("INV-SAVE-SKIP")`, committed as `it.fails` so they stay executable and fail loudly once fixed):
+  Two defects were measured, and the one this task predicted was the smaller:
 
-  1. **FALSE-DIRTY — every save is redundant. This is the bigger one and it was not anticipated.** The version cache is set from the elements returned through `restoreElements`, which RENORMALISES versions. Measured: live `[a:5, b:5]` (sum 10) is stored as `[a:2, b:2]` (sum 4). The cached sum therefore never equals the live sum, so `isSavedToFirebase` is **false immediately after a successful save** — every cycle pays a full firestore transaction (read + decrypt + merge + encrypt + write), and the beforeunload guard permanently claims unsaved work.
-  2. **FALSE-SKIP — silent loss.** `getSceneVersion` is a plain SUM, so it collides whenever one element's version rises as much as another's falls. T014b established versions DO move backwards here, so this is a recorded mechanism rather than a contrived collision. Nothing retries a dropped save.
+  - **FALSE-DIRTY, unanticipated** — the cache was set from elements returned through `restoreElements`, which RENORMALISES versions, so the cached and live sums never matched and EVERY save was redundant (measured: live sum 10 stored as sum 4), with the unload guard permanently claiming unsaved work.
+  - **FALSE-SKIP** — a plain sum collides whenever one element's version rises as much as another's falls, which does happen here.
 
-  T026 (dirty flag) is the fix for **both**, and defect 1 is why it should not be deferred: it is a live production cost, not just a latent correctness risk.
+  Both are closed by `Scene.contentToken` (T026). **Live gates**: `firebasePersistence.test.tsx` → `describe("INV-SAVE-SKIP")` — clean after save, redundant save skipped, in-flight change stays dirty, FAILED save stays dirty and the retry succeeds, sum-collision cannot false-clear, unknown socket is dirty; plus the generation-swap pair. No `it.fails` markers remain.
 
 - [x] T008 INV-WRITE-INTENT (a write through a deliberately stale reference touches only the declared keys; a peer's concurrent edit to another property survives). Cover a simple key, a JSON-leaf (`points`) and a nested one (`boundElements`). **Expected RED** — whole-object flush.
-- [ ] T009 **(SPLIT — its three parts are in different states; "Expected RED" was true of none of them as a whole)** - **INV-HISTORY-LOCKSTEP — DONE (T017)**, and its wording here is the falsified one: "history depths in lockstep" cannot hold for a correct editor, because an appState-only step makes a `History` entry with no `UndoManager` item. The invariant is now stated behaviourally in spec.md and covered. - **`meta.version` never regresses — OPEN and BLOCKED (T014b)**, re-verified at current HEAD: the defect reproduces and the blanket fix still breaks ~71 tests. This is the only genuinely open part. - **"a passive remote edit does not wipe the redo branch" — NOT separately covered.** T017 established that a remote apply contributes zero to both stacks, which is adjacent but not the same claim; the redo-branch half needs its own case and an accessor the harness does not expose. Author it against the behavioural formulation, not the depth one.
-- [ ] T011 **(SPLIT — one done, one restated, one blocked)** - **INV-APPSTATE-UNDO — DONE (T028)**, covered across a linked peer for undo and redo, with `name` narrowed by evidence. - **INV-WIRE-ROBUST — RESTATED, blocked (T027)**. "An invalid update is rejected without desynchronising" is not achievable by catching: Yjs apply is not atomic on a decode failure, measured at 10 of 1056 truncation offsets both throwing AND mutating. Recovery is discard-the-generation-and-resync, owned by the transport, and is gated on demonstrating the session-loss failure at the real transport boundary. - **INV-NO-BINARY-WIRE — BLOCKED on T023.** A live encode carries image bytes verbatim, and this cannot be fixed by filtering a full-state update.
+- [x] T009 **(DONE)** INV-HISTORY-LOCKSTEP / INV-VERSION-MONOTONIC.
+
+  - **The original "history depths stay in lockstep" wording is FALSIFIED and must not be restored**: an appState-only step makes a `History` entry with no `UndoManager` item, so equal depths cannot hold for a correct editor. Stated behaviourally instead — a remote apply contributes nothing to local history — and green (`historyLockstep.test.tsx`).
+  - **`meta.version` never regresses** — closed by T014b. Live gate: the un-skipped INV-VERSION-MONOTONIC case in `Scene.native-yjs-write-intent.test.ts`, plus the reservation pin in `reappearReveal.test.tsx`.
+
+- [ ] T011 **(SPLIT — one done, one open)** - **INV-APPSTATE-UNDO — DONE (T028)**: undo/redo of background/name survives the next scene update, verified across a linked peer, with `name` narrowed by evidence. Live gate: `appStateUndo.test.tsx`. - **INV-WIRE-ROBUST — OPEN, tracked as T027.** Its original wording ("an invalid update is rejected without desynchronising") is unachievable by catching: Yjs apply is not atomic on a decode failure, measured at 10 of 1056 truncation offsets both throwing AND mutating. Generation replacement now exists with a live consumer, so the dependency is gone; the transport-level reproduction and the receiver policy are not built.
+
 - [x] T014b **(DONE — FR-011 complete)** The version authority: a stale bulk write can no longer move `meta.version` backwards, and the Store no longer silently drops a real edit.
 
   **Three mechanisms, each narrowing forced by a MEASURED failure** (the earlier rounds' full traces are in the git history of this file):
@@ -73,12 +78,17 @@
 
   **Non-vacuity**: removing the single landed reservation fails reappearReveal with the exact tie symptom, and restoring it fixes it. There is exactly ONE reservation call site and exactly one test pinning it — no unpinned behaviour was frozen. (An earlier draft also reserved in `commitPlan` on symmetry grounds; that was removed, because symmetry is not evidence and the API has no production consumer.)
 
-- [ ] T015 Declare intent sets in the side-effecting helpers (`redrawTextBoundingBox`, `updateBoundElements`, `bindOrUnbind`) — see plan R6.
-- [ ] T016 **(PREMISE FALSIFIED — re-scope before doing any of this)** The re-read sites are **not** dead code after FR-009 and must not be bulk-deleted. - **Census correction**: 36 `fresh-snapshot` sites across 17 files (16 literal `*Map.get(id) ?? element` idioms), not the 32/14 first reported. - **Why they survive**: FR-009 scoped `Scene.mutateElement`, but `replaceAllElements` is deliberately unscoped — its contract is "make the doc equal this element set", which is correct for a full reconcile. The stale-read revert class therefore survives at the BULK path: a handler that captures the array, lets a side-effect helper write to the doc, then returns its captured array, reverts that write. Proven by `Scene.replaceAll-wholeObject.test.ts` (with non-vacuity guards on both the staleness of the array and the reality of the doc write). Deleting the re-reads would reintroduce exactly the class `b2f708f5` fixed. - **What the earlier "1/32 done" actually was**: not a bandaid removal. `changeFontSize`'s `editedTextIds` carve-out was an _exception_ to re-reading, removed because the font size became a real doc write — the surrounding re-read stayed. Prior claim withdrawn. - **Re-scope**: removing the re-reads requires first changing the bulk path — either scoping `replaceAllElements` to a declared changed-set, or changing how action handlers return arrays so a stale one never reaches it. That is a new requirement, not a cleanup task, and it interacts with T014b (both are about the bulk write path). Decide the bulk-path design before touching any of the 36 sites.
+- [x] T015 **(DONE — answered by the mutation journal, NOT by hand-written key lists)** Side-effecting helper intent.
 
-## Phase 2b — Action-result patch semantics (FR-016) — precedes History lockstep
+  The task proposed declaring intent sets inside `redrawTextBoundingBox`, `updateBoundElements` and `bindOrUnbind`. That was rejected as a second unconsumed API that could drift from the real writes. The implemented answer (T016b) journals what each `scene.mutateElement` call ALREADY declares, keyed by id: the `updates` object is both the declaration and the actual write source, so it cannot drift. Helpers are unchanged.
 
-Two independent findings (T014b's meta regression and T016's surviving revert class) both land on the unscoped bulk write path, so it is the next real work.
+  **Live consumer**: `Scene.beginActionMutationJournal` around each synchronous action; **live gate**: `Scene.mutationJournal.test.ts`.
+
+- [x] T016 **(DONE for the action-result path; the reread FAMILY remains open as T016f)** The bulk write path.
+
+  The re-read sites were never dead code: `replaceAllElements` is authoritative ("make the doc equal this set"), so a handler that captured an array, let a helper write to the doc, then returned its captured array reverted that write. The re-reads masked exactly that.
+
+  **Resolved by changing the bulk path itself** (T016b): an action's result is applied as a diff against its invocation snapshot with explicit ownership, which removes the need those re-reads served. Two are deleted, each proven by a failing production test. The rest stay under T016f — measured, and not to be retired without a test that fails when they return.
 
 - [x] T016a **(done)** `ActionManager` captures a real COPY of the element array at invocation and preserves it alongside the promise (`ActionFn` may be async). A bare reference is not a stable "before" image — `Scene.mutateElement` mutates the passed scratch before re-derivation. **A top-level spread is NOT sufficient**: it leaves nested persisted fields (`points`, `groupIds`, `boundElements`, `roundness`, `scale`, `crop`, `customData`) aliased to the live object, so they mutate underneath the "before" image and diff as unchanged. Copy every persisted field the diff reads, and preserve reconciliation/own-Symbol metadata deliberately — `structuredClone` does not carry symbol-keyed metadata.
 - [x] T016b-i **(diff done)** `computeElementIntent` / `diffElementKeys` in `packages/element/src/yjs/intent.ts` — presence-aware, `Object.hasOwn`, `id` + RECONCILE_META_KEYS excluded, 9 tests incl. a no-op-derives-nothing guard and a non-vacuity proof that a value-only diff misses the transitions. Pure function, wired to nothing yet.
@@ -122,7 +132,10 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
 
   There is therefore no async producer to build machinery for, and none is built. The durable rule is recorded at the `ActionResult` boundary instead: a future async element result CANNOT use the synchronous derived/journal fallback, because `ActionManager` closes both the transport boundary and the journal scope before the promise resolves. Such a result must supply explicit intent/ownership, or be rejected. Reopen only against a real producer.
 
-- [ ] T016e Integrate **T014b** here — this write path is the right integration point, but **the mechanism remains an OPEN, RED-first problem and must not be assumed solved by it**. Correction of an earlier claim: the narrowed experiment already tried `writes > 0 && record.version <= prevMeta ? prevMeta + 1 : record.version` — i.e. it was ALREADY scoped to ids whose doc properties actually changed — and it still broke transform snapshots. So "unchanged elements caused the 68 snapshot failures" is **unproven**, and patch semantics cannot be presumed to fix them. Patch semantics may well remove stale/unintended writes and shrink the failure set, but that has to be MEASURED: re-run the genuine raised-meta regression test plus the semantic failures and reclassify from scratch. Do not carry the blanket-fix explanation forward.
+- [x] T016e **(DONE — T014b landed and is integrated at this write path)** `meta.version` monotonicity in the action write path.
+
+  `applyElementChanges` inherits the same monotonic rule as every other write: content-gated, strict-regression only, with the tombstone-watermark reservation. **Live gate**: the un-skipped INV-VERSION-MONOTONIC case, green through both the authoritative and the diff route.
+
 - [ ] T016f **(OPEN — this slice removed TWO of the sites, not the family)** Revisit the remaining re-read sites, retiring each only where patch mode proves it redundant AND a test discriminates.
   - Removed so far: `actionFlip`'s post-flip whole-object reread, and `actionBoundText`'s wrap reread. Both were proven by a failing production test, not by inspection.
   - **Measured, per invocation, across the six families that call side-effecting helpers**: `flip:163` 63 reached / 2 semantic; `boundText:184` 25 / 10 (`boundElements`); `boundText:358` 14 / 3 (`index`); `props:319` 9 / 1; `props:1107` and `props:1379` 8 / 0 each; `align:83` and `distribute:77` **never reached — unknown, not clean**; `actionStyles`' is already narrow (copies only `width`/`height`).
@@ -221,7 +234,17 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
 ## Phase 7 — Origin policy + binaries off the wire (FR-012, FR-013)
 
 - [x] T022 **(done)** The origin→wire policy has exactly ONE implementation, in `Scene.onDocUpdate`. No shared lookup table: with a single call site it would be indirection, not deduplication. Pairing a structural tombstone with its reveal is the logical-mutation boundary's job, not the origin table's. **Still open**: INV-ORIGIN as a table-driven suite (T010).
-- [ ] T023 **(PARTIAL — core boundary landed; NO consumer may bump)** The document carries `fileId -> opaque locator`, never bytes written by this editor. - **What is guaranteed, narrowly**: supported writers publish only validated, bounded locator strings; the whole batch is prevalidated so one bad value writes nothing; decoders and a full-state egress check (`assertAssetRootValid`) reject a malformed asset root instead of serializing it; no path turns a failed upload into inline data; async adapter results cannot overwrite newer state. - **What is NOT guaranteed**: a universal "no bytes can enter Yjs". A remote peer can put an arbitrary value in the asset root — as it can in any element property — and it persists in CRDT history. Closing that needs an ingress trust decision across the whole accepted schema, not an asset-only guard, and is NOT done. The `data:` check targets the known retired fallback; `MAX_ASSET_LOCATOR_BYTES` is a schema bound, not a binary exclusion, since a short base64 string without the prefix is indistinguishable from a token. - **Failure contract, narrowly**: a failed `store` retains the image locally and publishes nothing, and is retried on a LATER PUBLISH PASS (when files are next added). There is no autonomous retry, no backoff, no observable failure state. - **BLOCKERS before any consumer bumps**: (1) cold load discards the stored references so a persisted image never resolves — needs T020's doc adoption, RED committed skipped; (2) the ingress/rolling-client decision above; (3) client-web must supply an adapter and delete its `dataURL` fallback. - **`MAX_ASSET_LOCATOR_BYTES = 2048`** is a starting value, not derived from a measured consumer; a host with long signed URLs may need it raised deliberately.
+- [ ] T023 **(PARTIAL — the core boundary is DONE; rollout blocked on two external items)** The document carries `fileId -> opaque locator`, never bytes.
+
+  **Done and live**: `AssetLocator` validation on every write and every encode (full state AND delta); `AssetAdapter` (`store`/`resolve`) on `ExcalidrawProps`, forwarded through the `Excalidraw` wrapper; persistence and the wire carry locators; orphan references reclaimed by `collectGarbage`. Cold-load adoption (T020) landed and is NO LONGER a blocker.
+
+  **Live blockers, both OUTSIDE this repo — no consumer may bump until they land**:
+
+  1. **client-web** must supply an `AssetAdapter` and delete its `dataURL`-on-upload-failure fallback. Without the adapter an image has no way to reach a store; with the fallback it would write bytes into a document that rejects them.
+  2. **The external WS protocol-version gate.** Admission is `socket.emit("join-room", roomId)` — there is no handshake field carrying a version (verified: no `protocolVersion` anywhere in the app). Until the service rejects pre-cutover clients, a legacy peer can still present a foreign document.
+
+  **Settled trust decision**: egress is validated on EVERY encode; ingress is NOT pre-flighted per update (a scratch-doc decode on the hot path is O(document)), so the no-binary guarantee is scoped to protocol-compliant writers — which is precisely what the gate above enforces.
+
 - [x] T025b **(DONE — landed with T032; see that entry)** The explicit maintenance call sits immediately before the real INIT/resync encode, and the encoder is PURE. No scheduler, no timer.
 
 - [x] T026 **(DONE — the task's stated design was wrong in two ways and was corrected before coding)** Replace the `getSceneVersion`-sum cache. `isSaved ⇔ nothing changed since the last successful save`. Green **INV-SAVE-SKIP**.
@@ -243,7 +266,14 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
 
   **Deliberately NOT done, and why.** The cold-load path no longer marks the room saved. Since T020 a cold load ADOPTS the stored document, and that adoption is itself a doc-changing transaction occurring after `loadFromFirebase` returns, so no revision available there corresponds to the post-adoption scene. The reviewer's richer rule (adoption may establish a clean baseline _only if_ the fresh generation was clean, staying dirty if a remote update landed during the fetch) is a real improvement and is NOT implemented — deferral reviewed and approved as a bounded follow-up, not a blocker. Cost of the omission is one redundant save after a cold load — the harmless direction. Guessing a baseline would risk the dangerous one: a false-skip, which is silent data loss with nothing to retry it.
 
-- [ ] T027 **(REVERTED — its central premise is FALSE; blocked behind generation-replacement)** The first attempt wrapped `applyRemoteUpdate` in try/catch, logged, and returned a boolean, justified as "an unguarded throw wedges the collaboration session". Decorrelated review rejected it and was right on the decisive point. - **MEASURED: Yjs apply is NOT atomic on a decode failure.** Over every truncation offset of a real 1057-byte delta, **10 of 1056 both THREW and left the doc MUTATED** — all of them near the tail, which is exactly what a dropped connection produces. Inspected concretely, one such case integrated four new elements while the file, the deletion marker and the property edit belonging to the SAME logical update never arrived: a partially-applied, internally inconsistent doc. The measurement's own control passes (fingerprinting the same doc twice is identical), so the mutations are real, not an artifact of non-deterministic encoding. - **Therefore catch-and-continue is not merely unproven, it is HARMFUL**: it would carry on with a maybe-corrupt doc and hide the corruption, which is strictly worse than failing loudly. The earlier "doc unchanged" assertions compared element ids and encoded byte LENGTH — equal length is not equal state, and they ignored files, appState, the deletion sidecar and delete sets entirely. That is how a false premise passed as verified. - **Reverted**: `applyRemoteUpdate` throws again, with the measurement recorded at the call site. `Scene.wireRobust.test.ts` now pins the two MEASURED facts (malformed bytes throw; an all-zeroes payload is a valid empty update and is accepted; apply is non-atomic) rather than testing a guard. Both branches of the non-atomicity count are asserted non-zero so it cannot pass for the wrong reason. - **The other premise remains UNMEASURED**: nothing has demonstrated that a throw in the real Collab/Portal Socket.IO handler actually removes the listener or wedges the session. Prove that at the real transport boundary before building anything. - **Correct shape when it is built**: recovery is "discard this Scene generation and resync", which belongs to the transport that owns the session — and it needs the generation-replacement machinery from **T031**, so T027 lands after it. No error framework, no `console.error` of network bytes in a library, and no boolean that erases which failure occurred (malformed bytes / wrong codec / programming defect / partial application are different situations).
+- [ ] T027 **(OPEN — the dependency is gone, the work is not)** INV-WIRE-ROBUST.
+
+  **The premise the first attempt rested on is FALSE**: wrapping `applyRemoteUpdate` in try/catch cannot make a bad update safe, because Yjs apply is **not atomic on a decode failure** — measured, 10 of 1056 truncation offsets both threw AND mutated the document. Catching therefore hides a half-applied state rather than preventing one.
+
+  **No longer blocked**: generation replacement exists and has a live consumer (`App.replaceSceneGeneration`, used by `resetScene`), so the mechanism a correct fix would need is available.
+
+  **What remains open**: a real transport-level failure reproduction, and the decision of what a receiver does with a document it can no longer trust — replace the generation and re-seed, or refuse the peer. Neither is built. Do NOT restore a try/catch.
+
 - [x] T028 **(done — 4 tests, `appStateUndo.test.tsx`)** Green **INV-APPSTATE-UNDO**. Undo/redo writes the reverted collaborative appState through to `yAppState` at `history.ts`, the one point where an undo/redo appState change converges — only the two actions (`actionCanvas`, `actionExport`) wrote through before, and undo does not go through them. Without it the appState mirror pushed the document's stale value back into React state on the next scene update, so the undo silently un-did itself and peers never saw the revert. - **Scoped to the DELTA, not the current state.** Only the keys the entry actually reverted are written, read from `entry.appState.delta.inserted` (`ObservedStandaloneAppState` is exactly `{name, viewBackgroundColor}`). Writing the whole subset instead publishes the background on every element-only undo AND introduces appState into a document that never had any — measured: it fails the zero-traffic test plus two existing history tests, one of which ("should not collapse when applying corrupted history entry") catches it purely as an extra render. - **Two-way non-vacuity**: removing the write-through fails the undo and redo peer cases; writing the whole subset instead of the delta fails the element-only case and the two history tests. - **Coverage across a linked peer** (via `onLocalSceneUpdate`, with delivery counts asserted so an unlinked peer cannot pass vacuously): background undo, background redo, and an element-only undo proving the collaborative appState is byte-identical afterwards. - **`name` claim NARROWED with evidence**, not covered: `changeProjectName` returns `CaptureUpdateAction.EVENTUALLY`, so a name change never becomes its own history entry and there is no name undo to propagate. The write-through is keyed off the delta so it carries `name` if an entry ever holds one, but no action produces that today — pinned by a test asserting the action's capture behaviour.
 - [ ] T029 The live invariant suites and the normal gates pass: `pnpm run test:typecheck`, lint, prettier, the full vitest suite, and `pnpm run test:headless`. Non-vacuity is each invariant test's own responsibility — it is asserted where the invariant lives, and the sabotage that established it is preserved in commit history. No central ledger and no retained baselines to re-verify against.
 - [ ] T030 SC-003 gate: a fresh FULL adversarial review of the complete HEAD returns ZERO findings of any kind. Ratchet any finding → a new invariant test + back to its phase.
@@ -252,21 +282,29 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
 
 Self-check, re-run after the 2026-08-19 widening. Every FR maps to a task and an invariant test:
 
-| FR         | Task           | Invariant             | Story |
-| ---------- | -------------- | --------------------- | ----- |
-| FR-001/002 | T032/T019      | INV-CONVERGE          | US1   |
-| FR-003     | T021           | INV-PERSIST-MERGE     | US3   |
-| FR-004     | T020           | INV-COLD-LOAD-LINEAGE | US4   |
-| FR-005     | T024           | INV-REVEAL            | US5   |
-| FR-006     | T025           | INV-BOUNDED           | US6   |
-| FR-007     | T026           | INV-SAVE-SKIP         | US7   |
-| FR-008     | T001/T002      | non-vacuity ledger    | —     |
-| FR-009     | T013/T015/T016 | INV-WRITE-INTENT      | US8   |
-| FR-010     | T017           | INV-HISTORY-LOCKSTEP  | US9   |
-| FR-011     | T014           | INV-VERSION-MONOTONIC | US9   |
-| FR-012     | T022           | INV-ORIGIN            | US10  |
-| FR-013     | T023           | INV-NO-BINARY-WIRE    | US11  |
-| FR-014     | T027           | INV-WIRE-ROBUST       | US12  |
-| FR-015     | T028           | INV-APPSTATE-UNDO     | US13  |
+| FR | Task | Invariant | Story |
+| --- | --- | --- | --- |
+| FR-001/002 | T032/T019 | INV-CONVERGE | US1 |
+| FR-003 | T021 | INV-PERSIST-MERGE | US3 |
+| FR-004 | T020 | INV-COLD-LOAD-LINEAGE | US4 |
+| FR-005 | T024 | INV-REVEAL | US5 |
+| FR-006 | T025 | INV-BOUNDED | US6 |
+| FR-007 | T026 | INV-SAVE-SKIP | US7 |
+| FR-008 | T001/T002 | per-task non-vacuity evidence, recorded on each task | — |
+| FR-009 | T013/T015/T016 | INV-WRITE-INTENT | US8 |
+| FR-010 | T017 | INV-HISTORY-LOCKSTEP | US9 |
+| FR-011 | T014 | INV-VERSION-MONOTONIC | US9 |
+| FR-012 | T022 | INV-ORIGIN | US10 |
+| FR-013 | T023 | INV-NO-BINARY-WIRE | US11 |
+| FR-014 | T027 | INV-WIRE-ROBUST | US12 |
+| FR-015 | T028 | INV-APPSTATE-UNDO | US13 |
 
-Every SC has a gate: SC-001→T001 + T032 (Scene-level half done; app path open), SC-002→T002 (now satisfied by Phases 2–3, not Phase 4), SC-003→T030, SC-004→T029, SC-005→T016 (bandaid census reaches zero), SC-006→T009, SC-007→T010. No orphan tasks, no uncovered FR/SC. **Consistent — clear to implement.**
+Every SC has a gate, recomputed against live tests:
+
+- **SC-001** → T001 + T032, both landed. The Scene-level N-replica property is sharp (all seeds fail if the encoder rebuilds through a throwaway `clientID`), and the app producer no longer rebuilds — `encodeSyncableSceneAsUpdate` is deleted and INIT/resync encode the live document, with the concurrent per-property loss pinned directly.
+- **SC-002** → T002, **NOT satisfied**. 36 multiplayer failures remain, measured on current HEAD. Both recorded leads (T014b, T016b) have since LANDED without moving the count, so there is no standing hypothesis; T016c is closed with zero current producers. Causes remain unattributed and must not be batch-fixed.
+- **SC-003** → T030, open: a fresh full adversarial review of HEAD returning zero findings.
+- **SC-004** → typecheck, lint (`--max-warnings=0`) and the suite: currently green at 143 files / 1609 passed, headless 4/4.
+- **SC-005** → T008 (green) + T016f. The re-read family is PARTLY retired: 2 of 36 sites, each proven by a failing production test. Not "all gone" — see the corrected SC-005 in spec.md.
+- **SC-006** → T009, green (both halves; the depth-equality wording is falsified and must not return).
+- **SC-007** → T010, the origin × write-path table.
