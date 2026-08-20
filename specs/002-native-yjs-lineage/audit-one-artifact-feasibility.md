@@ -38,6 +38,15 @@ So **"one direct dependency per consumer" was one import-specifier change away, 
 
 **Conclusion: one artifact and a cheap server install are mutually exclusive under npm/pnpm semantics.** Any claim otherwise needs to name the mechanism.
 
+## DECIDED — Route A is the contract (2026-08-20)
+
+- **`client-web`**: one direct dependency, `@excalidraw-yjs/excalidraw`.
+- **`server`**: one direct dependency, the slim `@excalidraw-yjs/element`, using `element/headless`. Its move onto the umbrella is being reverted by its owner — a 249 MB regression bought a package name.
+- **Both at the same build identifier.** The five published packages are exact-SHA transitives, not five consumer pins; that distinction is the whole resolution of the original complaint.
+- **No true-one-artifact effort.** The measurement above shows it cannot satisfy a cheap headless install under npm semantics, so it is closed rather than parked.
+
+The umbrella `/headless` subpath stays. It is correct, tested and free to keep — it is simply not what `server` should pin, because a server needing 18 MB should not install 267 MB to get a shorter package name.
+
 ## Ranked routes, with what each actually buys
 
 **A. Leave the split; server pins the headless artifact.** Cost to server: 18 MB. Consumers coordinate one package each — server the headless one, client the UI one — at the same identifier. This is what the original complaint asked for and it needs no repackaging at all; the umbrella `/headless` subpath stays as a convenience for anyone who wants a single name and can afford it.
@@ -50,8 +59,14 @@ So **"one direct dependency per consumer" was one import-specifier change away, 
 
 ## One thing worth fixing regardless of the route
 
-**`sass` and `cross-env` are declared as runtime `dependencies` of the umbrella** and are build-time tools — verified, neither is imported by any shipped source and neither appears in the built bundle. Every consumer installs them (~5 MB, 2 packages) for nothing. Moving them to `devDependencies` is independent of every decision above.
+**`sass` and `cross-env` are declared as runtime `dependencies` of the umbrella** and are build-time tools. Every consumer installs them (~5 MB, 2 packages) for nothing.
+
+**Prepared, verified, then reverted and HELD** — deliberately not landed, because it would churn the `@2af664c` pin the client migration is testing against, for a change with no functional effect. Apply once that slice lands. What was already checked, so it need not be rechecked:
+
+- `sass@1.51.0` moves `dependencies` → `devDependencies`. Its only consumer is `esbuild-sass-plugin`, which is _already_ a devDependency, and the published package ships compiled CSS (`dist/prod/index.css`, 180 KB) so no consumer ever compiles `.scss`.
+- `cross-env@7.0.3` is simply **declared twice** — once in `dependencies`, once in `devDependencies`, same version. Delete the runtime entry; nothing needs adding.
+- **`pnpm run build:esm` was run with the change applied and succeeded**, emitting identical CSS. That is the only real risk, and it passes.
 
 ## Not done here, deliberately
 
-No manifest was edited, no build config touched, nothing republished. The measurements are reproducible from two scratch manifests at `2af664c`.
+No manifest change is committed, no build config touched, nothing republished. The one manifest edit that was tried is reverted and held, above. The measurements are reproducible from two scratch manifests at `2af664c`.

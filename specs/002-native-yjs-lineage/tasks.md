@@ -9,7 +9,7 @@
 | task | why it is still open |
 | --- | --- |
 | T011 | its remaining half IS T027 |
-| T023 | fork side complete; `client-web` / `server` migration is the consumer lane |
+| T023 | fork side complete; `client-web` / `server` migration is the consumer lane. Packaging contract DECIDED — Route A, see `audit-one-artifact-feasibility.md`: one direct package per consumer (client → umbrella, server → slim `element`), same build identifier, five internals are transitives. One manifest cleanup is prepared and HELD until the client slice lands. |
 | T027 | policy settled and gated; the resync itself belongs to `UnifiedCollabProvider` |
 | T030 | paused by design until the consumer + ingress work lands, then run fresh |
 
