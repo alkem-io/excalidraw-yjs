@@ -178,6 +178,42 @@
   - leave **`boundElementsEmpty`** untouched — it is derived from content that,
     by definition, did not change.
 
+  **THE FIVE `hasElementChange` FLIPS, ADJUDICATED INDIVIDUALLY (round 3).**
+
+  All five are the **fix WORKING**, not phantom history — and this is decided on
+  evidence, not on the direction of the flag:
+  - They are one coherent cluster: every one is a **redo-stack entry in the
+    `should support bidirectional bindings` group** (unbind on deletion/undo,
+    rebind on the inverse). That is precisely where `bumpMetaVersionsFor` runs on
+    undo and the follow-up write then arrives carrying a stale version.
+  - `hasElementChange = !delta.elements.isEmpty()`, so `true` means the entry's
+    elements delta became genuinely NON-EMPTY. Redoing an unbind/rebind DOES
+    change elements, so recording it is correct and `false` was the dropped edit.
+  - Decisive: those five tests fail **ONLY** on the snapshot. Every behavioural
+    assertion in them — and their whole point is asserting binding state across
+    undo/redo — still passes. Behaviour is unchanged; only the recorded flag now
+    matches what the operation actually did.
+
+  **The `captureUpdate: NEVER` extra increment is a DIFFERENT phenomenon and IS a
+  phantom.** `collab.test` "two ephemeral increments" yields 3, and both updates
+  explicitly declined capture, so a Store-visible increment there cannot be a
+  previously-dropped real edit. The two must not be lumped together: 5 corrected
+  recordings, 1 genuine phantom.
+
+  **NO-WRITE RULE — REACHABLE, so not a hypothetical cleanup**
+  (`Scene.noWriteMeta.test.ts`, committed as `it.fails`). Measured on current
+  code: a bulk replace whose content is UNCHANGED but which carries stale
+  reconciliation metadata drives `version` **2 → -1** and `updated` **1 → 999**,
+  both taken verbatim — a version regression with no content change to justify
+  any movement whatsoever. Re-submitting the same object verbatim is correctly a
+  no-op, so the violation needs a stale carrier, which is exactly what a stale
+  action array is.
+
+  **Correction to my earlier flag, on review**: the `updated` half corrupts only
+  the LOCAL derived element. The durable deletion marker is protected —
+  `syncDeletionMarker` stamps only on the live→deleted transition and never
+  restamps — so there is no tombstone-expiry extension. Claim withdrawn.
+
   **Proposed boundary, NOT implemented pending review**: `meta.version` stays the
   exact ordered per-element counter that history/delta require, and advances iff
   the element's doc content changed — which is what makes it a faithful change
