@@ -60,6 +60,21 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
 
 - [ ] T020 Cold-load adopts stored bytes via `applyUpdateV2` into the Scene doc (`new Scene({ doc })` / `applyRemoteUpdate`), not decode→records→rebuild. Green **INV-COLD-LOAD-LINEAGE**.
 
+  **MEASURED (T020 trace) — narrower than written, and independent of T025b/T032.**
+  Traced the cold-load path and probed it through the real save/load path
+  (`firebasePersistence.test.tsx`, "cold load adopts the stored document"):
+  - The persistence layer is **already correct**: `loadFromFirebase` returns the
+    stored `assets` map, verified against a guard that the element itself
+    round-tripped. So the references survive storage — the loss is downstream.
+  - The remaining gap is **app-side only**: `DecryptedScene.docBytes` exists but
+    `loadFromFirebase` does not return it, and the app rebuilds a Scene from
+    decoded RECORDS rather than adopting the document. That is the lineage loss
+    *and* the T023 cold-load blocker in one place.
+  - **Independent of T025b/T032**: those change the wire (INIT/resync encode);
+    this is the load direction. No shared edit.
+  Sequencing: returning `docBytes` alone is dead code — it only becomes real
+  paired with the Scene adoption in `initializeScene`, so the two land together.
+
 ## Phase 6 — Persistence lineage (FR-003)
 
 - [ ] T021 **(BLOCKED ON T023 — verified in code, not assumed)** `encryptScene`: `applyUpdateV2`-fold prior + live into a scratch doc over shared lineage, encode that. DELETE `mergeStoredElements` + `isExpiredTombstone`. Green **INV-PERSIST-MERGE**. - **Why it is not independent**: `saveToFirebase(portal, elements: flat[], appState, files)` takes FLAT inputs that carry no lineage, so folding "over shared lineage" requires the boundary to accept a lineage-bearing update instead — a signature change. Any such update is a Yjs doc, and a Yjs doc carries `yFiles`; `buildSnapshotDoc` writes binaries into the same doc, and a live encode was measured to carry an image payload verbatim. T023 proposes removing binaries from the authoritative document and having persistence carry the update plus separately enumerated assets. Implementing T021 first would freeze the mixed binary/reference persistence shape currently under review and force a second boundary rewrite. - **Do NOT** build an intermediate live-update save signature, or retain `yFiles` binaries, merely to turn T003's REDs green. - Its acceptance criteria already exist and are measured: T003's three REDs (property loss, order-dependence, lineage idempotence) plus T001's convergence property.
