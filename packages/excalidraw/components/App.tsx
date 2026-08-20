@@ -496,6 +496,9 @@ import type {
   GenerateDiagramToCode,
   NullableGridSize,
   Offsets,
+  AssetPublishOutcome,
+  AssetPublishReport,
+  ExcalidrawProps,
 } from "../types";
 import type { RoughCanvas } from "roughjs/bin/canvas";
 import type { Action, ActionResult } from "../actions/types";
@@ -781,6 +784,7 @@ class App extends React.Component<AppProps, AppState> {
       scrollToContent: this.scrollToContent,
       getSceneElements: this.getSceneElements,
       getSceneAssetLocators: this.getSceneAssetLocators,
+      flushAssetPublication: this.flushAssetPublication,
       encodeSceneStateAsUpdate: this.encodeSceneStateAsUpdate,
       collectSceneGarbage: this.collectSceneGarbage,
       getSceneContentToken: this.getSceneContentToken,
@@ -4876,8 +4880,13 @@ class App extends React.Component<AppProps, AppState> {
     },
   );
 
-  /** Ids whose `store` is in flight, so concurrent calls do not double-upload. */
-  private assetStoresInFlight = new Set<string>();
+  /**
+   * Ids whose `store` is in flight, mapped to the promise that settles when the
+   * locator is COMMITTED (or explicitly not). A `Set` was enough to stop double
+   * uploads; the promise is what lets {@link flushAssetPublication} await a pass
+   * that another caller started.
+   */
+  private assetStoresInFlight = new Map<string, Promise<AssetPublishOutcome>>();
 
   /**
    * Publish a reference for every cached file that does not have one yet.
@@ -4887,10 +4896,12 @@ class App extends React.Component<AppProps, AppState> {
    * has no locator, so the next publish picks it up again. A failure leaves the
    * image local and pending and is never downgraded to sharing bytes.
    */
-  private publishUnreferencedAssets = async () => {
+  private publishUnreferencedAssets = async (): Promise<
+    AssetPublishOutcome[]
+  > => {
     const adapter = this.props.assetAdapter;
     if (!adapter) {
-      return;
+      return [];
     }
     const pending = Object.values(this.files).filter(
       (file) =>
@@ -4898,40 +4909,113 @@ class App extends React.Component<AppProps, AppState> {
         !this.assetStoresInFlight.has(file.id),
     );
     if (!pending.length) {
-      return;
+      return [];
     }
 
-    await Promise.all(
-      pending.map(async (file) => {
-        this.assetStoresInFlight.add(file.id);
-        try {
-          const locator = await adapter.store(file);
-
-          // Re-check at COMMIT, not from the snapshot taken before the await.
-          // During an upload a peer's locator can arrive, or the cached file can
-          // be replaced; publishing the stale result would clobber newer state.
-          if (this.unmounted) {
-            return;
-          }
-          if (this.scene.getAssetLocators()[file.id]) {
-            return; // a remote locator won the race
-          }
-          if (this.files[file.id] !== file) {
-            return; // the cached file is no longer the one we uploaded
-          }
-          // Validate here so a bad adapter cannot reject inside an unawaited
-          // write. `setAssetLocators` throws, and this is the only caller that
-          // could turn that into an unhandled rejection.
-          this.scene.setAssetLocators({ [file.id]: locator });
-        } catch (error) {
-          // Retained locally, retried on a later publish pass. There is no
-          // autonomous retry — see `assetAdapter` docs.
-          console.error(`assetAdapter.store failed for ${file.id}`, error);
-        } finally {
-          this.assetStoresInFlight.delete(file.id);
-        }
+    return Promise.all(
+      pending.map((file) => {
+        const settled = this.publishOneAsset(adapter, file);
+        this.assetStoresInFlight.set(file.id, settled);
+        return settled;
       }),
     );
+  };
+
+  /**
+   * Store one file's bytes and commit its locator. Never rejects — the outcome
+   * is the return value, so a caller cannot turn a bad adapter into an unhandled
+   * rejection, and {@link flushAssetPublication} can report per file.
+   */
+  private publishOneAsset = async (
+    adapter: NonNullable<ExcalidrawProps["assetAdapter"]>,
+    file: BinaryFileData,
+  ): Promise<AssetPublishOutcome> => {
+    try {
+      const locator = await adapter.store(file);
+
+      // Re-check at COMMIT, not from the snapshot taken before the await.
+      // During an upload a peer's locator can arrive, or the cached file can
+      // be replaced; publishing the stale result would clobber newer state.
+      if (this.unmounted) {
+        return { fileId: file.id, status: "skipped", reason: "unmounted" };
+      }
+      if (this.scene.getAssetLocators()[file.id]) {
+        return { fileId: file.id, status: "skipped", reason: "remote-won" };
+      }
+      if (this.files[file.id] !== file) {
+        return { fileId: file.id, status: "skipped", reason: "file-replaced" };
+      }
+      // Validate here so a bad adapter cannot reject inside an unawaited
+      // write. `setAssetLocators` throws, and this is the only caller that
+      // could turn that into an unhandled rejection.
+      this.scene.setAssetLocators({ [file.id]: locator });
+      return { fileId: file.id, status: "published" };
+    } catch (error) {
+      // Retained locally, retried on a later publish pass. There is no
+      // autonomous retry — see `assetAdapter` docs.
+      console.error(`assetAdapter.store failed for ${file.id}`, error);
+      return { fileId: file.id, status: "failed", error };
+    } finally {
+      this.assetStoresInFlight.delete(file.id);
+    }
+  };
+
+  /**
+   * Await asset publication, so a host can save without racing it.
+   *
+   * Background publishing stays fire-and-forget: `addMissingFiles` kicks a pass
+   * and does not wait. That is fine while editing and wrong at a commit point —
+   * `adapter.store` resolving is NOT the same as the locator being in the doc,
+   * so an immediate save or a close/unmount could encode an image element with
+   * no locator. This is the awaitable boundary for those moments.
+   *
+   * Resolves only once every pending file has either committed a locator or
+   * explicitly not, INCLUDING files whose upload a background pass already
+   * started — that is why the in-flight map holds promises.
+   *
+   * **Check `failed` before reporting a successful save.** A failure leaves the
+   * bytes local and unreferenced, never downgraded to inline data, so the file
+   * is picked up again by the next pass or by calling this again. `skipped` is
+   * not an error: a peer's locator won, the cached file was replaced, or the
+   * editor unmounted — in the last case nothing was written, by design.
+   *
+   * Deliberately NOT a queue: no backoff, no autonomous retry, no ordering
+   * guarantees. Retry is the host calling this again.
+   */
+  public flushAssetPublication = async (): Promise<AssetPublishReport> => {
+    // Snapshot the promises a BACKGROUND pass already started, before kicking
+    // ours — `publishUnreferencedAssets` clears each entry as it settles, so
+    // reading the map afterwards would miss them.
+    const alreadyRunning = [...this.assetStoresInFlight.values()];
+    // Exactly ONE pass. Looping until the map drains would re-pick a file whose
+    // store just failed and upload it again — an autonomous retry, which this
+    // API deliberately does not do. Retry is the host calling this again.
+    const [started, background] = await Promise.all([
+      this.publishUnreferencedAssets(),
+      Promise.all(alreadyRunning),
+    ]);
+    const collected: AssetPublishOutcome[] = [...started, ...background];
+    const seen = new Set<string>();
+    const report: AssetPublishReport = {
+      published: [],
+      skipped: [],
+      failed: [],
+    };
+    for (const outcome of collected) {
+      const key = `${outcome.fileId}:${outcome.status}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      if (outcome.status === "published") {
+        report.published.push(outcome.fileId);
+      } else if (outcome.status === "failed") {
+        report.failed.push({ fileId: outcome.fileId, error: outcome.error });
+      } else {
+        report.skipped.push({ fileId: outcome.fileId, reason: outcome.reason });
+      }
+    }
+    return report;
   };
 
   /** Insert bytes into the local cache WITHOUT publishing a reference. */

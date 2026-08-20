@@ -644,6 +644,33 @@ export type OnExportProgress = {
  * failure state yet; a host needing those should track them itself around
  * `store`.
  */
+/** One file's outcome from an asset publication pass. See {@link AssetAdapter}. */
+export type AssetPublishOutcome =
+  | { fileId: FileId; status: "published" }
+  | {
+      fileId: FileId;
+      status: "skipped";
+      /**
+       * `remote-won` — a peer's locator arrived first; `file-replaced` — the
+       * cached bytes are no longer the ones uploaded; `unmounted` — the editor
+       * went away before the commit, so nothing was written.
+       */
+      reason: "unmounted" | "remote-won" | "file-replaced";
+    }
+  | { fileId: FileId; status: "failed"; error: unknown };
+
+/**
+ * What `flushAssetPublication` reports. **A host must treat a non-empty
+ * `failed` as a failed save**: those files have no locator in the document, so
+ * the saved content references bytes no peer can resolve. `skipped` is not an
+ * error — see {@link AssetPublishOutcome}.
+ */
+export type AssetPublishReport = {
+  published: FileId[];
+  skipped: Array<{ fileId: FileId; reason: string }>;
+  failed: Array<{ fileId: FileId; error: unknown }>;
+};
+
 export interface AssetAdapter {
   /** Persist the bytes and return an opaque locator for them. */
   store: (file: BinaryFileData) => Promise<string>;
@@ -1080,6 +1107,12 @@ export interface ExcalidrawImperativeAPI {
   };
   getSceneElements: InstanceType<typeof App>["getSceneElements"];
   getSceneAssetLocators: InstanceType<typeof App>["getSceneAssetLocators"];
+  /**
+   * Await asset publication before a save/close. Resolves once every pending
+   * file has committed a locator or explicitly not; check `failed` before
+   * reporting a successful save.
+   */
+  flushAssetPublication: InstanceType<typeof App>["flushAssetPublication"];
   encodeSceneStateAsUpdate: InstanceType<
     typeof App
   >["encodeSceneStateAsUpdate"];

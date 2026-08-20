@@ -118,10 +118,14 @@ for (const [label, bundle] of BUNDLES) {
 
   await check(`${label}: runs without a DOM`, () => {
     // `navigator` is a Node global from 18 on, so it proves nothing either way.
-    for (const g of ["window", "document"]) {
-      if (g in globalThis) {
-        throw new Error(`${g} exists — this is not a bare Node process`);
-      }
+    // Written as `typeof` rather than a `globalThis` lookup: this file lints
+    // under a config without `globalThis` declared, and an eslint error here is
+    // how the previous revision of this check shipped broken.
+    if (typeof window !== "undefined") {
+      throw new Error("window exists — this is not a bare Node process");
+    }
+    if (typeof document !== "undefined") {
+      throw new Error("document exists — this is not a bare Node process");
     }
   });
 
@@ -194,6 +198,25 @@ for (const [label, bundle] of BUNDLES) {
   );
 }
 
+// Harness hygiene, not part of the contract under test.
+//
+// This command BUILDS `packages/excalidraw/dist`, and a built dist makes 10
+// Sidebar tests fail in the vitest suite on a ~1s waitFor timeout — measured,
+// and not a resolution error: the vitest aliases already point every
+// `@excalidraw-yjs/*` specifier at source. Leaving the artifact behind would
+// make `test:headless` and `test` non-composable in one working tree, which is
+// a trap for whoever runs them next rather than a real failure.
+//
+// So the build output this command produced is removed again. Deliberately NOT
+// fixed by raising a global test timeout — that would mask a genuine startup
+// regression, which is exactly what such a timeout is there to catch.
+const cleanup = () => {
+  fs.rmSync(path.resolve(process.cwd(), "packages/excalidraw/dist"), {
+    recursive: true,
+    force: true,
+  });
+};
+
 let failed = 0;
 for (const [ok, name, err] of results) {
   console.log(`  ${ok ? "PASS" : "FAIL"}  ${name}${err ? ` — ${err}` : ""}`);
@@ -204,4 +227,5 @@ for (const [ok, name, err] of results) {
 console.log(
   `\n${results.length - failed}/${results.length} headless checks passed`,
 );
+cleanup();
 process.exit(failed ? 1 : 0);
