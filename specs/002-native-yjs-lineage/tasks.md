@@ -430,6 +430,14 @@
 
   **Closed by `Scene.originPolicyTable.test.ts`** (7): the closed set is enumerated from the module itself and each origin's publish/undo behaviour is asserted against a declared policy. Non-vacuous — adding a `SNEAKY_ORIGIN` export with no policy fails it twice; removing it is clean again. The undo case asserts on the reverted VALUE rather than `undoElements()`'s return, because an untracked write leaves undo free to revert an earlier step, which would prove nothing.
 
+  **PREPARATION — a mutation campaign on the invariant surface (2026-08-20).** Rather than re-reading code hoping to spot something, 12 semantically meaningful mutations were applied one at a time to the core write/merge/GC/history paths, each run against the full suite and reverted. **11 were killed, 1 SURVIVED.**
+
+  Killed (with the first test that caught each, so the campaign is auditable): `wouldWriteChange` forced true / forced false; `writeOrigin` forced STRUCTURAL; the publish filter additionally withholding STRUCTURAL; the publish filter no longer withholding REMOTE (the echo loop); dropping the non-local meta bump; the GC cutoff `>=` → `>`; GC skipping the live re-check; the tombstone watermark off-by-one; the UndoManager also tracking REMOTE_ORIGIN; the undo scope dropping the deletion sidecar.
+
+  **The survivor: `writeOrigin` in `commitPlan` (`Scene.ts:1173`) forced to `LOCAL_ORIGIN`.** It makes a NON-RECORDING write undoable — a scene load, an import, or any `CaptureUpdateAction.NEVER` update becomes an undo step, so Ctrl+Z after a load reverts the load instead of the user's last edit. Reachable in production: `syncActionResult` derives `recordHistory` from `captureUpdate !== NEVER` and routes through `applyElementChanges` when the result carries an invocation base. One direction of that contract was asserted everywhere (the opposite mutation died in 9s against an existing history test); the other was asserted nowhere.
+
+  **Closed by `Scene.nonRecordingWrites.test.ts`** (4 tests). Note the trap that cost a first draft: there are TWO independent origin selectors — `replaceAllElements` at `Scene.ts:1406` and `commitPlan` at `:1173` — and the first draft tested only the former, so it passed happily under the surviving mutant. Both are covered now, and each mutation is verified to fail the file.
+
 - [ ] T030 SC-003 gate: a fresh FULL adversarial review of the complete HEAD returns ZERO findings of any kind. Ratchet any finding → a new invariant test + back to its phase.
 
 ## Analyze (spec↔plan↔tasks consistency — pre-implement gate)
