@@ -78,24 +78,50 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
 
 ## Phase 5 — Cold-load lineage (FR-004)
 
-- [ ] T020 Cold-load adopts stored bytes via `applyUpdateV2` into the Scene doc (`new Scene({ doc })` / `applyRemoteUpdate`), not decode→records→rebuild. Green **INV-COLD-LOAD-LINEAGE**.
+- [x] T020 **(DONE — one slice: docBytes + native initial-data adoption + record application removed at that branch)** Cold-load adopts stored bytes via `applyUpdateV2` into the Scene doc, not decode→records→rebuild. Green **INV-COLD-LOAD-LINEAGE**.
 
-  **MEASURED (T020 trace) — narrower than written, and independent of T025b/T032.**
-  Traced the cold-load path and probed it through the real save/load path
-  (`firebasePersistence.test.tsx`, "cold load adopts the stored document"):
-  - The persistence layer is **already correct**: `loadFromFirebase` returns the
-    stored `assets` map, verified against a guard that the element itself
-    round-tripped. So the references survive storage — the loss is downstream.
-  - The remaining gap is **app-side only**: `DecryptedScene.docBytes` exists but
-    `loadFromFirebase` does not return it, and the app rebuilds a Scene from
-    decoded RECORDS rather than adopting the document. That is the lineage loss
-    *and* the T023 cold-load blocker in one place.
-  - **Independent of T025b/T032**: those change the wire (INIT/resync encode);
-    this is the load direction. No shared edit.
-  Sequencing: returning `docBytes` alone is dead code — it only becomes real
-  paired with the Scene adoption in `initializeScene`, so the two land together.
+  **Shape (reviewed and approved before implementing).** `initialData` now takes
+  two MUTUALLY EXCLUSIVE forms as a discriminated union — the record form
+  (`elements`/`files`, `encodedScene?: never`) and the native form
+  (`encodedScene: { update, format: "v2" }`, `elements`/`files` forbidden). The
+  union makes mixing them a type error; a runtime guard fails loud for untyped
+  JS callers. `loadFromFirebase` returns `docBytes`; `App.initializeScene`
+  applies them to the CURRENT scene and derives elements, persisted appState and
+  asset locators from it, and does NOT then apply a record element array.
 
-## Phase 6 — Persistence lineage (FR-003)
+  **Adopt, never replace.** The stored update is applied into the existing
+  generation. A remote update can arrive while the persistence fetch is pending;
+  replacing the Scene afterwards would discard it, so there is deliberately no
+  `replaceSceneGeneration` on this path.
+
+  **Origin.** Reuses `REMOTE_ORIGIN` unchanged — adoption is externally-sourced
+  durable state, which wants exactly its semantics (non-undoable, never
+  rebroadcast). A new origin would rename the source without changing behaviour.
+  `applyRemoteUpdate`'s doc was corrected from "a remote peer's update" to
+  external update (peer **or** adopted durable state).
+
+  **appState precedence.** Collaborative keys come from the doc and beat the
+  caller; a caller override may only touch local UI keys. Overriding `name` or
+  `viewBackgroundColor` through initial data would produce a value no peer sees.
+
+  **Coverage** (`packages/excalidraw/tests/encodedSceneAdoption.test.tsx`, 6):
+  lineage adoption, Scene-level merge, appState precedence, asset resolve-only,
+  fail-loud on both forms, legacy record form unchanged.
+
+  **Non-vacuity, proven by sabotage**: replacing the adoption with a
+  record-rebuild (`new Scene()` → `replaceAllElements`) makes the lineage test
+  FAIL while the others still pass — they pin different properties. Recorded
+  honestly in the file: the merge test drives `Scene.applyRemoteUpdate` directly,
+  so it does NOT exercise the initialData branch and survives that sabotage; the
+  app-level fetch/update race is not covered, because the harness consumes
+  `initialData` at mount.
+
+  **Found while doing it**: the fail-loud guard, placed after
+  `initializeScene`'s try/catch, escaped as an UNHANDLED REJECTION rather than
+  reaching the user — loud in a console nobody reads, invisible in the editor.
+  Moved inside the try so the existing catch surfaces it as `errorMessage`, and
+  the test now pins the surfaced message plus the fact that NEITHER form was
+  applied.
 
 - [ ] T021 **(BLOCKED ON T023 — verified in code, not assumed)** `encryptScene`: `applyUpdateV2`-fold prior + live into a scratch doc over shared lineage, encode that. DELETE `mergeStoredElements` + `isExpiredTombstone`. Green **INV-PERSIST-MERGE**. - **Why it is not independent**: `saveToFirebase(portal, elements: flat[], appState, files)` takes FLAT inputs that carry no lineage, so folding "over shared lineage" requires the boundary to accept a lineage-bearing update instead — a signature change. Any such update is a Yjs doc, and a Yjs doc carries `yFiles`; `buildSnapshotDoc` writes binaries into the same doc, and a live encode was measured to carry an image payload verbatim. T023 proposes removing binaries from the authoritative document and having persistence carry the update plus separately enumerated assets. Implementing T021 first would freeze the mixed binary/reference persistence shape currently under review and force a second boundary rewrite. - **Do NOT** build an intermediate live-update save signature, or retain `yFiles` binaries, merely to turn T003's REDs green. - Its acceptance criteria already exist and are measured: T003's three REDs (property loss, order-dependence, lineage idempotence) plus T001's convergence property.
 

@@ -497,13 +497,7 @@ describe("firebase persistence boundary", () => {
       expect(loaded!.assets).toEqual({ f1: "asset://f1" });
     });
 
-    // SKIPPED — the remaining half of T020, and the T023 cold-load blocker. The
-    // loader has the stored bytes (`DecryptedScene.docBytes`) but does not return
-    // them, and the app rebuilds a scene from decoded RECORDS instead of adopting
-    // the document. Adopting it would preserve lineage AND carry the references
-    // into the live Scene as a side effect, which is what makes a persisted
-    // image resolvable after a reload.
-    it.skip("exposes the stored bytes so the Scene can adopt them", async () => {
+    it("exposes the stored bytes so the Scene can adopt them", async () => {
       const room = "cold-load-adopt";
       await saveToFirebase(
         portalForRoom(room),

@@ -3109,6 +3109,27 @@ class App extends React.Component<AppProps, AppState> {
       } else {
         initialData = (await this.props.initialData) || null;
       }
+      // T020 — the two initial-data forms are MUTUALLY EXCLUSIVE. The public
+      // type already forbids mixing them; this is the runtime half, for untyped
+      // JS callers. Silently honouring one and dropping the other would either
+      // double-apply the scene or discard the stored lineage with no trace.
+      //
+      // Deliberately INSIDE the try: the catch below turns this into a surfaced
+      // `errorMessage` and replaces `initialData`, so neither form is applied.
+      // Thrown after the try it would escape as an unhandled rejection — loud in
+      // a console nobody is reading, invisible in the editor.
+      if (
+        initialData?.encodedScene &&
+        (initialData?.elements || initialData?.files)
+      ) {
+        throw new Error(
+          "initialData carries both `encodedScene` and record data (`elements`/`files`). " +
+            "They are mutually exclusive: `encodedScene` is ADOPTED into the editor's " +
+            "document (preserving its lineage) and everything collaborative — elements, " +
+            "the persisted appState subset, and asset references — is derived from it.",
+        );
+      }
+
       if (initialData?.libraryItems) {
         this.library
           .updateLibrary({
@@ -3129,6 +3150,8 @@ class App extends React.Component<AppProps, AppState> {
         },
       };
     }
+    const encodedScene = initialData?.encodedScene ?? null;
+
     const restoredElements = restoreElements(initialData?.elements, null, {
       repairBindings: true,
       deleteInvisibleElements: true,
@@ -3165,7 +3188,9 @@ class App extends React.Component<AppProps, AppState> {
       toast: this.state.toast,
     };
 
-    if (initialData?.scrollToContent) {
+    // Native form scrolls AFTER adoption, against the doc's elements — there are
+    // no `restoredElements` to centre on here.
+    if (initialData?.scrollToContent && !encodedScene) {
       restoredAppState = {
         ...restoredAppState,
         ...calculateScrollCenter(restoredElements, {
@@ -3180,12 +3205,54 @@ class App extends React.Component<AppProps, AppState> {
 
     this.resetStore();
     this.resetHistory();
-    this.syncActionResult({
-      elements: restoredElements,
-      appState: restoredAppState,
-      files: initialData?.files,
-      captureUpdate: CaptureUpdateAction.NEVER,
-    });
+
+    if (encodedScene) {
+      // ADOPT into the CURRENT scene generation — never replace it. A remote
+      // update can arrive into this generation while the durable snapshot is
+      // still being fetched; replacing the Scene afterwards would discard it.
+      // Applying the stored update into the same doc merges both, and because
+      // it lands under REMOTE_ORIGIN it is neither undoable nor rebroadcast.
+      this.scene.applyRemoteUpdate(encodedScene.update, encodedScene.format);
+
+      // Collaborative appState lives on the DOC and wins over the caller. A
+      // caller override may only touch local UI keys (theme, zoom, …); changing
+      // `name` / `viewBackgroundColor` requires a document mutation, not an
+      // initial-data override that no peer would ever see.
+      let adoptedAppState = {
+        ...restoredAppState,
+        ...this.scene.getPersistedAppState(),
+      } as AppState;
+
+      if (initialData?.scrollToContent) {
+        adoptedAppState = {
+          ...adoptedAppState,
+          ...calculateScrollCenter(this.scene.getNonDeletedElements(), {
+            ...adoptedAppState,
+            width: this.state.width,
+            height: this.state.height,
+            offsetTop: this.state.offsetTop,
+            offsetLeft: this.state.offsetLeft,
+          }),
+        };
+      }
+
+      // NO element array here: passing one would rebuild the scene from records
+      // and undo the adoption. Elements already flowed from the doc through
+      // `applyRemoteUpdate` → `recomputeFromDoc` → `triggerUpdate()`. Likewise no
+      // `files`: the doc carries `fileId -> locator`, and the bytes resolve
+      // through the asset adapter into the cache.
+      this.syncActionResult({
+        appState: adoptedAppState,
+        captureUpdate: CaptureUpdateAction.NEVER,
+      });
+    } else {
+      this.syncActionResult({
+        elements: restoredElements,
+        appState: restoredAppState,
+        files: initialData?.files,
+        captureUpdate: CaptureUpdateAction.NEVER,
+      });
+    }
 
     // clear the shape and image cache so that any images in initialData
     // can be loaded fresh

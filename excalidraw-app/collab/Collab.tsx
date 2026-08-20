@@ -38,6 +38,7 @@ import type {
 } from "@excalidraw-yjs/element/types";
 import type {
   BinaryFileData,
+  ExcalidrawNativeInitialDataState,
   ExcalidrawImperativeAPI,
   SocketId,
   Collaborator,
@@ -575,8 +576,16 @@ class Collab extends PureComponent<CollabProps, CollabState> {
     }
 
     // TODO: `ImportedDataState` type here seems abused
+    //
+    // T020: a cold load resolves the NATIVE form (an encoded document to adopt)
+    // instead of a record snapshot, so this carries both alternatives — the same
+    // mutually-exclusive pair the editor's `initialData` accepts.
     const scenePromise = resolvablePromise<
-      | (ImportedDataState & { elements: readonly OrderedExcalidrawElement[] })
+      | (ImportedDataState & {
+          elements: readonly OrderedExcalidrawElement[];
+          encodedScene?: never;
+        })
+      | ExcalidrawNativeInitialDataState
       | null
     >();
 
@@ -877,21 +886,20 @@ class Collab extends PureComponent<CollabProps, CollabState> {
           this.portal.socket,
         );
         if (loaded) {
+          // T020 — ADOPT the stored document rather than rebuilding a scene from
+          // its decoded records. Rebuilding starts a fresh CRDT lineage and
+          // loses the persisted history; adopting keeps it, and carries the
+          // `fileId -> locator` asset references into the live scene as a side
+          // effect, which is what makes a persisted image resolvable after a
+          // reload.
+          //
+          // No `elements` / `files` here — they are the mutually exclusive
+          // record form. Everything collaborative (elements, the persisted
+          // appState subset, asset references) is derived from the adopted doc;
+          // the bytes behind each reference resolve through the asset adapter.
           return {
-            elements: loaded.elements,
+            encodedScene: { update: loaded.docBytes, format: "v2" as const },
             scrollToContent: true,
-            // Native-Yjs core (M4): carry the persisted appState subset
-            // (`viewBackgroundColor` / `name`) and files through the load so a
-            // solo cold-load restores the saved scene's background/name instead
-            // of falling back to defaults (they live on the doc, not in the
-            // element array). App.initializeScene merges `appState` via
-            // `restoreAppState`; files seed the in-memory cache before image
-            // fetch.
-            appState: loaded.appState as Partial<ImportedDataState["appState"]>,
-            // No `files` here: the stored document holds `fileId -> locator`,
-            // not bytes. Seeding the cache is the asset adapter's job once the
-            // references are in the scene — see T020 for adopting the stored
-            // bytes into the doc, which is what puts them there on a cold load.
           };
         }
       } catch (error: any) {

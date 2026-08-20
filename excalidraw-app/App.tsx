@@ -327,6 +327,29 @@ const initializeScene = async (opts: {
 
     const scene = await opts.collabAPI.startCollaboration(roomLinkData);
 
+    // T020 — a cold load resolves the NATIVE form: an encoded document to adopt.
+    // Pass it straight through. Only `theme` is layered on, and only because it
+    // is a LOCAL UI key; the collaborative appState (`name`,
+    // `viewBackgroundColor`) comes from the adopted document, and overriding it
+    // here would produce a value no peer ever sees.
+    if (scene?.encodedScene) {
+      return {
+        scene: {
+          ...scene,
+          appState: {
+            ...scene.appState,
+            ...(localDataState?.appState?.theme
+              ? { theme: localDataState.appState.theme }
+              : null),
+            isLoading: false,
+          },
+        },
+        isExternalScene: true,
+        id: roomLinkData.roomId,
+        key: roomLinkData.roomKey,
+      };
+    }
+
     return {
       // Native-Yjs core (M3): collaboration converges on the scene's `Y.Doc`, so
       // by the time `startCollaboration` resolves, the editor's scene already

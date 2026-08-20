@@ -464,6 +464,17 @@ export const saveToFirebase = async (
  * was previously dropped on load, so a solo cold-load reopened with default
  * background/name; carrying it through restores the saved scene faithfully. */
 export type LoadedFirebaseScene = {
+  /** The stored document's raw V2 bytes.
+   *
+   * This is what a cold load should ADOPT (T020): applying it into the live
+   * Scene doc keeps the persisted CRDT lineage, where rebuilding a scene from
+   * the decoded `elements` below starts a fresh lineage and loses it. Adopting
+   * it also carries the asset references in as a side effect, which is what
+   * makes a persisted image resolvable after a reload.
+   *
+   * `elements` / `assets` / `appState` remain for callers that genuinely want
+   * the decoded snapshot (the version cache, tests, non-adopting consumers). */
+  docBytes: Uint8Array;
   elements: readonly SyncableExcalidrawElement[];
   assets: Record<string, string>;
   appState: Partial<Record<typeof APPSTATE_ALLOW_LIST[number], unknown>>;
@@ -493,6 +504,7 @@ export const loadFromFirebase = async (
   }
 
   return {
+    docBytes: decrypted.docBytes,
     elements,
     assets: decrypted.assets,
     appState: decrypted.appState,

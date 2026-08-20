@@ -549,12 +549,61 @@ export type LibraryItemsSource =
   | MaybePromise<LibraryItems_anyVersion | Blob>;
 // -----------------------------------------------------------------------------
 
-export type ExcalidrawInitialDataState = Merge<
+/**
+ * A durable scene captured as encoded Yjs bytes, for hosts that persist the
+ * document itself rather than a decoded element snapshot.
+ *
+ * This is the lineage-preserving form: adopting these bytes into the editor's
+ * document keeps the stored CRDT history, where rebuilding a scene from decoded
+ * records starts a fresh lineage and loses it.
+ */
+export type EncodedSceneDocument = {
+  update: Uint8Array;
+  format: "v2";
+};
+
+/**
+ * The classic form: a decoded snapshot of elements / files / appState.
+ * `encodedScene` is forbidden here so the two forms cannot be mixed.
+ */
+export type ExcalidrawRecordInitialDataState = Merge<
   ImportedDataState,
   {
     libraryItems?: MaybePromise<Required<ImportedDataState>["libraryItems"]>;
+    encodedScene?: never;
   }
 >;
+
+/**
+ * The native form: the scene arrives as an encoded document and is ADOPTED, so
+ * `elements` and `files` are forbidden — everything collaborative is derived
+ * from the document itself, including the persisted appState subset and the
+ * `fileId -> locator` asset references.
+ *
+ * `appState` here may still carry LOCAL-ONLY UI keys (theme, zoom, and the
+ * like). It must not be used to override collaborative keys such as `name` or
+ * `viewBackgroundColor`: those live on the document, and changing them requires
+ * a document mutation, not an initial-data override.
+ */
+export type ExcalidrawNativeInitialDataState = Merge<
+  Omit<ImportedDataState, "elements" | "files">,
+  {
+    libraryItems?: MaybePromise<Required<ImportedDataState>["libraryItems"]>;
+    encodedScene: EncodedSceneDocument;
+    elements?: never;
+    files?: never;
+  }
+>;
+
+/**
+ * Two MUTUALLY EXCLUSIVE forms. The union makes mixing them a type error; the
+ * runtime additionally fails loud for untyped JS callers, because silently
+ * honouring one and dropping the other would double-apply the scene or discard
+ * the stored lineage without a trace.
+ */
+export type ExcalidrawInitialDataState =
+  | ExcalidrawRecordInitialDataState
+  | ExcalidrawNativeInitialDataState;
 
 export type OnUserFollowedPayload = {
   userToFollow: UserToFollow;

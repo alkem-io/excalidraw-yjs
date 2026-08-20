@@ -1531,7 +1531,15 @@ export class Scene {
   // ---------------------------------------------------------------------------
 
   /**
-   * Apply a remote peer's Yjs update to `this.doc` under {@link REMOTE_ORIGIN}.
+   * Apply an EXTERNAL Yjs update to `this.doc` under {@link REMOTE_ORIGIN}.
+   *
+   * "External" is broader than "from a peer": it covers both a peer's live edit
+   * and the adoption of durable state (a stored document loaded from
+   * persistence — T020). Both are externally-sourced state that the local user
+   * did not just author, so both want exactly these semantics: non-undoable and
+   * never rebroadcast. Adoption is a distinct public operation from a peer echo,
+   * but it does not warrant a separate origin — that would rename the source
+   * without changing the behaviour.
    *
    * The update integrates inside a `doc.transact` whose origin is `REMOTE_ORIGIN`
    * (distinct from every local origin), which is the linchpin of M3:
