@@ -156,6 +156,26 @@
 
   - **THE PATTERN, now measured at three sites** (`distribute:77`, `boundText:184`, `boundText:358`): the re-read IS genuinely redundant under the patch route, because the derived diff compares the result against the INVOCATION BASE and the stale entry EQUALS that base — so no key is declared, nothing is written, and the helper's doc value survives. **Redundant is not retirable**: removal is unobservable, which is exactly the state the "a test must discriminate" bar exists to refuse, so these three stay. Only `align:83` and `flip:216` behaved otherwise — there the action's entry had genuinely diverged from its base, removal WAS observable, and both were retired behind an ownership policy.
 
+  - **THE RULE WAS HALF WRONG — corrected by probing, as required.** The hypothesis "entry diverges from base ⇒ retirable; equality ⇒ redundant" was tested on the two remaining candidates:
+
+    - **`props:319` — hypothesis HELD.** Removal leaves the full suite green (1612 passed). Redundant, unobservable, KEPT.
+    - **`flip:163` — hypothesis FALSIFIED.** It has only 2 semantic invocations out of 63, which the rule predicted meant redundant. Removing it FAILS a real test: _"mutliple elements > with bound text flip correctly"_ (`expected -50 to be close to 110`). Frequency predicts nothing.
+
+    And `flip:163` is not even the same KIND of site. Its result feeds `bindOrUnbindBindingElements(flippedElements, …)` — a HELPER INPUT consumed mid-action, not the array returned to `syncActionResult`. An ownership policy governs how the RESULT is applied, so it cannot substitute for this: the problem is a helper computing from stale geometry, and flip's existing geometry policy does not prevent the failure.
+
+  - **The corrected taxonomy**, by what the re-read FEEDS:
+
+    1. **Result array, entry diverges from base** → removal observable → retirable behind an ownership policy. `flip:216`, `align:83` (both done).
+    2. **Result array, entry equals base** → removal unobservable → KEEP. `distribute:77`, `boundText:184`, `boundText:358`, `props:319`.
+    3. **Helper input consumed mid-action** → removal observable, but ownership is the wrong instrument entirely → KEEP until the helper takes doc-derived input. `flip:163`.
+
+  - **FLAKE LEAD (not attributed, not fixed here).** Two intermittent full-suite symptoms, both teardown-shaped, neither reproducing in isolation:
+
+    1. `still loading` render timeouts in `zindex` / `textWysiwyg` — seen once, both files green alone, next full run green.
+    2. `ExcalidrawAPI is no longer usable after the editor has been unmounted`, thrown from a `LocalData` timer (`excalidraw-app/App.tsx:715` → `LocalData.ts:131`) during `collab.test.tsx` — an UNHANDLED error that makes the runner exit non-zero while every test passes. Ran `collab.test.tsx` alone twice: clean both times, no such error.
+
+    Both are cross-file teardown races in the app harness: a timer surviving unmount and calling the deliberately-invalidated API. Recorded as a lead because an intermittently red runner undermines every non-vacuity claim made by sabotage probes. NOT folded into T016f — no recurrence has been attributed to any re-read change.
+
   - A semantic difference is NOT an observable defect: `boundText:184` and `boundText:358` can each be deleted with the suite still green. Do not retire a site without a test that fails when it returns.
 
 **Design note (do not lose):** a base→result diff is a sound migration default but is NOT the definition of intent. "Explicitly set a key to the value it already had in base" is invisible to a diff yet must still beat an interleaved remote write — the same asymmetry FR-009 fixed one layer down. Derive for synchronous actions in the interim; the durable contract carries explicit per-id key sets plus membership intent.
