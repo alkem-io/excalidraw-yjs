@@ -10,6 +10,20 @@
 
 - [x] T001 **(done — Scene-level convergence gate)** `Scene.convergence.property.test.ts`. N-replica property for INV-CONVERGE / INV-NO-RESURRECT over the `Scene` wire path: 4 replicas × 12 rounds × 5 fixed seeds, each round making unexchanged concurrent edits (move / soft-delete / create), then exchanging in a seeded Fisher–Yates order, roughly half as full-state resyncs and half as state-vector deltas. Asserts identical canonical content fingerprints (id/x/y/isDeleted — semantic convergence, NOT Yjs byte equality) and that nothing soft-deleted returns. Per-seed guards reject a vacuous pass: >20 edits, ≥1 full-state resync, non-empty live set. - **Proven sharp**: all 5 seeds fail when the Scene encoder is made to rebuild through a throwaway `Y.Doc` with a fresh `clientID`. - **SC-001 is now satisfied together with T032** (landed): the app's INIT/resync no longer rebuilds — `encodeSyncableSceneAsUpdate` is deleted and `Collab.encodeSceneAsUpdate` encodes the live document. This task covers the Scene wire path; T032's own pins cover the app producer, including the per-property loss a rebuild causes.
 - [ ] T002 **(MEASURED — the failures are recorded; their causes are NOT yet attributed)** Re-enabling `describe.skip("multiplayer undo/redo")` (history.test.tsx:2218) plus the removed `collab.test.tsx` cases. **Measured by un-skipping and reverting: 36 of 37 fail.** - **Measured clusters** (the only established facts): ~24 snapshot mismatches, concentrated in "conflicts in bound text elements and their containers" and "conflicts in arrows and their bindable elements"; ~16 element-shape mismatches; and several history-depth assertions off by one or more (`expected 4 to be 1`, `expected 1 to be 3`). - **Investigation LEADS, not dependencies**: **T014b** (meta version regression) and **T016b/T016c** (intent-scoped result application) are plausible causes given the clusters, but **no failing case has been traced to either**, so neither is recorded as a blocker. Trace one concrete failure to a cause before treating that cause as required work. - **T017 is excluded, not merely untraced**: its premise was falsified — a remote apply already contributes zero to both stacks — so no failure here can originate from it. - Do not fix the 36 as a batch; each cluster needs its own attribution first.
+
+  **RE-MEASURED against current HEAD** (after T014b, T021, T023, T026, T032,
+  T016k all landed; block un-skipped, measured, re-skipped):
+  **36 multiplayer failures remain** — unchanged in count from the original
+  "36 of 37".
+  - Classified by FIRST reason per test: **9 snapshot, 27 non-snapshot**.
+  - **Not directly comparable to the original "~24 snapshot / ~16 non-snapshot"**,
+    which counted REASONS (a test can emit several) rather than tests. The honest
+    statement is that the count is unchanged and the composition has not been
+    re-derived on the same basis.
+  - The dominant non-snapshot shape is whole-array equality
+    (`expected [ { id: 'id0', … } ] to deeply equal …`), 20 of the 27.
+  - Causes still NOT attributed. T014b landing did not move the count, which
+    weakens the earlier note listing it as an investigation lead.
 - [x] T003 **(DONE — the LIVE gate replaced the old flat-boundary block, which was deleted rather than kept as a baseline)** INV-PERSIST-MERGE against the real path.
 
   The original block described the pre-T021 flattened boundary and left its three
@@ -165,11 +179,19 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
   arriving today.
 
   **Producer census** (`packages/excalidraw/actions/*`):
-  - 87 `perform:` implementations in total; **8 are async** (outside this slice —
-    T016c/d).
+  - 87 `perform:` implementations in total; **8 are async**.
   - **49 SYNCHRONOUS performs return an `elements` array** through
     `syncActionResult` → `scene.replaceAllElements(...)`, which is authoritative
-    ("make the doc equal this set"). Exactly 1 async perform returns elements.
+    ("make the doc equal this set").
+  - **ZERO async performs return an `elements` field — CORRECTED.** The earlier
+    "exactly 1" was WRONG: it came from a loose regex that matched
+    `prepareElementsForExport(...)` ARGUMENTS inside `actionClipboard` as though
+    they were returned fields. Re-audited by brace-matching each of the 8 async
+    bodies and inspecting only `return { … }` sites: `actionElementLink` ×1,
+    `actionExport` ×3, `actionClipboard` ×4 — none returns `elements`.
+    (`actionLoadScene`/`actionElementLink` catch paths were removed in T016d.)
+    **T016c therefore covers a future/other async risk, not a current
+    producer**, and must not carry the stale one-action claim.
   - **6 action files call the side-effecting helpers** (`redrawTextBoundingBox`,
     `updateBoundElements`, `bindOrUnbindBindingElements`): `actionAlign`,
     `actionStyles`, `actionBoundText`, `actionDistribute`, `actionProperties`,
