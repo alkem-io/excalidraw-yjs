@@ -47,6 +47,25 @@ So **"one direct dependency per consumer" was one import-specifier change away, 
 
 The umbrella `/headless` subpath stays. It is correct, tested and free to keep — it is simply not what `server` should pin, because a server needing 18 MB should not install 267 MB to get a shorter package name.
 
+## Route A VERIFIED end to end from a published pin (2026-08-20)
+
+Deciding a contract is not the same as knowing it works, and the server corrective depends on it. Reproduced with **exactly the shape server will have** — one direct dependency on the slim package at `2af664c`, pnpm 10.17.1, no config, no `pnpm-workspace.yaml`:
+
+```
+$ node probe.mjs   # dynamic import("@excalidraw-yjs/element/headless")
+ROUTE A OK | exports: 10 | snapshot x,y: 5 6 | updates emitted: 2
+$ node probe2.mjs
+asset boundary OK from the slim package | locator stored: asset://f1 | data: URL rejected: true
+```
+
+- **`element/headless` resolves and runs in bare Node** via `await import(...)`, which is the form `server` actually uses (`whiteboard-fork.ts`).
+- All ten server-facing exports present; `renderElement` / `elementWithCanvasCache` absent; `window` and `document` undefined.
+- Snapshot round-trip preserves geometry; the full `Scene` workflow works (replace, per-property mutate, updates emitted).
+- **The T023 asset boundary is intact in the slim package too**: a locator round-trips, and a `data:` URL is rejected. That matters — the egress guard is not a UI-layer feature, and a server writing content must hit the same wall.
+- **Cost: 18 MB, 10 packages, 82 lockfile lines, ONE identifier, and zero React in the tree** — against 267 MB / 289 / 3125 for the umbrella.
+
+So the corrective is a swap back to a path that is measured working, not a hopeful revert.
+
 ## Ranked routes, with what each actually buys
 
 **A. Leave the split; server pins the headless artifact.** Cost to server: 18 MB. Consumers coordinate one package each — server the headless one, client the UI one — at the same identifier. This is what the original complaint asked for and it needs no repackaging at all; the umbrella `/headless` subpath stays as a convenience for anyone who wants a single name and can afford it.
