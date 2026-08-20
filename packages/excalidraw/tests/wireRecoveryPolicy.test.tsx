@@ -24,6 +24,21 @@ const { h } = window;
  * vector out, the authority's delta back (`SyncStep1` -> `SyncStep2`, which the
  * transport already speaks) — repairs it exactly.
  *
+ * SCOPE, decided rather than drifted into. The recovery policy covers ANNOUNCED
+ * decode failure only. Silent semantic corruption — a flipped bit that still
+ * decodes — is an **accepted risk**, deliberately outside this bounded recovery:
+ * TLS already covers accidental wire flips, and the residual is a malicious or
+ * buggy peer, which needs a product contract and an ingress owner rather than a
+ * generic integrity layer bolted into the editor. The three `it.fails` cases
+ * below therefore measure a gap nobody is currently assigned to close. They are
+ * kept, not deleted, because the measurements are the evidence for that decision
+ * — and because `it.fails` inverts: if someone ever does close the gap, the
+ * suite goes RED and forces this scope note to be revisited consciously.
+ *
+ * Implementation of the resync itself does NOT live here. It belongs to the
+ * embedder's provider (`UnifiedCollabProvider`, client-web), and needs no API
+ * beyond what this package already exports — proven by the second test below.
+ *
  * That is why the policy is RESYNC, not REPLACE. Discarding the Scene
  * generation and re-seeding would also converge, but it is strictly worse: it
  * destroys local edits the authority has not yet seen, which the resync
@@ -231,7 +246,7 @@ describe("INV-WIRE-ROBUST: receiver recovery policy", () => {
   });
 
   it.fails(
-    "a corrupted-but-decodable update is never accepted silently",
+    "OUT OF SCOPE (accepted risk): a corrupted-but-decodable update is never accepted silently",
     () => {
       // Yjs's binary format carries no integrity check, so a flipped bit often
       // decodes as a VALID struct. Exhaustive single-bit corruption of a real
@@ -278,7 +293,7 @@ describe("INV-WIRE-ROBUST: receiver recovery policy", () => {
   );
 
   it.fails(
-    "V2 — the format the COLD-LOAD path always speaks — is no worse than v1 under corruption",
+    "OUT OF SCOPE (accepted risk): v2 — the format the COLD-LOAD path always speaks — is no worse than v1 under corruption",
     () => {
       // `EncodedSceneDocument.format` is the literal `"v2"` (types.ts), so the
       // cold-load adoption path — one of the three production receivers — always
@@ -329,52 +344,55 @@ describe("INV-WIRE-ROBUST: receiver recovery policy", () => {
     },
   );
 
-  it.fails("a silent divergence is repaired by a state-vector resync", () => {
-    // The sting: the class that is NOT announced is also the class the CRDT
-    // catch-up cannot repair. The receiver's state vector claims it already
-    // holds those clocks, so the authority's delta omits the real structs and
-    // the corruption is permanent. Measured exhaustively: 134 of the 258 silent
-    // divergences survived a full resync, with the resync itself never throwing.
-    const src = new Scene();
-    src.replaceAllElements([
-      API.createElement({ type: "rectangle", id: "a", x: 1 }),
-      API.createElement({ type: "rectangle", id: "b", x: 2 }),
-    ]);
-    const seed = src.encodeStateAsUpdate("v1");
-    src.replaceAllElements([
-      ...src.getElementsIncludingDeleted(),
-      API.createElement({ type: "rectangle", id: "c", x: 3 }),
-    ]);
-    const good = src.encodeStateAsUpdate("v1");
-    const authority = rederive(src);
+  it.fails(
+    "OUT OF SCOPE (accepted risk): a silent divergence is repaired by a state-vector resync",
+    () => {
+      // The sting: the class that is NOT announced is also the class the CRDT
+      // catch-up cannot repair. The receiver's state vector claims it already
+      // holds those clocks, so the authority's delta omits the real structs and
+      // the corruption is permanent. Measured exhaustively: 134 of the 258 silent
+      // divergences survived a full resync, with the resync itself never throwing.
+      const src = new Scene();
+      src.replaceAllElements([
+        API.createElement({ type: "rectangle", id: "a", x: 1 }),
+        API.createElement({ type: "rectangle", id: "b", x: 2 }),
+      ]);
+      const seed = src.encodeStateAsUpdate("v1");
+      src.replaceAllElements([
+        ...src.getElementsIncludingDeleted(),
+        API.createElement({ type: "rectangle", id: "c", x: 3 }),
+      ]);
+      const good = src.encodeStateAsUpdate("v1");
+      const authority = rederive(src);
 
-    let unrepairable = 0;
-    for (let i = 0; i < Math.min(64, good.length); i++) {
-      for (let bit = 0; bit < 8; bit++) {
-        const bad = good.slice();
-        bad[i] ^= 1 << bit;
-        const recv = new Scene();
-        Y.applyUpdate(recv.doc, seed);
-        try {
-          recv.applyRemoteUpdate(bad, "v1");
-          if (rederive(recv) !== authority) {
-            recv.applyRemoteUpdate(
-              src.encodeStateAsUpdate("v1", recv.encodeStateVector()),
-              "v1",
-            );
+      let unrepairable = 0;
+      for (let i = 0; i < Math.min(64, good.length); i++) {
+        for (let bit = 0; bit < 8; bit++) {
+          const bad = good.slice();
+          bad[i] ^= 1 << bit;
+          const recv = new Scene();
+          Y.applyUpdate(recv.doc, seed);
+          try {
+            recv.applyRemoteUpdate(bad, "v1");
             if (rederive(recv) !== authority) {
-              unrepairable++;
+              recv.applyRemoteUpdate(
+                src.encodeStateAsUpdate("v1", recv.encodeStateVector()),
+                "v1",
+              );
+              if (rederive(recv) !== authority) {
+                unrepairable++;
+              }
             }
+          } catch {
+            // announced
           }
-        } catch {
-          // announced
+          recv.destroy();
         }
-        recv.destroy();
       }
-    }
-    src.destroy();
+      src.destroy();
 
-    // RED, and deliberately NOT closable by the resync policy above.
-    expect(unrepairable).toBe(0);
-  });
+      // RED, and deliberately NOT closable by the resync policy above.
+      expect(unrepairable).toBe(0);
+    },
+  );
 });

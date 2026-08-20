@@ -321,7 +321,7 @@
 
   **Deliberately NOT done, and why.** The cold-load path no longer marks the room saved. Since T020 a cold load ADOPTS the stored document, and that adoption is itself a doc-changing transaction occurring after `loadFromFirebase` returns, so no revision available there corresponds to the post-adoption scene. The reviewer's richer rule (adoption may establish a clean baseline _only if_ the fresh generation was clean, staying dirty if a remote update landed during the fetch) is a real improvement and is NOT implemented — deferral reviewed and approved as a bounded follow-up, not a blocker. Cost of the omission is one redundant save after a cold load — the harmless direction. Guessing a baseline would risk the dangerous one: a false-skip, which is silent data loss with nothing to retry it.
 
-- [ ] T027 **(POLICY DRAFTED — one class ready to implement, two not ours)** INV-WIRE-ROBUST.
+- [ ] T027 **(POLICY SETTLED; IMPLEMENTATION IS NOT THIS REPO'S)** INV-WIRE-ROBUST.
 
   **Receiver census** — every production receiver of remote bytes funnels to `Scene.applyRemoteUpdate`: `Collab`'s INIT (`Collab.tsx:710`) and UPDATE (`:724`) handlers via `App.applyRemoteSceneUpdate`, and the cold-load adoption path (`App.tsx:3286`). Three entry points, one boundary.
 
@@ -388,6 +388,11 @@
   Truncation behaves identically in both. **Corruption is materially worse in v2 — 2.2x the silent divergences and 2.8x the unrepairable ones** — even though FEWER flips decode at all. Its run-length encoding means one flipped bit perturbs a wider decoded span.
 
   **And this is the one path with no authority to resync FROM.** The drafted policy assumes a live peer or server answering `SyncStep1`. At cold load the stored document IS the authority, so a corrupted snapshot has nothing to be repaired against. The recovery policy therefore does NOT cover the adoption path, and it must not be described as if it did. Pinned by a fifth RED asserting v2 is no worse than v1, which fails today.
+
+  **OWNERSHIP AND SCOPE — decided 2026-08-20, so this does not drift.**
+
+  - **The resync implementation is NOT in this repo.** It belongs to the embedder's provider (`UnifiedCollabProvider`, client-web), which owns the socket and the session. **No fork API change is needed** — `applyRemoteSceneUpdate` already throws through and `encodeSceneStateVector` is already exported, proven by a test that runs the whole recovery through the public API only. This repo's deliverable for T027 is therefore the measurement, the RED, and the corrected policy — all landed. It is held here on purpose, not forgotten.
+  - **Silent semantic corruption is an ACCEPTED RISK, not backlog.** TLS covers accidental wire flips; the residual is a malicious or buggy peer, which needs a product contract and an ingress owner rather than a generic integrity layer bolted into the editor. The three `it.fails` cases stay — the measurements are the evidence for the decision, and `it.fails` inverts, so if anyone ever closes the gap the suite goes RED and this note gets revisited consciously rather than silently.
 
   **Policy summary — three classes, three owners.**
 
