@@ -1347,9 +1347,7 @@ export class Scene {
           // caller aliasing of `ordered`).
           const record = snapshots.get(element.id)!;
           const ymap = this.yElements.get(element.id);
-          if (ymap) {
-            writeChangedKeys(ymap, record);
-          }
+          const writes = ymap ? writeChangedKeys(ymap, record) : 0;
           // Capture the element's (locally maintained) reconciliation metadata +
           // any own-Symbol props (e.g. ORIG_ID) — not stored in the doc, but the
           // derived snapshot must expose them. Version/etc. come from the snapshot,
@@ -1372,14 +1370,38 @@ export class Scene {
           // fix has to reconcile meta versioning with Store change-detection as a
           // whole, which is its own piece of work. See the skipped
           // INV-VERSION-MONOTONIC case in `Scene.native-yjs-write-intent.test.ts`.
+          // NO-WRITE RULE. When this element contributed ZERO document writes,
+          // nothing about it changed in the doc, so the doc-derived
+          // reconciliation metadata must not move. Recording the caller's values
+          // verbatim here let a stale array REGRESS them with no change to
+          // justify it — measured: `version` 2 -> -1 and `updated` 1 -> 999
+          // (`Scene.noWriteMeta.test.ts`).
+          //
+          // Two fields DO still refresh, because neither is doc-derived:
+          //  - `symbols`: own-Symbol props (e.g. ORIG_ID) live on the caller's
+          //    object, never in the doc, and legitimately differ after
+          //    operations like duplicate.
+          //  - `boundElementsEmpty`: the CRDT collapses `boundElements: []` and
+          //    `null` to the SAME empty representation, so this sentinel is the
+          //    only carrier of the distinction. A caller switching between them
+          //    produces zero Yjs writes yet must still change what derives.
+          const prevMeta = this.meta.get(element.id);
+          const carryMeta = writes === 0 && prevMeta !== undefined;
           this.meta.set(element.id, {
-            version: record.version as number,
-            versionNonce: record.versionNonce as number,
-            updated: record.updated as number,
+            version: carryMeta ? prevMeta.version : (record.version as number),
+            versionNonce: carryMeta
+              ? prevMeta.versionNonce
+              : (record.versionNonce as number),
+            updated: carryMeta ? prevMeta.updated : (record.updated as number),
             symbols: captureOwnSymbols(element),
             boundElementsEmpty: isEmptyBoundElements(record),
           });
-          if ((record.version as number) > this.versionHighWater) {
+          // Not advanced on a no-op either: the high-water mark tracks versions
+          // the doc has actually seen.
+          if (
+            !carryMeta &&
+            (record.version as number) > this.versionHighWater
+          ) {
             this.versionHighWater = record.version as number;
           }
           // Deletion marker, in this SAME transaction so it and the `isDeleted`

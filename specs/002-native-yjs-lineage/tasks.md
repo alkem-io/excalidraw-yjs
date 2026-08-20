@@ -214,6 +214,33 @@
   `syncDeletionMarker` stamps only on the live→deleted transition and never
   restamps — so there is no tombstone-expiry extension. Claim withdrawn.
 
+  **NO-WRITE META RULE — LANDED** (independent slice; the version-authority
+  mechanism is still NOT implemented).
+
+  When an element contributes ZERO document writes, nothing about it changed, so
+  the doc-derived reconciliation metadata no longer moves: `version`,
+  `versionNonce` and `updated` are carried forward from the previous meta, and
+  `versionHighWater` is not advanced.
+
+  **Two fields DO still refresh — my first rule was too broad and was corrected
+  in review.** `symbols` (own-Symbol props like `ORIG_ID` live on the caller's
+  object, never in the doc). And `boundElementsEmpty`: the CRDT collapses
+  `boundElements: []` and `null` into the SAME empty representation, so that
+  sentinel is the only carrier of the distinction — a caller switching between
+  them produces zero Yjs writes yet must still change what derives. Verified in
+  code before accepting the correction, not taken on trust.
+
+  **Coverage** (`Scene.noWriteMeta.test.ts`, 5): the reachability case (was RED,
+  now green), the same object re-submitted verbatim, BOTH collapsed-representation
+  directions (`null → []` and `[] → null`) with no metadata movement, and Symbols
+  still reaching the freshly derived snapshot.
+
+  **Snapshot impact, classified rather than blanket-updated**: exactly 5 values in
+  `history.test.tsx`, ALL `"version"`, ALL exactly **−1** — one spurious advance
+  removed per element, which is precisely what the rule predicts. **Zero
+  `hasElementChange` flips**, so no history semantics changed, and no behavioural
+  assertion changed in any of the 5 tests. Accepted on that basis.
+
   **Proposed boundary, NOT implemented pending review**: `meta.version` stays the
   exact ordered per-element counter that history/delta require, and advances iff
   the element's doc content changed — which is what makes it a faithful change
