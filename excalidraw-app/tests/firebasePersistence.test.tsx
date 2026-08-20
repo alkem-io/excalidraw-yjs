@@ -10,26 +10,30 @@ import type { AppState } from "@excalidraw-yjs/excalidraw/types";
 
 import type { SceneContentToken } from "@excalidraw-yjs/element";
 
+import { DELETED_ELEMENT_TIMEOUT } from "../app_constants";
+
 import type { SyncableExcalidrawElement } from "../data";
+
 import type Portal from "../collab/Portal";
 
 /**
- * Persistence/wire boundary (findings #1, #2, #4) at the FIREBASE save/load seam.
+ * Persistence boundary at the FIREBASE save/load seam.
  *
- * The store is a SEPARATE replica from the live socket, so these are tested with a
+ * The store is a SEPARATE replica from the live socket, so these run against a
  * faithful in-memory firestore + storage mock:
- *   - #2 lost-update: `saveToFirebase` reads the stored doc INSIDE the transaction
- *     and VALUE-merges it with the live element/file/appState set before writing
- *     (a decoded whole-element LWW with a deletion-union — NOT a Yjs `applyUpdateV2`
- *     fold, which would be whole-element LWW by `clientID` across the docs' disjoint
- *     lineages and could drop a concurrent edit or resurrect a deletion). A
- *     concurrent writer's element survives and no deletion is resurrected.
- *   - #1 leak: a deleted image's binary is NOT persisted (file-prune to referenced).
- *   - #4 cold-load: the persisted `viewBackgroundColor` / `name` survive a load
- *     (previously dropped by `decryptScene`, so a solo reopen fell back to defaults).
+ *   - **lost update**: `saveToFirebase` reads the stored doc INSIDE the
+ *     transaction and `applyUpdateV2`-FOLDS it with the live update (T021).
+ *     Both sides carry lineage — the wire ships the live document (T032) and a
+ *     cold load adopts the stored one (T020) — so this is a real per-property
+ *     CRDT merge: concurrent edits to different properties of one element both
+ *     survive, where the old decoded value merge could keep only one side whole.
+ *   - **soft deletion**: `isDeleted` is an ordinary property, NOT a Yjs delete,
+ *     so delete-set union is not what protects it. See that describe block.
+ *   - **cold load**: the persisted `viewBackgroundColor` / `name` and the asset
+ *     references survive a load.
  *
  * Encryption is mocked to identity so the doc bytes round-trip verbatim (the seam
- * under test is the merge/filter/appState carry, not WebCrypto).
+ * under test is the merge and the carry-through, not WebCrypto).
  */
 
 // Identity "encryption" so the stored ciphertext IS the plaintext doc bytes.
@@ -147,13 +151,18 @@ const saveScene = async (
  * Two replicas derived from ONE shared update — the model T021's fold requires
  * and T003 called for.
  *
- * Production never has two independently-created documents racing: the stored
- * doc descends from a live doc (via a save), and every peer's doc descends from
- * the room's INIT/resync seed (T032) or from adopting the stored one (T020). A
- * test that builds each side with `new Scene()` models DISJOINT lineages, which
- * no production path produces — and a CRDT fold across disjoint lineages really
- * is whole-element LWW, so such a test would be measuring a situation that
- * cannot arise.
+ * Under the POST-CUTOVER protocol, two independently-created documents do not
+ * race: the stored doc descends from a live doc (via a save), and every peer's
+ * doc descends from the room's INIT/resync seed (T032) or from adopting the
+ * stored one (T020). A test that builds each side with `new Scene()` models
+ * DISJOINT lineages, and a CRDT fold across those really is whole-element LWW —
+ * so such a test measures a situation this protocol does not produce.
+ *
+ * That premise is SCOPED, not absolute: it holds once the external WS protocol
+ * gate rejects pre-cutover clients and pre-cutover stored shapes. Until that gate
+ * exists an old client could still present a foreign document, so the gate is
+ * what makes this reasoning sound in production — see the T023 rollout
+ * obligation.
  */
 const sharedBase = (elements: readonly SyncableExcalidrawElement[]) => {
   const base = new Scene();
@@ -263,14 +272,11 @@ describe("firebase persistence boundary", () => {
     expect(ids).toEqual(["a", "b", "c"]);
   });
 
-  // The broken fresh-doc `applyUpdateV2` merge resolves a shared element id by a
-  // RANDOM `clientID` tiebreak (a new `clientID` per save), so on any single race
-  // it may coincidentally land the correct element ~half the time. To make these
-  // discriminating cases DETERMINISTICALLY red under the broken merge, each runs
-  // the race RACE_ITERATIONS times on independent rooms and asserts the invariant
-  // EVERY time: the broken merge violates it on at least one iteration with
-  // probability 1 − 2^−RACE_ITERATIONS (≈ 0.9998 at 12). The value merge is
-  // deterministic, so it passes all iterations.
+  // A merge that resolves a shared element id by `clientID` tiebreak can land the
+  // right answer ~half the time on any single race. Each discriminating case
+  // therefore runs the race RACE_ITERATIONS times on independent rooms and
+  // asserts the invariant EVERY time, so a broken merge is red with probability
+  // 1 − 2^−RACE_ITERATIONS (≈ 0.9998 at 12) rather than a coin flip.
   const RACE_ITERATIONS = 12;
 
   it("FINDING #2 (same-element, DIFFERENT properties): both concurrent edits survive", async () => {
@@ -356,87 +362,125 @@ describe("firebase persistence boundary", () => {
     }
   });
 
-  it("FINDING #2 (soft delete, live side): a deletion is not resurrected by a stale stored ALIVE", async () => {
-    for (let i = 0; i < RACE_ITERATIONS; i++) {
-      const room = `del-live-${i}`;
-      const base = sharedBase([rect("e1", { strokeColor: "#000000" })]);
+  /**
+   * Soft deletion across a concurrent save.
+   *
+   * These MUST run with a controlled clock. Deletion markers are stamped from
+   * the element's `updated`, and the harness mocks `getUpdatedTimestamp()` to a
+   * constant `1`; `encryptScene` sweeps with the production cutoff
+   * (`Date.now() - DELETED_ELEMENT_TIMEOUT`), which reclaims a marker of 1
+   * outright. Measured: without this, the stored scene came back EMPTY and the
+   * old assertion ("no live copy of e1") passed because the element was gone
+   * entirely, not because the deletion persisted. Pinning the clock keeps the
+   * tombstone in-window so the assertion is about the merge.
+   */
+  describe("soft deletion across a concurrent save", () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      // Cutoff becomes 0, so the marker of 1 is comfortably in-window.
+      vi.setSystemTime(new Date(DELETED_ELEMENT_TIMEOUT));
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
 
-      // B re-colours e1, never touching its deleted flag.
-      await saveDoc(
-        portalForRoom(room),
-        replicaFrom(base, (scene) =>
-          scene.replaceAllElements(
-            scene
-              .getElementsIncludingDeleted()
-              .map((e) => ({ ...e, strokeColor: "#ff0000" })) as never,
-          ),
-        ),
+    const del = (scene: Scene) =>
+      scene.replaceAllElements(
+        scene
+          .getElementsIncludingDeleted()
+          .map((e) => ({ ...e, isDeleted: true })) as never,
+      );
+    const recolour = (c: string) => (scene: Scene) =>
+      scene.replaceAllElements(
+        scene
+          .getElementsIncludingDeleted()
+          .map((e) => ({ ...e, strokeColor: c })) as never,
       );
 
-      // A, from the SAME base and never having seen B's recolour, deletes it.
-      await saveDoc(
-        portalForRoom(room),
-        replicaFrom(base, (scene) =>
-          scene.replaceAllElements(
-            scene
-              .getElementsIncludingDeleted()
-              .map((e) => ({ ...e, isDeleted: true })) as never,
-          ),
-        ),
-      );
-
+    /** The stored element, which must still EXIST — tombstoned, not reclaimed. */
+    const storedE1 = async (room: string) => {
       const loaded = await loadFromFirebase(room, KEY, null);
-      // The deletion survives. Excalidraw deletes SOFTLY — `isDeleted` is an
-      // ordinary property, not a Yjs delete — so this holds because only one
-      // replica wrote that property, NOT because Yjs unions delete sets.
-      expect(
-        (loaded!.elements as readonly OrderedExcalidrawElement[]).some(
-          (e) => e.id === "e1" && !e.isDeleted,
-        ),
-      ).toBe(false);
-    }
+      return (loaded!.elements as readonly OrderedExcalidrawElement[]).find(
+        (e) => e.id === "e1",
+      );
+    };
+
+    it.each([
+      ["delete saved SECOND", false],
+      ["delete saved FIRST", true],
+    ])(
+      "keeps the deletion when the other replica touched a different property (%s)",
+      async (_label, deleteFirst) => {
+        const room = `soft-del-${deleteFirst}`;
+        const base = sharedBase([rect("e1", { strokeColor: "#000000" })]);
+        const deletion = replicaFrom(base, del);
+        const edit = replicaFrom(base, recolour("#ff0000"));
+
+        for (const update of deleteFirst
+          ? [deletion, edit]
+          : [edit, deletion]) {
+          await saveDoc(portalForRoom(room), update);
+        }
+
+        const e1 = await storedE1(room);
+        // EXISTS and is tombstoned — not merely "no live copy", which a reclaimed
+        // element would also satisfy.
+        expect(e1).toBeDefined();
+        expect(e1!.isDeleted).toBe(true);
+        // ...and the concurrent edit to the other property survived alongside it.
+        expect(e1!.strokeColor).toBe("#ff0000");
+      },
+    );
+
+    /**
+     * The residual GENUINE conflict: both branches write `isDeleted` (one
+     * deletes; the other deletes and then undoes). The contract is NOT a
+     * particular boolean — it is that persistence yields exactly what the live
+     * socket would, so the two replicas cannot disagree with the store.
+     */
+    it.each([
+      ["A then B", false],
+      ["B then A", true],
+    ])(
+      "resolves an explicit isDeleted conflict exactly as the socket does (%s)",
+      async (_label, reverse) => {
+        const room = `soft-del-conflict-${reverse}`;
+        const base = sharedBase([rect("e1", { strokeColor: "#000000" })]);
+
+        const aDeletes = replicaFrom(base, del);
+        const bRevives = replicaFrom(base, (scene) => {
+          del(scene);
+          scene.replaceAllElements(
+            scene
+              .getElementsIncludingDeleted()
+              .map((e) => ({ ...e, isDeleted: false })) as never,
+          );
+        });
+
+        // What the LIVE socket would produce from the same two updates.
+        const expectedDoc = new Y.Doc();
+        Y.applyUpdateV2(expectedDoc, base);
+        for (const u of reverse ? [bRevives, aDeletes] : [aDeletes, bRevives]) {
+          Y.applyUpdateV2(expectedDoc, u);
+        }
+        const expectedScene = new Scene(null, { doc: expectedDoc });
+        const expected = expectedScene
+          .getElementsIncludingDeleted()
+          .find((e) => e.id === "e1")!.isDeleted;
+        expectedScene.destroy();
+
+        for (const u of reverse ? [bRevives, aDeletes] : [aDeletes, bRevives]) {
+          await saveDoc(portalForRoom(room), u);
+        }
+
+        const e1 = await storedE1(room);
+        expect(e1).toBeDefined();
+        expect(e1!.isDeleted ?? false).toBe(expected ?? false);
+      },
+    );
   });
 
-  it("FINDING #2 (soft delete, stored side): a stored deletion the live view never saw is not revived", async () => {
-    for (let i = 0; i < RACE_ITERATIONS; i++) {
-      const room = `del-stored-${i}`;
-      const base = sharedBase([rect("e1", { strokeColor: "#000000" })]);
-
-      // B deletes e1 and commits.
-      await saveDoc(
-        portalForRoom(room),
-        replicaFrom(base, (scene) =>
-          scene.replaceAllElements(
-            scene
-              .getElementsIncludingDeleted()
-              .map((e) => ({ ...e, isDeleted: true })) as never,
-          ),
-        ),
-      );
-
-      // A, from the same base, edits a DIFFERENT property, never having seen the
-      // deletion. Its stale view must not revive the element.
-      await saveDoc(
-        portalForRoom(room),
-        replicaFrom(base, (scene) =>
-          scene.replaceAllElements(
-            scene
-              .getElementsIncludingDeleted()
-              .map((e) => ({ ...e, strokeColor: "#00ff00" })) as never,
-          ),
-        ),
-      );
-
-      const loaded = await loadFromFirebase(room, KEY, null);
-      expect(
-        (loaded!.elements as readonly OrderedExcalidrawElement[]).some(
-          (e) => e.id === "e1" && !e.isDeleted,
-        ),
-      ).toBe(false);
-    }
-  });
-
-  it("FINDING #1: a deleted image's binary is NOT persisted", async () => {
+  it("a deleted image's asset REFERENCE is not persisted", async () => {
     const live = imageEl("live", "f-live");
     const deleted = imageEl("deleted", "f-deleted");
     (deleted as unknown as { isDeleted: boolean }).isDeleted = true;
@@ -473,18 +517,14 @@ describe("firebase persistence boundary", () => {
   });
 
   /**
-   * INV-PERSIST-MERGE (T003) — PARTIAL.
+   * INV-PERSIST-MERGE (T003) — the LIVE gate.
    *
-   * These exercise the CURRENT flattened save boundary: `saveToFirebase` takes a
-   * plain element array, so by the time it is called the information needed to
-   * tell "B intentionally reset x" from "B never saw A's x" is already gone.
-   * They reproduce the resulting loss; they are NOT the final gate.
-   *
-   * The final gate needs two real Scenes derived from ONE shared update, whose
-   * lineage-bearing updates are persisted — which requires the post-T021
-   * boundary. That API does not exist yet and is not invented here.
+   * The save boundary takes the scene's own document (T021), so both sides of a
+   * concurrent save carry lineage and the merge is a real CRDT fold. These are
+   * the properties that fold must have; the "different properties both survive"
+   * case lives with the FINDING #2 group above.
    */
-  describe("INV-PERSIST-MERGE (current boundary)", () => {
+  describe("INV-PERSIST-MERGE", () => {
     /** Lineage-sensitive: the stored CRDT bytes, not the decoded values. */
     const storedFingerprint = (room: string) => {
       const data = store.get(`${room}`) as
@@ -501,101 +541,72 @@ describe("firebase persistence boundary", () => {
       return JSON.stringify(sv);
     };
 
-    // SKIPPED — desired contract, currently fails: measured, A's x=100 is lost
-    // (stored x=0 y=200). Cause is `mergeStoredElements` (firebase.ts:191),
-    // "both alive: whole-element LWW, saving replica wins", followed by a
-    // `buildSnapshotDoc` rebuild. Not rewritten to assert the loss.
-    it.skip("a concurrent edit to a DIFFERENT property of the same element survives", async () => {
-      const room = "persist-merge";
-      await saveScene(
-        portalForRoom(room),
-        [rect("e1", { x: 0, y: 0 })],
-        appStateWith({}),
-        {},
+    const storedElements = async (room: string) =>
+      (
+        (await loadFromFirebase(room, KEY, null))!
+          .elements as readonly OrderedExcalidrawElement[]
+      )
+        .map((e) => `${e.id}:${e.x}:${e.y}:${e.isDeleted ?? false}`)
+        .sort();
+
+    it("is ORDER-INDEPENDENT — A then B stores the same as B then A", async () => {
+      const base = sharedBase([rect("e1", { x: 0, y: 0 })]);
+      // The SAME two updates, replayed in both orders. Reusing the identical
+      // bytes is the point: a difference in the result would then be the merge's
+      // doing and nothing else.
+      const a = replicaFrom(base, (scene) =>
+        scene.replaceAllElements(
+          scene
+            .getElementsIncludingDeleted()
+            .map((e) => ({ ...e, x: 100 })) as never,
+        ),
       );
-      await saveScene(
-        portalForRoom(room),
-        [rect("e1", { x: 100, y: 0 })],
-        appStateWith({}),
-        {},
-      );
-      await saveScene(
-        portalForRoom(room),
-        [rect("e1", { x: 0, y: 200 })],
-        appStateWith({}),
-        {},
+      const b = replicaFrom(base, (scene) =>
+        scene.replaceAllElements(
+          scene
+            .getElementsIncludingDeleted()
+            .map((e) => ({ ...e, y: 200 })) as never,
+        ),
       );
 
-      const loaded = await loadFromFirebase(room, KEY, null);
-      const e1 = (loaded!.elements as readonly OrderedExcalidrawElement[]).find(
-        (e) => e.id === "e1",
+      await saveDoc(portalForRoom("order-ab"), a);
+      await saveDoc(portalForRoom("order-ab"), b);
+
+      await saveDoc(portalForRoom("order-ba"), b);
+      await saveDoc(portalForRoom("order-ba"), a);
+
+      // Semantic result AND stored CRDT state must match: converging on the same
+      // decoded values while holding different histories would diverge later.
+      expect(await storedElements("order-ab")).toEqual(
+        await storedElements("order-ba"),
       );
-      expect(e1).toBeDefined();
-      expect(e1!.x).toBe(100);
-      expect(e1!.y).toBe(200);
+      expect(storedFingerprint("order-ab")).toBe(storedFingerprint("order-ba"));
+
+      // GUARD (non-vacuity): both edits are actually present, so this is not two
+      // empty stores agreeing.
+      expect(await storedElements("order-ab")).toEqual(["e1:100:200:false"]);
     });
 
-    // SKIPPED — desired contract. Order-independence is what makes the invariant
-    // non-vacuous, so it is asserted rather than deferred on the grounds that it
-    // obviously fails.
-    it.skip("is ORDER-INDEPENDENT — A then B stores the same as B then A", async () => {
-      const seed = [rect("e1", { x: 0, y: 0 })];
-      const A = [rect("e1", { x: 100, y: 0 })];
-      const B = [rect("e1", { x: 0, y: 200 })];
+    it("is IDEMPOTENT in the stored CRDT state, not just in decoded values", async () => {
+      const base = sharedBase([rect("e1", { x: 0, y: 0 })]);
+      const update = replicaFrom(base, (scene) =>
+        scene.replaceAllElements(
+          scene
+            .getElementsIncludingDeleted()
+            .map((e) => ({ ...e, x: 42 })) as never,
+        ),
+      );
 
-      await saveScene(portalForRoom("order-ab"), seed, appStateWith({}), {});
-      await saveScene(portalForRoom("order-ab"), A, appStateWith({}), {});
-      await saveScene(portalForRoom("order-ab"), B, appStateWith({}), {});
+      // Distinct portals so the save-skip token cache cannot be what makes the
+      // second save a no-op — the CRDT has to be.
+      await saveDoc(portalForRoom("idem"), update);
+      const first = storedFingerprint("idem");
+      expect(first).not.toBeNull();
 
-      await saveScene(portalForRoom("order-ba"), seed, appStateWith({}), {});
-      await saveScene(portalForRoom("order-ba"), B, appStateWith({}), {});
-      await saveScene(portalForRoom("order-ba"), A, appStateWith({}), {});
+      await saveDoc(portalForRoom("idem"), update);
 
-      const semantic = async (room: string) => {
-        const l = await loadFromFirebase(room, KEY, null);
-        return (l!.elements as readonly OrderedExcalidrawElement[])
-          .map((e) => `${e.id}:${e.x},${e.y}`)
-          .sort();
-      };
-
-      expect(await semantic("order-ab")).toEqual(await semantic("order-ba"));
-    });
-
-    // SKIPPED — desired contract. The earlier version of this compared decoded
-    // id/x/y/isDeleted only and PASSED, which was vacuous for lineage:
-    // `buildSnapshotDoc` mints a fresh `clientID` on every save, so the stored
-    // CRDT state changes underneath while the semantic values stay identical.
-    it.skip("is IDEMPOTENT in the stored CRDT state, not just in decoded values", async () => {
-      const room = "persist-idempotent-lineage";
-      const elements = [rect("e1", { x: 42, y: 7 })];
-
-      await saveScene(portalForRoom(room), elements, appStateWith({}), {});
-      const first = storedFingerprint(room);
-      await saveScene(portalForRoom(room), elements, appStateWith({}), {});
-      const second = storedFingerprint(room);
-
-      expect(first).not.toBeNull(); // guard: something was stored
-      expect(second).toBe(first);
-    });
-
-    it("semantic values are stable across an identical re-save", async () => {
-      // The weaker property that DOES hold today, kept so the skipped lineage
-      // case above is not the only coverage of re-saving.
-      const room = "persist-idempotent-semantic";
-      const elements = [rect("e1", { x: 42, y: 7 })];
-
-      await saveScene(portalForRoom(room), elements, appStateWith({}), {});
-      const first = await loadFromFirebase(room, KEY, null);
-      await saveScene(portalForRoom(room), elements, appStateWith({}), {});
-      const second = await loadFromFirebase(room, KEY, null);
-
-      const shape = (r: typeof first) =>
-        (r!.elements as readonly OrderedExcalidrawElement[])
-          .map((e) => `${e.id}:${e.x},${e.y},${e.isDeleted}`)
-          .sort();
-
-      expect(shape(first)).toEqual(["e1:42,7,false"]); // guard: it saved
-      expect(shape(second)).toEqual(shape(first));
+      expect(storedFingerprint("idem")).toBe(first);
+      expect(await storedElements("idem")).toEqual(["e1:42:0:false"]);
     });
   });
 

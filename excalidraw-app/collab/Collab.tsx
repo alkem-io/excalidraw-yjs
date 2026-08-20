@@ -3,7 +3,7 @@ import {
   zoomToFitBounds,
 } from "@excalidraw-yjs/excalidraw";
 import { ErrorDialog } from "@excalidraw-yjs/excalidraw/components/ErrorDialog";
-import { APP_NAME, cloneJSON, EVENT, randomId } from "@excalidraw-yjs/common";
+import { APP_NAME, EVENT, randomId } from "@excalidraw-yjs/common";
 import {
   IDLE_THRESHOLD,
   ACTIVE_THRESHOLD,
@@ -86,11 +86,7 @@ import { resetBrowserStateVersions } from "../data/tabSync";
 import { collabErrorIndicatorAtom } from "./CollabError";
 import Portal from "./Portal";
 
-import type {
-  SocketUpdateData,
-  SocketUpdateDataSource,
-  SyncableExcalidrawElement,
-} from "../data";
+import type { SocketUpdateData, SocketUpdateDataSource } from "../data";
 
 export const collabAPIAtom = atom<CollabAPI | null>(null);
 export const isCollaboratingAtom = atom(false);
@@ -369,7 +365,7 @@ class Collab extends PureComponent<CollabProps, CollabState> {
     ) {
       // this won't run in time if user decides to leave the site, but
       //  the purpose is to run in immediately after user decides to stay
-      this.saveCollabRoomToFirebase(syncableElements);
+      this.saveCollabRoomToFirebase();
 
       if (import.meta.env.VITE_APP_DISABLE_PREVENT_UNLOAD !== "true") {
         preventUnload(event);
@@ -381,10 +377,7 @@ class Collab extends PureComponent<CollabProps, CollabState> {
     }
   });
 
-  saveCollabRoomToFirebase = async (
-    syncableElements: readonly SyncableExcalidrawElement[],
-  ) => {
-    syncableElements = cloneJSON(syncableElements);
+  saveCollabRoomToFirebase = async () => {
     // Captured BEFORE the await, alongside the state being saved: anything that
     // changes the doc while the save is in flight — a peer edit, or a whole
     // generation swap — replaces the live token, so the scene correctly stays
@@ -437,11 +430,7 @@ class Collab extends PureComponent<CollabProps, CollabState> {
     this.loadImageFiles.cancel();
     this.resetErrorIndicator(true);
 
-    this.saveCollabRoomToFirebase(
-      getSyncableElements(
-        this.excalidrawAPI.getSceneElementsIncludingDeleted(),
-      ),
-    );
+    this.saveCollabRoomToFirebase();
 
     if (this.portal.socket && this.fallbackInitializationHandler) {
       this.portal.socket.off(
@@ -650,7 +639,7 @@ class Collab extends PureComponent<CollabProps, CollabState> {
         captureUpdate: CaptureUpdateAction.NEVER,
       });
 
-      this.saveCollabRoomToFirebase(getSyncableElements(elements));
+      this.saveCollabRoomToFirebase();
     }
 
     // Subscribe to local logical updates and broadcast them to the room.
@@ -1130,11 +1119,7 @@ class Collab extends PureComponent<CollabProps, CollabState> {
   queueSaveToFirebase = throttle(
     () => {
       if (this.portal.socketInitialized) {
-        this.saveCollabRoomToFirebase(
-          getSyncableElements(
-            this.excalidrawAPI.getSceneElementsIncludingDeleted(),
-          ),
-        );
+        this.saveCollabRoomToFirebase();
       }
     },
     SYNC_FULL_SCENE_INTERVAL_MS,

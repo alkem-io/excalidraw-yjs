@@ -360,8 +360,8 @@ export const saveToFirebase = async (
   // (T032) and a cold load adopts the stored one (T020), the two share lineage —
   // so the fold is the correct merge and the value merge is now the lossy one,
   // able only to take one side's whole element when the two edited different
-  // properties of it. Yjs unions delete sets, so deletions still survive from
-  // either side and nothing is resurrected.
+  // properties of it. How SOFT deletion behaves under the fold is set out on
+  // `encryptScene` — it is not delete-set union, and the difference matters.
   const storedScene = await runTransaction(firestore, async (transaction) => {
     const snapshot = await transaction.get(docRef);
 
