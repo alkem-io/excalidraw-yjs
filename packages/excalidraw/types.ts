@@ -672,7 +672,17 @@ export type AssetPublishReport = {
 };
 
 export interface AssetAdapter {
-  /** Persist the bytes and return an opaque locator for them. */
+  /**
+   * Persist the bytes and return an opaque locator for them.
+   *
+   * **`store` MUST settle.** `flushAssetPublication` waits for it indefinitely
+   * by design — it has no timeout, because a timeout here would either abandon
+   * bytes the host still holds or lie about a locator that never committed.
+   * The host owns the network call and is the only party that knows what a
+   * reasonable bound is, so **the host must bound it** (an `AbortController`, a
+   * `Promise.race`, whatever fits) and reject on expiry. A `store` that hangs
+   * hangs every caller awaiting the flush, including a save or close path.
+   */
   store: (file: BinaryFileData) => Promise<string>;
   /** Retrieve the bytes a locator refers to. */
   resolve: (fileId: FileId, locator: string) => Promise<BinaryFileData>;

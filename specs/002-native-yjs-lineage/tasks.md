@@ -304,7 +304,7 @@ T030's precondition is now specifically collab-unification's clean-close correct
 
   **Done and live**: locator validation on every write and on EVERY encode (full state and delta); `AssetAdapter` on `ExcalidrawProps`, forwarded through the `Excalidraw` wrapper; persistence and the wire carry locators; orphan references reclaimed by `collectGarbage`; cold load adopts the stored document (T020).
 
-  **Live blocker — ONE, outside this repo**: `client-web` must supply an `AssetAdapter` and delete its `dataURL`-on-upload-failure fallback (`useWhiteboardFilesManager.getUploadedFiles`, which on upload failure keeps the file with its `dataURL` so peers "receive the dataURL directly"). That fallback writes bytes into a document that rejects them.
+  **Historical — the blocker as it stood, now RESOLVED (see the closure note above):** `client-web` must supply an `AssetAdapter` and delete its `dataURL`-on-upload-failure fallback (`useWhiteboardFilesManager.getUploadedFiles`, which on upload failure keeps the file with its `dataURL` so peers "receive the dataURL directly"). That fallback writes bytes into a document that rejects them.
 
   **No protocol/version gate is required.** The byte-carrying document shape was never shipped, so there is no mixed population, no stale client and no compatibility boundary to negotiate. No `documentSchemaVersion`, no join payload field, no rejection path.
 
@@ -338,7 +338,7 @@ T030's precondition is now specifically collab-unification's clean-close correct
     **The workflow is unchanged, and stays that way.** A checkout change (`ref: github.event.pull_request.head.sha`) was tried in `5176911` and reverted in `090d9d29`; **do not retry it**. Historical note, not part of the rule above: across three consecutive runs the emitted identifier tracked the checked-out HEAD — merge SHAs before the change (`93fbaf2`, `5cd6030`), the head SHA with it (`5176911`), a merge SHA after the revert (`d29ee95`). That is recorded as evidence only. The active contract does not depend on any theory of how the identifier is derived: read the emitted URL.
 
   - **The locator needs no URL parsing.** `FileUploader.upload` reads only `uploadFileOnStorageBucket.url`, but the mutation returns `StorageBucketUploadFileResult { id, url }` — the server's document-row id is already available ATOMICALLY alongside the URL and is currently discarded. `store()` can return an opaque row id with no extra round-trip.
-  - **The exact behaviour to delete** is `useWhiteboardFilesManager`'s `getUploadedFiles`: when `convertLocalFileToRemote` fails it keeps `{...files[id]}` if a `dataURL` is present, so peers "receive the dataURL directly" — writing bytes into a document that rejects them.
+  - **The behaviour that WAS deleted** (kept for the record — the module no longer exists): `useWhiteboardFilesManager`'s `getUploadedFiles`: when `convertLocalFileToRemote` fails it keeps `{...files[id]}` if a `dataURL` is present, so peers "receive the dataURL directly" — writing bytes into a document that rejects them.
   - **Live transport**, reference only: a raw WebSocket per document, `/collab/<documentId>?type=memo|whiteboard`, server sending SyncStep1 after admission. No `join-room`.
 
 - [x] T025b **(DONE — landed with T032; see that entry)** The explicit maintenance call sits immediately before the real INIT/resync encode, and the encoder is PURE. No scheduler, no timer.
@@ -471,6 +471,20 @@ T030's precondition is now specifically collab-unification's clean-close correct
   - **T022 deferred "INV-ORIGIN as a table-driven suite" to that non-existent T010**, so the invariant's actual claim — _adding an origin without a declared policy fails the suite_ — was uncovered. The existing case-by-case tests stay green when a fourth origin appears.
 
   **Closed by `Scene.originPolicyTable.test.ts`** (7): the closed set is enumerated from the module itself and each origin's publish/undo behaviour is asserted against a declared policy. Non-vacuous — adding a `SNEAKY_ORIGIN` export with no policy fails it twice; removing it is clean again. The undo case asserts on the reverted VALUE rather than `undoElements()`'s return, because an untracked write leaves undo free to revert an earlier step, which would prove nothing.
+
+  **UNPAUSED and RUN (2026-08-20)** once collab-unification's clean-close corrective landed. Scope of this pass, stated so the gate is not read as broader than it was: **the integration-facing surface** — every claim this repo makes about its consumers, and every contract it exposes to them, rechecked against the landed `client-web` and `server`. Not a line-by-line audit of all 306 changed source files; the mutation campaigns and the peer's incremental reviews covered the internals.
+
+  **THREE FINDINGS. T030 does NOT close on this pass.**
+
+  **F1 — an unbounded await chain makes a whiteboard un-closeable on a hung upload.** Measured across both repos: `CrdWhiteboardDialog` does `await excalidrawAPI.flushAssetPublication()` on close with no bound; `flushAssetPublication` waits on `adapter.store` with no bound (by design); the client's `store` awaits an Apollo `uploadFile` mutation with **no timeout, no `AbortController`, no `Promise.race`** — grepped, zero occurrences. So a stalled upload hangs the close path with no way out for the user.
+
+  Not a fork defect to fix in code — a timeout inside `flushAssetPublication` would either abandon bytes the host still holds or report success for a locator that never committed, and the host owns the network call. But the fork's contract _invited_ the unbounded await without saying so, which is the part that is mine: **`AssetAdapter.store` and `flushAssetPublication` now state that `store` MUST settle and that bounding it is the host's job.** The client-side bound is routed to that owner.
+
+  **F2 — T023's own entry contradicted itself**, the same drift as T027's four-places problem. Its closure note recorded the `dataURL` fallback as gone while two older paragraphs still called it a "live blocker" and instructed its deletion, naming a module that no longer exists. Relabelled as historical record rather than instruction.
+
+  **F3 — the cold-load adoption path has NO consumer.** `encodedScene` appears **zero** times in `client-web`; both wrappers pass `initialData` that is "just the empty tool defaults — NO content elements/files/appState" and take content over the provider's sync instead. `EncodedSceneDocument` / T020 / INV-COLD-LOAD-LINEAGE are shipped, gated and unused. Not a defect, and it strengthens T027's closure rather than weakening it — but "shipped and unused" must not be read as "shipped and load-bearing", so it is recorded. Worth revisiting only if a host ever owns whiteboard persistence directly.
+
+  **Verified still true**, so they are not silently assumed: `EncodedSceneDocument.format` is the literal `"v2"`; `assetAdapter` is forwarded through the `Excalidraw` wrapper and reaches the client; `flushAssetPublication` is on the imperative API and the client consumes it exactly as documented — awaiting it BEFORE teardown and treating a non-empty `failed` as "do not report a clean close"; the transport claim "no `join-room`" still holds (zero occurrences).
 
   **FIRST PASS RUN (2026-08-20), on what a fresh review checks before anything else: are the gates actually running?**
 

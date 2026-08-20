@@ -4981,6 +4981,14 @@ class App extends React.Component<AppProps, AppState> {
    *
    * Deliberately NOT a queue: no backoff, no autonomous retry, no ordering
    * guarantees. Retry is the host calling this again.
+   *
+   * **And deliberately NOT bounded.** This waits for `adapter.store` as long as
+   * it takes. A timeout here would either abandon bytes the host still holds or
+   * report success for a locator that never committed, and this method exists
+   * precisely so a host can trust its own save. The corollary is the host's:
+   * `store` must settle (see {@link AssetAdapter.store}) — an unbounded `store`
+   * makes an awaited flush unbounded too, so a save or close path awaiting it
+   * hangs with no way out.
    */
   public flushAssetPublication = async (): Promise<AssetPublishReport> => {
     // Snapshot the promises a BACKGROUND pass already started, before kicking
