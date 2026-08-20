@@ -267,6 +267,46 @@
   adjudication that they are corrected recordings rather than an artefact the
   no-write rule could have caused.
 
+  **THE PHANTOM, ATTRIBUTED — and it names the minimal correction.**
+  (Instrumented run; experiment applied and REVERTED, nothing implemented.)
+
+  *Wording corrected first*: `captureUpdate: NEVER` means "not durable/undoable",
+  NOT "no Store-visible increment". The phantom conclusion rests on **3
+  increments for 2 explicit `updateScene` calls**, not on `NEVER` itself.
+
+  *Which increment is extra*: not the trailing one — the **leading** one. The
+  three carry `x = 0, 100, 200`; the test expects only the last two. The extra is
+  emitted for the element's CREATION state.
+
+  *Its cause, from the per-write log*: three `replaceAllElements` writes occur,
+  and the bump fires on the FIRST —
+  `writes=1, prevMetaVersion=2, incomingVersion=2 → chosen 3`. That is a **TIE,
+  not a regression**. Element creation is a two-phase write (structural add then
+  reveal, `materializeNewEntry`), so meta is already stamped at 2 when the same
+  logical write re-presents a version-2 record. The `<=` rule reads that benign
+  re-presentation as staleness and manufactures an advance, which the Store then
+  observes as a second change for ONE logical creation. The other two writes
+  (`2→4`, `4→5`) carry advancing versions and never trigger it.
+
+  *Minimal correction, measured*: fire only on a **STRICT regression**
+  (`incoming < prev`), never on a tie.
+
+  | mechanism | failing pairs | snapshot | cascade | semantic | fixes anchor |
+  |---|---|---|---|---|---|
+  | blanket `max` | 70 | — | — | — | — |
+  | content-gated `<=` (pre-no-write) | 61 | 59 | 13 | 3 | yes |
+  | content-gated `<=` (post-no-write) | 65 | 49 | 13 | 3 | yes |
+  | content-gated **strict `<`** | **44** | **29** | **13** | **2** | **yes** |
+
+  **The phantom is GONE under strict `<`**, and the anchoring
+  INV-VERSION-MONOTONIC case still passes. Causality is isolated by the pair:
+  `<=` produces it, `<` does not, and the write log shows the bump firing exactly
+  on the creation-time tie.
+
+  Remaining semantic failures: `textWysiwyg` container-wrap and `reappearReveal`'s
+  STORE case — still unattributed, and 13 of the 44 are the known contextmenu
+  cascade.
+
   **Proposed boundary, NOT implemented pending review**: `meta.version` stays the
   exact ordered per-element counter that history/delta require, and advances iff
   the element's doc content changed — which is what makes it a faithful change
