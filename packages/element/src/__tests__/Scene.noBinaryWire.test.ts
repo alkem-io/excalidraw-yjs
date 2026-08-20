@@ -228,26 +228,57 @@ describe("INV-NO-BINARY-WIRE", () => {
     probe.destroy();
   });
 
-  it("a poisoned root cannot be FULL-STATE encoded, but a delta still can", () => {
-    const victim = new Scene();
-    victim.replaceAllElements([mk("a")]);
-    const clean = victim.encodeStateVector();
+  it("a poisoned root refuses BOTH a full encode and a DELTA", () => {
+    // The delta is the propagation path: the poisoned struct is not echoed
+    // incrementally, but it IS included in a delta computed against a peer that
+    // does not have it yet. Gating only the full encode would let the retired
+    // shape reach a clean replica.
+    const a = new Scene();
+    a.replaceAllElements([mk("shared")]);
+
+    // B genuinely lags A, so the encode below is a real delta, not full state.
+    const b = new Scene(undefined, { doc: new Y.Doc() });
+    b.applyRemoteUpdate(a.encodeStateAsUpdate());
+    a.replaceAllElements([mk("shared"), mk("later")]);
+    const bVector = b.encodeStateVector();
 
     const hostile = new Y.Doc();
     hostile.transact(() => {
       hostile.getMap("files").set("f1", "data:image/png;base64,AAAA");
     });
-    victim.applyRemoteUpdate(Y.encodeStateAsUpdate(hostile));
+    a.applyRemoteUpdate(Y.encodeStateAsUpdate(hostile));
 
-    // a checkpoint / INIT seed / resync refuses
-    expect(() => victim.encodeStateAsUpdate()).toThrow(/data URL/);
-    expect(() => victim.encodeStateAsUpdate("v2")).toThrow(/data URL/);
+    expect(() => a.encodeStateAsUpdate()).toThrow(/data URL/);
+    expect(() => a.encodeStateAsUpdate("v1", bVector)).toThrow(/data URL/);
+    expect(() => a.encodeStateAsUpdate("v2", bVector)).toThrow(/data URL/);
 
-    // an incremental delta is not gated — it carries only what a peer lacks,
-    // and gating it would put the cost on the hot path for no added protection.
-    expect(() => victim.encodeStateAsUpdate("v1", clean)).not.toThrow();
-
-    victim.destroy();
+    a.destroy();
+    b.destroy();
     hostile.destroy();
+  });
+
+  it("a CLEAN divergent pair still exchanges deltas and converges", () => {
+    // Non-vacuity: the guard must not be refusing everything.
+    const a = new Scene();
+    a.replaceAllElements([mk("a1")]);
+    const b = new Scene(undefined, { doc: new Y.Doc() });
+    b.applyRemoteUpdate(a.encodeStateAsUpdate());
+
+    a.replaceAllElements([mk("a1"), mk("a2")]);
+    a.setAssetLocators({ f1: "asset://f1" });
+
+    const delta = a.encodeStateAsUpdate("v1", b.encodeStateVector());
+    b.applyRemoteUpdate(delta);
+
+    expect(
+      b
+        .getElementsIncludingDeleted()
+        .map((e) => e.id)
+        .sort(),
+    ).toEqual(["a1", "a2"]);
+    expect(b.getAssetLocators()).toEqual({ f1: "asset://f1" });
+
+    a.destroy();
+    b.destroy();
   });
 });

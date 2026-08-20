@@ -1577,17 +1577,16 @@ export class Scene {
     format: "v1" | "v2" = "v1",
     targetStateVector?: Uint8Array,
   ): Uint8Array {
-    if (!targetStateVector) {
-      // FULL STATE — a checkpoint, an INIT seed or a resync. Refuse to serialize
-      // an asset root a peer has poisoned: doing so would make one client's
-      // injection permanent for everyone who loads the result afterwards. This
-      // is prevention, NOT recovery — a poisoned generation cannot checkpoint or
-      // resync, and discarding it is the transport's job (T027).
-      //
-      // A delta (with a target vector) is deliberately not checked: it carries
-      // only what the peer lacks, and the cost belongs on the rarer full encode.
-      this.assertAssetRootValid();
-    }
+    // EVERY encode, delta included. A delta is not safer than a full encode —
+    // it is the propagation mechanism: a poisoned asset struct integrated from
+    // one peer is not echoed incrementally (remote applies are filtered), but it
+    // IS included in a delta computed against a peer that lacks it. Skipping the
+    // check here would let the retired shape spread to a clean replica.
+    //
+    // Refusing is prevention, not repair: a generation that has integrated a
+    // malformed update cannot sync at all and must be discarded (T027).
+    this.assertAssetRootValid();
+
     return format === "v2"
       ? Y.encodeStateAsUpdateV2(this.doc, targetStateVector)
       : Y.encodeStateAsUpdate(this.doc, targetStateVector);
