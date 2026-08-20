@@ -176,6 +176,45 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
     `actionFlip`. These are where a helper writes to the doc mid-`perform` and
     the action then returns an array that may not carry that write.
 
+  **THE PROPOSED RED DOES NOT REPRODUCE — T016j's causality is FALSIFIED on
+  current HEAD.** (Measured; experiment reverted, only the new order pin kept.)
+
+  The plan was: remove the `wrapTextInContainer` post-helper re-read, watch the
+  action produce a tied/wrong z-order, then show a base-diff apply fixes it.
+  Measured instead:
+  - **Removing that re-read breaks NOTHING** — full suite 140 files / 1589
+    passed with it deleted.
+  - **A new n=3 order pin passes with AND without it**: container directly below
+    its text, locally and at a linked peer, identical id order on both.
+  - **Why**, probed directly at the re-read site: for every element already in
+    the doc, the live version is byte-identical to the entry in
+    `updatedElements` (`differs: false`) — INCLUDING its `index`. The new
+    container is not yet in the doc, so the `?? element` fallback preserves it.
+    The re-read swaps objects for equal-valued ones: a semantic NO-OP.
+
+  So the specific mechanism T016j recorded — "the freshMap re-read restores the
+  text's OLD doc index and creates the tie, which authoritative
+  `replaceAllElements` then repairs" — is **not observable here**.
+  `syncMovedIndices`' index is already in the doc by the time the re-read runs,
+  so re-reading returns that same index. Whatever produced the earlier
+  attribution, it does not reproduce against HEAD after T014b / T016k / FR-009.
+
+  **Kept**: the n=3 order pin (`actionAtomicity.test.tsx`) — container directly
+  below its text locally and at a peer, with guards that the action ran, a
+  container was created and the peer was linked. It passes today; it is a real
+  regression gate for whatever mechanism eventually lands.
+
+  **Not done, deliberately**: no `syncActionResult` signature change and no
+  `applyElementChanges` routing. Wiring a base-diff path needs a case where the
+  authoritative apply demonstrably loses something, and this case does not lose
+  anything — building the consumer on a non-reproducing RED would be exactly the
+  unconsumed-API trap that stopped T015.
+
+  **Standing obligation, recorded**: when a real production consumer for
+  `applyElementChanges` does land, `commitPlan`'s hard-removal tombstone
+  reservation must return with a property driven through
+  `syncActionResult`/`applyElementChanges` — not restored by symmetry.
+
   **T015 is HELD, not started** — declaring intent sets in those three helpers
   would create a SECOND unconsumed API, the same trap as the `commitPlan`
   reservation. The textWysiwyg `+7` proves stale full writes happen; it does not

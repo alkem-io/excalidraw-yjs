@@ -108,4 +108,91 @@ describe("one action, one logical mutation", () => {
     detachPeer();
     peer.destroy();
   });
+
+  /**
+   * T016b — the ORDER the action intends must survive the boundary.
+   *
+   * `pushContainerBelowText` runs `syncMovedIndices`, which mints DISTINCT
+   * indices placing the new container immediately below its text. The action
+   * then re-reads every element from the live doc, which restores the text's OLD
+   * doc index and ties it against the fresh container. Today's authoritative
+   * `replaceAllElements` repairs that tie on the way in, which is exactly why
+   * the re-read looks harmless — but the repair is a global re-index, not the
+   * action's intent, and with a third element present the result is the wrong
+   * z-order.
+   *
+   * n = 3 on purpose: with only the pair there is nothing for a repaired tie to
+   * be ordered WRONG against.
+   */
+  it("keeps the container directly below its text, locally and at a peer", async () => {
+    await render(<Excalidraw handleKeyboardGlobally />);
+
+    const below = API.createElement({
+      type: "rectangle",
+      id: "below",
+      x: 0,
+      y: 0,
+    });
+    const text = API.createElement({
+      type: "text",
+      id: "text-1",
+      text: "hello",
+      x: 0,
+      y: 0,
+    });
+    const above = API.createElement({
+      type: "rectangle",
+      id: "above",
+      x: 0,
+      y: 0,
+    });
+    API.setElements([below, text, above]);
+    API.setSelectedElements([text]);
+
+    const peerDoc = new Y.Doc();
+    const peer = new Scene(undefined, { doc: peerDoc });
+    peer.applyRemoteUpdate(h.scene.encodeStateAsUpdate());
+
+    const senderUpdates: Uint8Array[] = [];
+    const detachSender = h.scene.onDocUpdate((u) => {
+      senderUpdates.push(u);
+      peer.applyRemoteUpdate(u);
+    });
+
+    API.executeAction(actionWrapTextInContainer);
+
+    detachSender();
+
+    const orderOf = (els: readonly ExcalidrawElement[]) => {
+      const textEl = els.find((e) => e.id === "text-1")!;
+      const containerId = (textEl as { containerId?: string | null })
+        .containerId;
+      const ids = els.map((e) => e.id);
+      return {
+        containerId,
+        containerIdx: ids.indexOf(containerId ?? "\u0000none"),
+        textIdx: ids.indexOf("text-1"),
+        ids,
+      };
+    };
+
+    // GUARDS: the action ran, a container was created, and the peer was linked.
+    expect(senderUpdates.length).toBeGreaterThan(0);
+    const local = orderOf(h.elements);
+    expect(local.containerId).toBeTruthy();
+    expect(h.elements.length).toBe(4);
+
+    // The container must sit DIRECTLY below its text — that is what
+    // `pushContainerBelowText` intended.
+    expect(local.containerIdx).toBe(local.textIdx - 1);
+
+    // ...and the peer must agree, since order is carried by the shared indices.
+    const remote = orderOf(
+      peer.getElementsIncludingDeleted() as unknown as readonly ExcalidrawElement[],
+    );
+    expect(remote.containerIdx).toBe(remote.textIdx - 1);
+    expect(remote.ids).toEqual(local.ids);
+
+    peer.destroy();
+  });
 });
