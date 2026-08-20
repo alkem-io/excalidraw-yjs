@@ -65,10 +65,16 @@ export const getSyncableElements = (
 
 /**
  * The fileIds still referenced by a LIVE (non-deleted, initialized) image element
- * in `elements`. This is the privacy gate for the persistence/wire boundary: only
- * a binary that some surviving element actually points at may be shipped/stored.
- * Mirrors `exportToBackend`'s "files-from-live-elements" set so a pasted-then-
- * deleted image's bytes are never leaked through the wire seed or the save.
+ * in `elements`. This is the privacy gate for export: only an asset some
+ * surviving element actually points at may be shipped. Mirrors
+ * `exportToBackend`'s "files-from-live-elements" set so a pasted-then-deleted
+ * image is not carried along.
+ *
+ * NOTE: this is no longer the gate for the collaboration wire or for persistence.
+ * Since T023 the document holds `fileId -> locator` and never bytes, and orphan
+ * references are reclaimed from the document itself by `Scene.collectGarbage`
+ * (run as maintenance before the seed is encoded) rather than filtered out of one
+ * encoding of it.
  */
 export const getReferencedFileIds = (
   elements: readonly OrderedExcalidrawElement[],

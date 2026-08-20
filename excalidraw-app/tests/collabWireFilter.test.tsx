@@ -120,7 +120,7 @@ describe("collaboration wire seed: deleted-content + orphaned-file filtering", (
     expect(filtered["f-deleted"]).toBeUndefined();
   });
 
-  it("FINDING #1: the wire seed excludes a deleted image's file bytes", () => {
+  it("FINDING #1: the wire seed excludes a deleted image's asset reference", () => {
     const live = imageEl("live", "f-live");
     // freshly deleted (within timeout) so the tombstone itself still syncs…
     const deleted = imageEl("deleted", "f-deleted", {

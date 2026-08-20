@@ -376,11 +376,16 @@ export class Scene {
    * recomputed from it by `recomputeFromDoc` on `observeDeep` and then
    * `triggerUpdate()` fires.
    *
-   * Native-Yjs core (M4): files and the persistable appState subset are ALSO on
-   * this doc ({@link yAssets} / {@link yAppState}), so `encodeStateAsUpdateV2(doc)`
-   * is a complete, portable whiteboard snapshot over `getMap("elements")` +
-   * `getMap("files")` + `getMap("appState")` — the format any persistence layer or
-   * collaboration server stores. Persistence is therefore native: create/load/save
+   * Native-Yjs core (M4): ASSET REFERENCES and the persistable appState subset
+   * are ALSO on this doc ({@link yAssets} / {@link yAppState}), so
+   * `encodeStateAsUpdateV2(doc)` is the whole collaborative state over
+   * `getMap("elements")` + `getMap("files")` + `getMap("appState")` — the format
+   * any persistence layer or collaboration server stores.
+   *
+   * It is NOT a self-contained archive. Since T023 the doc carries
+   * `fileId -> locator` and never image bytes, so an encoded doc is portable only
+   * alongside the assets those locators resolve to: archiving means this update
+   * PLUS the asset bytes fetched out of band. Persistence is therefore native: create/load/save
    * encode/decode THIS doc, not element JSON. (Local-only appState — selection /
    * zoom / scroll / active tool — is NEVER on the doc.)
    */
@@ -1731,8 +1736,10 @@ export class Scene {
   // ---------------------------------------------------------------------------
   // files + persistable appState on the doc (native-Yjs core, M4 — persistence)
   //
-  // Image binaries and the persistable appState subset live in THIS doc, so
-  // `encodeStateAsUpdate` over it yields the whole whiteboard. These thin
+  // ASSET REFERENCES (`fileId -> locator`, never bytes — T023) and the
+  // persistable appState subset live in THIS doc, so `encodeStateAsUpdate` over
+  // it yields the whole collaborative state. The image BYTES live in the local
+  // cache and in the host's asset store, reached through the locator. These thin
   // accessors are how the editor reads/writes them; the renderer keeps consuming
   // a plain files object and the plain appState — the doc is just where the
   // durable copy lives and collaborates.
@@ -1786,10 +1793,10 @@ export class Scene {
   }
 
   /**
-   * Reclaim deleted elements and the binaries only they still referenced
+   * Reclaim deleted elements and the asset REFERENCES only they still pointed at
    * (FR-006, INV-BOUNDED). Without this the doc grows monotonically under
    * paste/delete churn, and a full-state encode ships every pasted-then-deleted
-   * element — and its image — to each new joiner.
+   * element — and its locator — to each new joiner.
    *
    * The caller supplies POLICY only (`deletedBefore`, normally
    * `Date.now() - DELETED_ELEMENT_TIMEOUT`); the doc is the single authority on
@@ -1799,11 +1806,15 @@ export class Scene {
    * re-checked against the element's CURRENT state, so an element that was
    * un-deleted is never reclaimed on the strength of a stale marker.
    *
-   * **Files**: a binary is dropped only when NO remaining element references it —
-   * counting live elements AND retained tombstones. A soft-deleted image inside
-   * the grace window is still undoable, so dropping its binary because no *live*
-   * element points at it would restore the element without its image. Files are
-   * therefore reclaimed against what SURVIVES the element sweep.
+   * **Assets**: a LOCATOR is dropped only when NO remaining element references it
+   * — counting live elements AND retained tombstones. A soft-deleted image inside
+   * the grace window is still undoable, so dropping its reference because no
+   * *live* element points at it would restore the element without its image.
+   * References are therefore reclaimed against what SURVIVES the element sweep.
+   *
+   * This removes a REFERENCE from the document; it never deletes bytes. The
+   * bytes live in the host's asset store, whose lifecycle the host owns — this
+   * sweep has no authority over it and must not be read as reclaiming storage.
    *
    * **Origin** is {@link STRUCTURAL_ORIGIN}, in ONE transaction:
    *  - not `LOCAL_ORIGIN` — the `UndoManager` tracks that, so a sweep would enter
@@ -1895,7 +1906,8 @@ export class Scene {
   // ---------------------------------------------------------------------------
   // persistence (native-Yjs core, M4) — the doc IS the persistence unit.
   //
-  // Save = encode THIS doc (elements + files + appState) to Yjs V2 bytes; load =
+  // Save = encode THIS doc (elements + asset references + appState) to Yjs V2
+  // bytes; load =
   // decode bytes into a doc the `Scene` constructor adopts. There is no element
   // JSON: the bytes a `Scene` produces are exactly what the server / collab-
   // service stores (a base64 V2 snapshot over `getMap("elements"/"files"/

@@ -394,8 +394,10 @@ class Collab extends PureComponent<CollabProps, CollabState> {
       // Persistence only — the scene `Y.Doc` is the source of truth and already
       // holds the merged state, so there is nothing to reconcile back in from
       // what Firebase stored. Native-Yjs core (M4): the stored scene document is
-      // the doc encoded to Yjs V2 bytes (elements + files + persistable appState),
-      // not element JSON — so we pass the files through to be encoded into it.
+      // the doc encoded to Yjs V2 bytes (elements + ASSET REFERENCES + persistable
+      // appState), not element JSON. What travels is `fileId -> locator` (T023);
+      // the image bytes never enter the document and are stored by the host's
+      // asset store instead.
       await saveToFirebase(
         this.portal,
         syncableElements,
@@ -713,15 +715,10 @@ class Collab extends PureComponent<CollabProps, CollabState> {
           case WS_SUBTYPES.INIT: {
             if (!this.portal.socketInitialized) {
               this.initializeRoom({ fetchScene: false });
-              // INIT carries a full-scene seed as Yjs bytes; apply it to our doc
-              // and Yjs merges it with whatever we already hold.
-              //
-              // NOTE: the sender builds that seed from the LIVE doc (T032),
-              // which REBUILDS the scene through a throwaway doc rather than encoding
-              // the live one — so the seed does not carry the sender's lineage, and
-              // merging it can resurrect deletions and lose concurrent edits. That is
-              // the known T018 defect; the receive path here is already correct and
-              // needs no change when the sender is fixed.
+              // INIT carries a full-scene seed as Yjs bytes, encoded from the
+              // sender's LIVE doc (T032), so it carries real lineage: applying it
+              // merges per-property with whatever we already hold, and nothing
+              // concurrent is lost or resurrected.
               const update = new Uint8Array(decryptedData.payload.update);
               this.applyRemoteSceneUpdate(update);
               // The doc now holds the merged state — resolve with the current

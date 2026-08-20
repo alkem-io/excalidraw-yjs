@@ -104,10 +104,35 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
   plus a resync of unchanged content teaching an up-to-date peer NOTHING (state
   vector unchanged) and a peer's concurrent edit surviving a resync.
 
-  **Non-vacuity**: restoring the throwaway-doc rebuild fails the lineage pin.
-  Stated honestly — the "keeps a peer's concurrent edit" case does NOT fail that
-  sabotage, because a rebuilt seed still only ADDS elements; the real loss is at
-  property level, so that case is weaker than it reads.
+  **Non-vacuity**: restoring the throwaway-doc rebuild fails the lineage pin AND
+  the property-level pin below.
+
+  **The loss this task exists to prevent is now pinned directly** (added after
+  review; the first attempt did not cover it). Through the production
+  `Collab.encodeSceneAsUpdate`: seed a peer, then have sender and peer edit
+  DIFFERENT properties of the SAME element, then apply the sender's full resync —
+  both must survive. Per-property merge keeps both; whole-element LWW keeps one.
+  The peer's `clientID` is pinned to 1 so the sabotage loses reliably: Yjs
+  assigns random 32-bit client ids, so a rebuilt seed outranks 1 with probability
+  1 − 2⁻³², where an unpinned tie would make the sabotage a coin flip. Verified
+  failing on 3 consecutive sabotage runs and passing when restored.
+
+  **MEASURED — the extra broadcast when maintenance actually removes something**
+  (raised in review; recorded rather than "fixed" speculatively). `collectGarbage`
+  writes under `STRUCTURAL_ORIGIN`, which is published, so a sweep that reclaims
+  anything emits **one** additional local scene update — measured directly
+  (`localUpdateEmits=1` for a sweep that removed a tombstone, 0 sends otherwise).
+  During collaboration that becomes one incremental GC update on the socket,
+  ordered BEFORE the full INIT/UPDATE seed, because maintenance runs
+  synchronously before the encode. So a resync that sweeps is 2 sends, not 1.
+  They commute (the seed already reflects the sweep), so this is redundant
+  traffic, not a correctness problem, and it only occurs when something was
+  actually reclaimed. **Accepted as-is**: suppressing it would mean either a
+  second origin filter or an impure encoder, both worse than the occasional extra
+  message. **Harness limit stated**: the count was measured at the Scene-update
+  boundary, not at `Portal`, because the probe was not in a collaborating
+  session — the socket-level count is inferred from the subscription, not
+  observed.
 
   **MEASURED test-environment artifact, recorded because it bounds what the
   suite proves.** Deletion markers are stamped from the element's `updated`, and
@@ -116,13 +141,12 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
   cutoff reclaims all of them — measured. The tombstone-window case moves the
   cutoff instead of the clock, so the window invariant is covered.
 
-  **Gap since CLOSED**: the production cutoff arithmetic is now pinned separately
-  in `collab.test.tsx` — the wire seed must prune with
-  `Date.now() - DELETED_ELEMENT_TIMEOUT`, and maintenance must run BEFORE the
-  encode. Non-vacuous in both directions: passing `Date.now()` fails it, and so
-  does swapping the order. Between the two files the path is covered — semantics
-  where realistic markers are impossible, arithmetic and ordering where they are
-  not needed.
+  **Contract**: the wire seed prunes with `Date.now() - DELETED_ELEMENT_TIMEOUT`
+  and maintenance runs BEFORE the encode — pinned in `collab.test.tsx` against
+  the production `Collab.encodeSceneAsUpdate`. Non-vacuous in both directions:
+  passing `Date.now()` fails it, and so does swapping the order. Between the two
+  files the path is covered — window semantics where realistic markers are
+  impossible, arithmetic and ordering where they are not needed.
 
 - [x] T019 **(DONE — folded into the T032/T025b slice)** `encodeSyncableSceneAsUpdate` deleted once it had no production caller; Portal INIT and resync both confirmed to ship live state.
 

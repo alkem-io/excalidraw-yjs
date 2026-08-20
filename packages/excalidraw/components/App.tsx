@@ -785,9 +785,11 @@ class App extends React.Component<AppProps, AppState> {
       collectSceneGarbage: this.collectSceneGarbage,
       getSceneContentToken: this.getSceneContentToken,
       getAppState: () => this.state,
-      // Doc-backed (M4): files live on `scene.doc`, so always read them from the
-      // doc (refreshing the cache) — a host calling `getFiles()` sees files added
-      // by a remote peer or restored on load, even between renders. Read-only.
+      // Doc-backed (M4): the doc holds `fileId -> locator` (T023), and the BYTES
+      // live in this local cache, resolved through the asset adapter. Reading
+      // here reflects the doc's current references — a host calling `getFiles()`
+      // sees files added by a remote peer or restored on load, even between
+      // renders — but what it gets back is the cached bytes. Read-only.
       getFiles: () => this.files,
       getName: this.getName,
       registerAction: (action: Action) => {
@@ -3021,9 +3023,11 @@ class App extends React.Component<AppProps, AppState> {
    * Scene and again for every replacement generation, so a swap never leaves the
    * editor observing a destroyed doc.
    *
-   * Files live on `scene.doc`, which is the source of truth. On every scene
-   * update — a local `setFiles`, a remote files apply, a load, undo/redo — refresh
-   * `this.files` from the doc, then render. Both mirrors are strictly READ-ONLY
+   * `scene.doc` is the source of truth for WHICH files the scene has — it holds
+   * `fileId -> locator` and never bytes (T023). The bytes live in `this.files`,
+   * populated from the asset adapter. On every scene update — a local locator
+   * write, a remote apply, a load, undo/redo — reconcile `this.files` against the
+   * doc's references, then render. Both mirrors are strictly READ-ONLY
    * (`getFiles()` / `getPersistedAppState()`): neither may write back to the
    * scene, or the write -> observe -> refresh cycle would loop. Both are ordered
    * before `triggerRender` so the render sees the freshest values.
@@ -3100,8 +3104,10 @@ class App extends React.Component<AppProps, AppState> {
       // A local reset must not touch the shared doc at all — see
       // {@link replaceSceneGeneration}. Clearing it in place would be
       // republished by the next full-state encode and would delete every peer's
-      // elements and image binaries. Swapping generations also makes the file
-      // prune unnecessary: the new doc simply has no binaries to orphan.
+      // elements and asset references. Swapping generations also makes the
+      // reference prune unnecessary: the new doc simply has no locators to
+      // orphan. No image BYTES are affected either way — those live in the local
+      // cache and the host's asset store, not in the doc.
       this.replaceSceneGeneration();
       this.setState((state) => ({
         ...getDefaultAppState(),

@@ -6,7 +6,7 @@ import {
   createRedoAction,
   createUndoAction,
 } from "@excalidraw-yjs/excalidraw/actions/actionHistory";
-import { syncInvalidIndices } from "@excalidraw-yjs/element";
+import { Scene, syncInvalidIndices } from "@excalidraw-yjs/element";
 import { API } from "@excalidraw-yjs/excalidraw/tests/helpers/api";
 import {
   act,
@@ -460,5 +460,66 @@ describe("collaboration", () => {
 
     gcSpy.mockRestore();
     encodeSpy.mockRestore();
+  });
+
+  /**
+   * The loss T032 actually exists to prevent, through the PRODUCTION producer.
+   *
+   * The state-vector no-op case proves lineage identity; it does NOT prove the
+   * outcome that identity buys. The rebuild's real damage is to concurrent
+   * writes to DIFFERENT PROPERTIES of the SAME element: per-property merge keeps
+   * both, whole-element LWW keeps one.
+   *
+   * The peer's `clientID` is pinned to 1 so the sabotage loses reliably. Yjs
+   * assigns random 32-bit client ids, so a rebuilt seed outranks 1 with
+   * probability 1 - 2^-32; without pinning, the outcome would be a coin flip and
+   * the sabotage would only fail some of the time.
+   */
+  it("a resync keeps a peer's concurrent edit to ANOTHER PROPERTY of the same element", async () => {
+    await render(<ExcalidrawApp />);
+
+    const collab = window.collab;
+    const scene = h.app.scene;
+
+    scene.replaceAllElements([
+      API.createElement({ type: "rectangle", id: "shared", x: 10, y: 10 }),
+    ]);
+
+    // A peer seeded from the sender, with a deliberately low clientID.
+    const peerDoc = new Y.Doc();
+    peerDoc.clientID = 1;
+    const peer = new Scene(null, { doc: peerDoc });
+    peer.applyRemoteUpdate(collab.encodeSceneAsUpdate(), "v1");
+    expect(peer.getElementsIncludingDeleted().map((e) => e.id)).toEqual([
+      "shared",
+    ]);
+
+    // Concurrent edits to DIFFERENT properties of the same element. Neither side
+    // has seen the other's.
+    scene.replaceAllElements(
+      scene
+        .getElementsIncludingDeleted()
+        .map((e) => (e.id === "shared" ? { ...e, x: 999 } : e)),
+    );
+    peer.replaceAllElements(
+      peer
+        .getElementsIncludingDeleted()
+        .map((e) => (e.id === "shared" ? { ...e, y: 777 } : e)),
+    );
+
+    // The sender's periodic full resync arrives.
+    peer.applyRemoteUpdate(collab.encodeSceneAsUpdate(), "v1");
+
+    const merged = peer
+      .getElementsIncludingDeleted()
+      .find((e) => e.id === "shared")!;
+
+    // Both survive. A rebuilt seed carries the sender's whole element — including
+    // its STALE y — under a fresh clientID that outranks the peer's, so y reverts
+    // to 10 and the peer's edit is gone with no trace.
+    expect(merged.x).toBe(999);
+    expect(merged.y).toBe(777);
+
+    peer.destroy();
   });
 });
