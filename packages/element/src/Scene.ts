@@ -1843,15 +1843,19 @@ export class Scene {
     // Deliberately UNGUARDED — it throws on a malformed update, and the caller
     // must handle that. A `try/catch` here that logged and continued would be
     // actively harmful, because Yjs apply is NOT atomic on a decode failure:
-    // measured over every truncation offset of a real delta, 10 of 1056 both
-    // threw AND left the doc mutated, all of them near the tail — precisely what
-    // a dropped connection produces. One such case integrated four new elements
-    // while the file, the deletion marker and the property edit from the SAME
-    // logical update never arrived. Swallowing that would continue on a doc that
-    // is partially applied and internally inconsistent, which is worse than
-    // failing loudly. Recovery means discarding this Scene generation and
-    // resyncing, and that belongs to the transport that owns the session — not
-    // to a catch block in the element layer. See T027.
+    // measured over every truncation offset of a real delta, 27 of 2114 both
+    // threw AND left the doc mutated, all of them in the tail — precisely what a
+    // dropped connection produces. Swallowing that would continue on a doc the
+    // caller believes is up to date when it is not.
+    //
+    // Recovery is a state-vector RESYNC, not a discard: the fragment is a valid
+    // PREFIX of the sender's structs, so the doc is incomplete rather than
+    // corrupt, and the CRDT's own catch-up (`SyncStep1` -> `SyncStep2`) repairs
+    // it. Measured: 27 of 27 converge, with local work the authority has not yet
+    // seen preserved — which discarding the generation and re-seeding destroys.
+    // The resync belongs to the transport that owns the session, not to a catch
+    // block in the element layer, and needs no API beyond what is already
+    // exported. See T027 and `wireRecoveryPolicy.test.tsx`.
     if (format === "v2") {
       Y.applyUpdateV2(this.doc, update, REMOTE_ORIGIN);
     } else {
