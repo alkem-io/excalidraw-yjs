@@ -2,10 +2,7 @@
 
 **Status**: IMPLEMENTED. **Spec**: FR-016, FR-017, T014b.
 
-An action's result is applied as a DIFF against the snapshot it was invoked on,
-onto whatever the document holds now. Where the action and a helper it invoked
-wrote the same key, ownership is explicit and unresolved conflicts are rejected
-before any mutation.
+An action's result is applied as a DIFF against the snapshot it was invoked on, onto whatever the document holds now. Where the action and a helper it invoked wrote the same key, ownership is explicit and unresolved conflicts are rejected before any mutation.
 
 ## 0. The API, literally
 
@@ -33,24 +30,11 @@ wouldWriteChange(ymap: Y.Map<unknown>, element: ElementRecord, key: string): boo
 overlapPolicy?   // the ONE production conflict channel; consumed by flip
 ```
 
-**Ambiguity** applies to DERIVED intent only. An explicit `declaredIntent` IS
-the ownership statement: naming a key in `keysById` means the action owns it and
-its canonical value is written, journal or not.
+**Ambiguity** applies to DERIVED intent only. An explicit `declaredIntent` IS the ownership statement: naming a key in `keysById` means the action owns it and its canonical value is written, journal or not.
 
-For derived intent, an ambiguous key is one in `derived ∩ journal` for which
-`wouldWriteChange` is true. Same-valued overlap is not ambiguous. Each must be
-covered by `overlapPolicy`; otherwise the apply THROWS naming every unresolved
-`id.key` and mutates nothing. An unknown choice throws.
+For derived intent, an ambiguous key is one in `derived ∩ journal` for which `wouldWriteChange` is true. Same-valued overlap is not ambiguous. Each must be covered by `overlapPolicy`; otherwise the apply THROWS naming every unresolved `id.key` and mutates nothing. An unknown choice throws.
 
-**Async**: FAIL-CLOSED, enforced not merely documented. `ActionManager` rejects
-an async `ActionResult` carrying `elements` in the promise continuation, before
-any store scheduling or Scene mutation, and surfaces it via `console.error`
-rather than as an unhandled rejection. An async appState-only result is
-unaffected. This path is synchronous-only. `ActionManager` closes both the
-transport boundary and the journal scope before an async result resolves, so
-neither the base nor the journal describes the document it would land on. No
-async `perform` returns `elements` today (audited: zero); any future one must
-supply explicit ownership rather than use this fallback.
+**Async**: FAIL-CLOSED, enforced not merely documented. `ActionManager` rejects an async `ActionResult` carrying `elements` in the promise continuation, before any store scheduling or Scene mutation, and surfaces it via `console.error` rather than as an unhandled rejection. An async appState-only result is unaffected. This path is synchronous-only. `ActionManager` closes both the transport boundary and the journal scope before an async result resolves, so neither the base nor the journal describes the document it would land on. No async `perform` returns `elements` today (audited: zero); any future one must supply explicit ownership rather than use this fallback.
 
 ## 1. The plan shape
 
