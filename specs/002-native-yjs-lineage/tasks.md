@@ -192,12 +192,16 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
     container is not yet in the doc, so the `?? element` fallback preserves it.
     The re-read swaps objects for equal-valued ones: a semantic NO-OP.
 
-  So the specific mechanism T016j recorded — "the freshMap re-read restores the
-  text's OLD doc index and creates the tie, which authoritative
-  `replaceAllElements` then repairs" — is **not observable here**.
-  `syncMovedIndices`' index is already in the doc by the time the re-read runs,
-  so re-reading returns that same index. Whatever produced the earlier
-  attribution, it does not reproduce against HEAD after T014b / T016k / FR-009.
+  So the specific mechanism T016j recorded is **not observable in the scenario
+  built here** — `syncMovedIndices`' index was already in the doc when the
+  re-read ran, so it returned that same index.
+
+  **CORRECTION to that conclusion, from the round-2 census below**: calling
+  T016j "falsified" was OVER-BROAD. Instrumenting every invocation shows
+  `boundText:358` DOES produce a `semantic:index` difference on 3 of its 14
+  reached invocations. The mechanism is real; the scenario constructed here
+  simply did not hit it. What IS true is narrower: no covered assertion observes
+  the consequence — removing that re-read entirely leaves the suite green.
 
   **Kept**: the n=3 order pin (`actionAtomicity.test.tsx`) — container directly
   below its text locally and at a peer, with guards that the action ran, a
@@ -214,6 +218,47 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
   `applyElementChanges` does land, `commitPlan`'s hard-removal tombstone
   reservation must return with a property driven through
   `syncActionResult`/`applyElementChanges` — not restored by symmetry.
+
+  **ROUND-2 CENSUS — every post-helper re-read in the six families, instrumented
+  per invocation** (semantic keys classified separately from
+  `version`/`versionNonce`/`updated`; experiment reverted, suite green at 1589):
+
+  | site | reached | semantic | metadata-only | no-op | removal → RED? |
+  |---|---|---|---|---|---|
+  | `flip:216` | 63 | **27** (`x`,`y`,`x+y`) | 0 | 36 | **YES — 2 real tests** |
+  | `boundText:184` | 25 | 10 (`boundElements`) | 0 | 15 | no |
+  | `boundText:358` | 14 | 3 (`index`) | 0 | 7 (+4 absent) | no |
+  | `props:319` | 9 | 1 (`height`) | 1 | 7 | not tested |
+  | `flip:163` | 63 | 2 (`x`,`y`) | 0 | 61 | not tested |
+  | `props:1107` | 8 | 0 | 0 | 8 | — |
+  | `props:1379` | 8 | 0 | 0 | 8 | — |
+  | `align:83` | **0** | — | — | — | **coverage gap** |
+  | `distribute:77` | **0** | — | — | — | **coverage gap** |
+  | `actionStyles:194` | n/a | — | — | — | already NARROW: copies only `width`/`height` from the fresh container, not a whole-object swap |
+
+  **THE PRODUCTION RED IS `flip:216`.** Removing only that re-read fails two
+  existing action tests with observably wrong results: *"mutliple elements > with
+  bound text flip correctly"* and *"flipping re-centers selection > elbow arrow
+  touches group selection side yet it remains in place after multiple moves"*.
+  Its own comment states the cause precisely — bound texts are repositioned
+  THROUGH THE DOC rather than mutated in place, so the pre-flip
+  `selectedElements` entries are genuinely stale and returning them clobbers the
+  doc's correct post-flip positions. That is the stale-overwrite class, reachable
+  through a real production action.
+
+  **Semantic difference ≠ observable defect.** `boundText:184` (10 semantic
+  invocations) and `boundText:358` (3, including the `index` T016j named) can BOTH
+  be deleted with the full suite still green. The difference is real; no covered
+  assertion depends on it.
+
+  **Scope, stated as required**: this measured the six synchronous families that
+  both call side-effecting helpers and return elements, across the full suite.
+  `align:83` and `distribute:77` were never invoked, so they are unknown rather
+  than clean, and every producer outside these six is unmeasured. Nothing here
+  licenses a claim about the stale-overwrite class as a whole.
+
+  **The kept n=3 order pin does NOT pin the re-read or any T016b mechanism** — it
+  passes with and without them. It is a product z-order regression gate only.
 
   **T015 is HELD, not started** — declaring intent sets in those three helpers
   would create a SECOND unconsumed API, the same trap as the `commitPlan`
