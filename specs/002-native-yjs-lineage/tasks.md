@@ -109,12 +109,19 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
   fail-loud on both forms, legacy record form unchanged.
 
   **Non-vacuity, proven by sabotage**: replacing the adoption with a
-  record-rebuild (`new Scene()` → `replaceAllElements`) makes the lineage test
-  FAIL while the others still pass — they pin different properties. Recorded
-  honestly in the file: the merge test drives `Scene.applyRemoteUpdate` directly,
-  so it does NOT exercise the initialData branch and survives that sabotage; the
-  app-level fetch/update race is not covered, because the harness consumes
-  `initialData` at mount.
+  record-rebuild (`new Scene()` → `replaceAllElements`) fails 4 of the 7 tests,
+  including the lineage pin and the app-level race. Recorded honestly in the
+  file: the Scene-level merge test drives `Scene.applyRemoteUpdate` directly, so
+  it does NOT exercise the initialData branch and survives that sabotage.
+
+  **The app-level race IS covered** (added after review, which supplied the
+  recipe). The first attempt at it did not work — the `excalidrawAPI` callback
+  never fires in this harness (measured: `apiFired=false` both before and after
+  resolution). But `h.app`/`h.scene` ARE live while `isLoading` is still true
+  (measured), so the race stages by holding `initialData` unresolved, applying a
+  peer update into the mounted generation, then resolving with `encodedScene`.
+  Both the in-flight and stored elements must survive, with a guard asserting
+  the in-flight edit was present BEFORE adoption.
 
   **Found while doing it**: the fail-loud guard, placed after
   `initializeScene`'s try/catch, escaped as an UNHANDLED REJECTION rather than
