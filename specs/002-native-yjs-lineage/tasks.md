@@ -300,6 +300,31 @@
 
   **RED landed** (`remoteUpdateRobustness.test.tsx`): one GREEN guarantee that holds today — no truncation mutates without announcing it — plus two `it.fails` REDs pinning the partial mutation and the publish-wedge. Executable, suite stays green, and each fires the moment its class is addressed.
 
+  **COSTING (measured on this machine; reps averaged).** Per-update cost on the hot path, where the receiving doc already exists:
+
+  | board | delta apply alone | per-update scratch preflight | overhead |
+  | --- | --- | --- | --- |
+  | 50 elements (16 KB doc) | 0.05 ms | 1.3 ms | **27×** |
+  | 500 elements (165 KB) | 0.36 ms | 8.9 ms | **25×** |
+  | 2000 elements (666 KB) | 0.90 ms | **52.8 ms** | **59×** |
+
+  The preflight is dominated by the CLONE, which is O(document) and independent of delta size (deltas here were 239 B / 2 KB / 8 KB).
+
+  **(a) Per-update scratch clone — REJECTED on measurement.** At 2000 elements it is 52.8 ms per remote update; a peer dragging emits updates at interactive rates (~10–30/s), i.e. 0.5–1.6 s of CPU per second of peer activity. It does not degrade gracefully — it degrades with BOARD size, so the largest boards pay most.
+
+  **(b) Shadow validator generation — the only candidate that costs the right order.** Keeping a second doc in sync costs roughly one extra delta apply (~0.9 ms at n=2000, ≈2×), not a clone per update. Its real cost is elsewhere and must not be waved through: EVERY origin that mutates the live doc — local writes, undo/redo, structural prelude, GC maintenance, cold-load adoption — has to reach the shadow too, or it diverges and starts rejecting valid updates. And after a decode throw the shadow is itself of unknown state, so it must be rebuilt from the live doc — the O(document) clone again, but paid ONCE per failure rather than per update.
+
+  **(c) Discard + reseed — works for truncation, PROVABLY NOT for poison.** See the server finding below.
+
+  **SERVER IMPLICATION (read-only census of `collaboration-service`, a Go service — reported, not modified; changes there belong to its owner).** It maintains and persists a server-side Yjs document (`ApplyUpdate` ×8 in `internal/domain/service/room.go`, 10 checkpoint references, persistence adapters `fileservice` / `inprocess` / `metapointer`) and is **schema-agnostic**: zero references to locator / dataURL / asset anywhere in its Go source. So a structurally-valid poison is accepted into the room AND written to its checkpoint. **A client-side reseed therefore re-fetches the poison and loops forever** — exactly the failure the reviewer predicted.
+
+  **Consequence for policy**: the two classes need different owners.
+
+  - **Transport decode failure** is client-solvable: the fragment is local, server state is valid, so discard the generation and reseed.
+  - **Schema poison is NOT client-solvable.** Any client-side remedy is either defeated by the checkpoint (reseed) or amounts to silently dropping a bad root, which is repair-by-guessing. The sound fix is ingress validation at the service, which is outside this repo and must be routed to that owner.
+
+  No policy implemented; the reproduction and costing had to come first.
+
 - [x] T028 **(done — 4 tests, `appStateUndo.test.tsx`)** Green **INV-APPSTATE-UNDO**. Undo/redo writes the reverted collaborative appState through to `yAppState` at `history.ts`, the one point where an undo/redo appState change converges — only the two actions (`actionCanvas`, `actionExport`) wrote through before, and undo does not go through them. Without it the appState mirror pushed the document's stale value back into React state on the next scene update, so the undo silently un-did itself and peers never saw the revert. - **Scoped to the DELTA, not the current state.** Only the keys the entry actually reverted are written, read from `entry.appState.delta.inserted` (`ObservedStandaloneAppState` is exactly `{name, viewBackgroundColor}`). Writing the whole subset instead publishes the background on every element-only undo AND introduces appState into a document that never had any — measured: it fails the zero-traffic test plus two existing history tests, one of which ("should not collapse when applying corrupted history entry") catches it purely as an extra render. - **Two-way non-vacuity**: removing the write-through fails the undo and redo peer cases; writing the whole subset instead of the delta fails the element-only case and the two history tests. - **Coverage across a linked peer** (via `onLocalSceneUpdate`, with delivery counts asserted so an unlinked peer cannot pass vacuously): background undo, background redo, and an element-only undo proving the collaborative appState is byte-identical afterwards. - **`name` claim NARROWED with evidence**, not covered: `changeProjectName` returns `CaptureUpdateAction.EVENTUALLY`, so a name change never becomes its own history entry and there is no name undo to propagate. The write-through is keyed off the delta so it carries `name` if an entry ever holds one, but no action produces that today — pinned by a test asserting the action's capture behaviour.
 - [x] T029 **(DONE — gates swept and the gate MAP reconciled)** The live invariant suites and the normal gates pass.
 
