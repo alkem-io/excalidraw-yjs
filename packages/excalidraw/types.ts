@@ -1080,6 +1080,10 @@ export interface ExcalidrawImperativeAPI {
   };
   getSceneElements: InstanceType<typeof App>["getSceneElements"];
   getSceneAssetLocators: InstanceType<typeof App>["getSceneAssetLocators"];
+  encodeSceneStateAsUpdate: InstanceType<
+    typeof App
+  >["encodeSceneStateAsUpdate"];
+  collectSceneGarbage: InstanceType<typeof App>["collectSceneGarbage"];
   getSceneContentToken: InstanceType<typeof App>["getSceneContentToken"];
   getAppState: () => InstanceType<typeof App>["state"];
   getFiles: () => InstanceType<typeof App>["files"];

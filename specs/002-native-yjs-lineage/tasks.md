@@ -73,10 +73,51 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
 
 - [x] T016k **(done — the action owns the broadcast)** One editor action reaches a peer as ONE transport message. `ActionManager.executeAction` opens a logical mutation around the synchronous span (`perform` through `syncActionResult`); inner `Scene` boundaries JOIN it, so only the outermost close publishes. - **Measured on `wrapTextInContainer`**: `senderUpdates=1, peerStates=1, dangling=[], undoDepth=1`, against a baseline of 4 / 4 / 2 dangling container references. `actionAtomicity.test.tsx` is un-skipped. - **Scope of the guarantee, stated precisely**: it is a TRANSPORT guarantee. The sender's own Scene/Store callbacks may still fire several times locally, and no test claims otherwise. - **Async is delimited, never spanned**: the updater registers a promise continuation and returns, so the boundary closes before an async result lands and the buffer is never held across an `await`. An async action gains nothing from it and is unchanged. - **A throw mid-action still publishes** whatever Yjs already committed — those bytes are in the document, and withholding them would diverge the peer permanently. Balanced closes live in `finally`. - **Boundary rules pinned**: nested join (only the outermost publishes, and its single message carries the final state), throw-after-write publication, a no-write boundary publishing nothing, and closing without opening throwing.
 - [x] T017 **(closed by reconciliation — the behavioural contract holds; no fix was needed)** Measured through the real public path (`excalidrawAPI.applyRemoteSceneUpdate`, what `Collab` calls), a remote apply contributes ZERO to both stacks. The task's premise — that it currently contributes a history entry — is false, and a `NEVER` micro-action written to "fix" it changed the numbers not at all, so it was reverted rather than shipped. - **The invariant is restated behaviourally, not as stack depths.** `History` and the `UndoManager` legitimately differ: an appState-only step makes a `History` entry with `hasElementChange: false` and no `UndoManager` item. A depth-equality assertion would fail for a CORRECT editor, which is why the old skipped test was not evidence of a defect. A pairing claim (`hasElementChange` entry ⇔ `UndoManager` item) was considered and NOT adopted — it is another cardinality claim, and `history.ts:153` only calls `stopElementCapture()` to seal a step, which does not by itself guarantee a one-to-one relationship under coalescing. - **Coverage of the three behavioural requirements**: (1) a remote apply adds no locally undoable step — `historyLockstep.test.tsx`, new, non-vacuous (applying the remote update under `LOCAL_ORIGIN` instead fails it); (2) the next local undo affects only the local action and both replicas converge — `Scene.native-yjs-collab.test.ts` origin-scoped undo, which asserts peer content and matching state vectors; (3) appState-only local history stays undoable without an element item — `appStateUndo.test.tsx`, where a background change is appState-only and undoable end to end.
-- [ ] T032 **(the wire lineage slice — BLOCKED ON T023; lands with T025b)** **Blocker, measured**: `yFiles` holds full `BinaryFileData` dataURLs, and a raw live-doc encode necessarily carries them — a single 4096-byte payload produces a 4189-byte update containing the payload verbatim. T025b reclaims only ORPHANS, so every LIVE image would ship on every INIT and every periodic resync, violating FR-013/INV-NO-BINARY-WIRE and likely exceeding the socket frame limit. Selectively dropping `yFiles` structs from a full-state encode is not a fix: Yjs encodes the whole document, and omitting root structs risks clock gaps and pending dependencies on the receiver. The files boundary needs a root design first — either the collaborative document does not carry binary bytes at all, or wire and persistence get genuinely separate authoritative shapes with an explicit supported mechanism. No throwaway mirror doc, no update surgery, no second ad-hoc lineage. INIT seed and periodic resync currently rebuild the scene through a throwaway `Y.Doc`, which discards CRDT lineage. Switch `Collab.encodeSceneAsUpdate()` to the live-doc encode via `excalidrawAPI.encodeSceneAsUpdate()` and delete `encodeSyncableSceneAsUpdate` from the wire, in the SAME change as T025b's pre-encode sweep — so the observable end state is raw live-lineage sync carrying no expired payload, never a lineage fix that ships deleted content. Green **INV-CONVERGE / INV-NO-RESURRECT**.
-- [ ] T019 Delete `encodeSyncableSceneAsUpdate` (data/index.ts) once unused; confirm Portal INIT/resync both ship live state.
+- [x] T032 / T025b **(DONE — landed together as one slice)** The INIT/resync wire encodes the LIVE scene doc; maintenance runs immediately before it and the encoder stays PURE.
 
-## Phase 5 — Cold-load lineage (FR-004)
+  **Producer re-confirmed before changing anything**: `Portal.broadcastSceneInit`
+  (on `new-user`) and `Portal.broadcastSceneResync`, both via
+  `Collab.encodeSceneAsUpdate`. No other producer.
+
+  **What changed.** `encodeSceneAsUpdate` previously rebuilt the scene through a
+  throwaway doc (`encodeSyncableSceneAsUpdate`), giving every join/resync a fresh
+  `clientID` and destroying CRDT lineage (~50% concurrent-edit loss, ~50%
+  deletion resurrection per resync). It now runs
+  `collectSceneGarbage({ deletedBefore: Date.now() - DELETED_ELEMENT_TIMEOUT })`
+  and then encodes the live doc. Two new API methods —
+  `encodeSceneStateAsUpdate` (pure) and `collectSceneGarbage` — kept separate on
+  purpose: an encoder that pruned on encode would make reading the state
+  destructive, and the resync timer would then quietly drive deletion.
+
+  The rebuild existed to keep two things off the wire, and both have better
+  answers now: aged tombstones are reclaimed from the DOCUMENT by maintenance
+  rather than filtered out of one encoding of it, and since T023 the document
+  carries `fileId -> locator` and never bytes, so there is nothing to strip.
+
+  **T019 folded in**: `encodeSyncableSceneAsUpdate` is deleted, now that it has
+  no production caller. Stale comments in `Portal`, `Collab` and the convergence
+  property test that described the old rebuild were corrected rather than left
+  to mislead.
+
+  **Coverage** (`collabWireFilter.test.tsx`, 7): the original filtering
+  invariants, repointed at the live path (they survive; the MECHANISM changed),
+  plus a resync of unchanged content teaching an up-to-date peer NOTHING (state
+  vector unchanged) and a peer's concurrent edit surviving a resync.
+
+  **Non-vacuity**: restoring the throwaway-doc rebuild fails the lineage pin.
+  Stated honestly — the "keeps a peer's concurrent edit" case does NOT fail that
+  sabotage, because a rebuilt seed still only ADDS elements; the real loss is at
+  property level, so that case is weaker than it reads.
+
+  **MEASURED test-environment artifact, recorded because it bounds what the
+  suite proves.** Deletion markers are stamped from the element's `updated`, and
+  the harness mocks `getUpdatedTimestamp()` to a constant `1` for deterministic
+  snapshots. Every tombstone therefore carries marker `1`, and the PRODUCTION
+  cutoff reclaims all of them — measured. The tombstone-window case moves the
+  cutoff instead of the clock, so the window invariant is covered, but the
+  production cutoff arithmetic itself is NOT exercised end-to-end here.
+
+- [x] T019 **(DONE — folded into the T032/T025b slice)** `encodeSyncableSceneAsUpdate` deleted once it had no production caller; Portal INIT and resync both confirmed to ship live state.
 
 - [x] T020 **(DONE — one slice: docBytes + native initial-data adoption + record application removed at that branch)** Cold-load adopts stored bytes via `applyUpdateV2` into the Scene doc, not decode→records→rebuild. Green **INV-COLD-LOAD-LINEAGE**.
 

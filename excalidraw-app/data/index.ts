@@ -10,7 +10,6 @@ import {
 import { serializeAsJSON } from "@excalidraw-yjs/excalidraw/data/json";
 import { isInvisiblySmallElement } from "@excalidraw-yjs/element";
 import { isInitializedImageElement } from "@excalidraw-yjs/element";
-import { encodeSnapshotAsUpdate } from "@excalidraw-yjs/element";
 
 import { t } from "@excalidraw-yjs/excalidraw/i18n";
 import { bytesToHexString } from "@excalidraw-yjs/common";
@@ -101,43 +100,6 @@ export const filterReferencedFiles = <T>(
     }
   }
   return out;
-};
-
-/**
- * Build a FILTERED full-scene Yjs update for the collaboration wire (native-Yjs
- * core). The raw scene `Y.Doc` carries (a) deleted-element tombstones whose full
- * content has aged past {@link DELETED_ELEMENT_TIMEOUT} and (b) every file binary
- * ever added (append-only), so `Y.encodeStateAsUpdate(doc)` would re-broadcast
- * stale deleted content and orphaned binaries on every join/resync. This rebuilds
- * the full state from ONLY the syncable elements (`getSyncableElements`: live
- * elements + tombstones still inside the timeout window, so peers still learn of
- * recent deletions and converge) plus the files those live elements reference,
- * then encodes it as a self-contained **v1** update (matching the incremental
- * UPDATE bytes on the wire). The throwaway snapshot doc starts from an empty state
- * vector, so the result is a valid, idempotent `REMOTE_ORIGIN` full-state merge on
- * the receiver — exactly what the INIT seed / periodic resync needs.
- */
-export const encodeSyncableSceneAsUpdate = (
-  elements: readonly OrderedExcalidrawElement[],
-  assets: Readonly<Record<string, string>>,
-  appState: Pick<AppState, "viewBackgroundColor" | "name">,
-): Uint8Array => {
-  const syncableElements = getSyncableElements(elements);
-  return encodeSnapshotAsUpdate(
-    {
-      elements: syncableElements as unknown as readonly Record<
-        string,
-        unknown
-      >[],
-      // References only — the snapshot carries `fileId -> locator`, never bytes.
-      assets: filterReferencedFiles(assets, syncableElements),
-      appState: {
-        viewBackgroundColor: appState.viewBackgroundColor,
-        name: appState.name,
-      },
-    },
-    "v1",
-  );
 };
 
 const BACKEND_V2_GET = import.meta.env.VITE_APP_BACKEND_V2_GET_URL;

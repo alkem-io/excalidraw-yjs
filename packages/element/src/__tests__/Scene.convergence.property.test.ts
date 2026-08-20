@@ -56,7 +56,7 @@ const liveIds = (scene: Scene) =>
  *
  * SCOPE: this is the Scene-level half of SC-001. It passes on current code and
  * fails only when the (already correct) Scene encoder is sabotaged. The app's
- * INIT/resync still rebuilds through `encodeSyncableSceneAsUpdate`, and this
+ * INIT/resync encodes the LIVE doc since T032, and this
  * test does not exercise that path — SC-001 is not satisfied until T032 routes
  * it through the live-doc encode and this property covers it.
  *

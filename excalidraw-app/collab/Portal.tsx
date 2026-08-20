@@ -174,10 +174,11 @@ class Portal {
    * without disturbing one that is already up to date. Wire stays V1-consistent,
    * matching the incremental UPDATE bytes already on the wire.
    *
-   * NOTE: `collab.encodeSceneAsUpdate()` is NOT `Y.encodeStateAsUpdate(doc)` — it
-   * rebuilds the scene through a throwaway doc (`encodeSyncableSceneAsUpdate`), so
-   * the resync payload carries no lineage and the "idempotent merge" claim above
-   * holds only for the bytes, not for CRDT history. Known T018 defect.
+   * `collab.encodeSceneAsUpdate()` encodes the LIVE scene doc (T032), so the
+   * resync payload carries real CRDT lineage and the idempotent-merge claim above
+   * holds for history, not merely for the bytes: an already-current peer learns
+   * nothing from a resync. It previously rebuilt through a throwaway doc with a
+   * fresh `clientID`, which is what made that claim false.
    */
   broadcastSceneResync = async () => {
     await this.broadcastSceneUpdate(

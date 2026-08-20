@@ -781,6 +781,8 @@ class App extends React.Component<AppProps, AppState> {
       scrollToContent: this.scrollToContent,
       getSceneElements: this.getSceneElements,
       getSceneAssetLocators: this.getSceneAssetLocators,
+      encodeSceneStateAsUpdate: this.encodeSceneStateAsUpdate,
+      collectSceneGarbage: this.collectSceneGarbage,
       getSceneContentToken: this.getSceneContentToken,
       getAppState: () => this.state,
       // Doc-backed (M4): files live on `scene.doc`, so always read them from the
@@ -2550,6 +2552,29 @@ class App extends React.Component<AppProps, AppState> {
    * adapter.
    */
   public getSceneAssetLocators = () => this.scene.getAssetLocators();
+
+  /**
+   * Encode the LIVE scene document as a self-contained update.
+   *
+   * PURE — it does not mutate the document. Anything the host wants pruned
+   * before a full-state broadcast must be pruned by calling
+   * {@link collectSceneGarbage} first, as an explicit separate step. An encoder
+   * that quietly mutated on encode would make "just read the state" a
+   * destructive operation, and a resync timer would silently drive data loss.
+   */
+  public encodeSceneStateAsUpdate = (
+    format: "v1" | "v2" = "v1",
+    targetStateVector?: Uint8Array,
+  ) => this.scene.encodeStateAsUpdate(format, targetStateVector);
+
+  /**
+   * Reclaim elements soft-deleted before `deletedBefore`, and asset references
+   * no live element points at. Returns how many of each were reclaimed.
+   *
+   * Separate from the encoder on purpose — see {@link encodeSceneStateAsUpdate}.
+   */
+  public collectSceneGarbage = (options: { deletedBefore: number }) =>
+    this.scene.collectGarbage(options);
 
   /**
    * The scene document's opaque content token — see `Scene.contentToken`. A host

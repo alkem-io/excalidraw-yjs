@@ -49,6 +49,7 @@ import type { Mutable, ValueOf } from "@excalidraw-yjs/common/utility-types";
 import { appJotaiStore, atom } from "../app-jotai";
 import {
   CURSOR_SYNC_TIMEOUT,
+  DELETED_ELEMENT_TIMEOUT,
   FILE_UPLOAD_MAX_BYTES,
   FIREBASE_STORAGE_PREFIXES,
   INITIAL_SCENE_UPDATE_TIMEOUT,
@@ -58,7 +59,6 @@ import {
   WS_EVENTS,
 } from "../app_constants";
 import {
-  encodeSyncableSceneAsUpdate,
   generateCollaborationLinkData,
   getCollaborationLink,
   getSyncableElements,
@@ -716,7 +716,7 @@ class Collab extends PureComponent<CollabProps, CollabState> {
               // INIT carries a full-scene seed as Yjs bytes; apply it to our doc
               // and Yjs merges it with whatever we already hold.
               //
-              // NOTE: the sender builds that seed with `encodeSyncableSceneAsUpdate`,
+              // NOTE: the sender builds that seed from the LIVE doc (T032),
               // which REBUILDS the scene through a throwaway doc rather than encoding
               // the live one — so the seed does not carry the sender's lineage, and
               // merging it can resurrect deletions and lose concurrent edits. That is
@@ -1085,34 +1085,35 @@ class Collab extends PureComponent<CollabProps, CollabState> {
   };
 
   /**
-   * Encode the scene's current state as a FILTERED full-scene Yjs update
-   * (native-Yjs core, M3) — the full state used to seed a new peer
-   * (`broadcastSceneInit`, on `new-user`) or periodically resync already-joined
-   * peers (`broadcastSceneResync`).
+   * Encode the scene's current state as a full-scene Yjs update — the state used
+   * to seed a new peer (`broadcastSceneInit`, on `new-user`) or to periodically
+   * resync already-joined peers (`broadcastSceneResync`).
    *
-   * It does NOT raw-encode the scene `Y.Doc` (`Y.encodeStateAsUpdate(doc)`): the
-   * doc holds deleted-element tombstones whose content has aged past
-   * {@link DELETED_ELEMENT_TIMEOUT} and every file binary ever added (append-only),
-   * so a raw encode would re-broadcast stale deleted content and orphaned image
-   * bytes on every join/resync — a privacy leak (a pasted-then-deleted image) and
-   * unbounded resync growth. Instead it rebuilds the full state from the SYNCABLE
-   * elements + the files those live elements reference (mirroring the old
-   * element-JSON wire's `getSyncableElements` / files-from-live-elements filter),
-   * via `encodeSyncableSceneAsUpdate`. Recently-deleted elements (tombstones still
-   * inside the timeout window) ARE included, so peers still converge on deletions.
-   * The result is a self-contained V1 update — an idempotent `REMOTE_ORIGIN` merge
-   * on the receiver — matching the incremental UPDATE bytes already on the wire.
+   * T032/T025b: this now encodes the LIVE scene `Y.Doc`. It previously rebuilt
+   * the scene through a throwaway doc (`encodeSyncableSceneAsUpdate`), which
+   * gave every join/resync a fresh `clientID` and so destroyed CRDT lineage —
+   * measured at ~50% concurrent-edit loss and ~50% deletion resurrection per
+   * resync. A peer that merges such an update cannot tell a concurrent edit from
+   * a stale one, because the identity that would order them is gone.
+   *
+   * The rebuild existed to keep two things off the wire, and both now have a
+   * better answer:
+   *  - aged deleted-element tombstones — reclaimed by the explicit maintenance
+   *    call below, so they are gone from the DOCUMENT rather than filtered out
+   *    of one encoding of it;
+   *  - image binaries — since T023 the document carries `fileId -> locator` and
+   *    never bytes, so there is nothing to strip.
+   *
+   * Maintenance runs immediately BEFORE the encode and is deliberately a
+   * separate call: {@link ExcalidrawImperativeAPI.encodeSceneStateAsUpdate} is
+   * pure. An encoder that pruned on encode would make reading the state a
+   * destructive act, and the resync timer would then quietly drive deletion.
    */
   public encodeSceneAsUpdate = (): Uint8Array => {
-    const appState = this.excalidrawAPI.getAppState();
-    return encodeSyncableSceneAsUpdate(
-      this.excalidrawAPI.getSceneElementsIncludingDeleted(),
-      this.excalidrawAPI.getSceneAssetLocators(),
-      {
-        viewBackgroundColor: appState.viewBackgroundColor,
-        name: appState.name,
-      },
-    );
+    this.excalidrawAPI.collectSceneGarbage({
+      deletedBefore: Date.now() - DELETED_ELEMENT_TIMEOUT,
+    });
+    return this.excalidrawAPI.encodeSceneStateAsUpdate("v1");
   };
 
   /**

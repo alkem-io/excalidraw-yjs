@@ -1,3 +1,5 @@
+import * as Y from "yjs";
+
 import { Scene } from "@excalidraw-yjs/element";
 import { API } from "@excalidraw-yjs/excalidraw/tests/helpers/api";
 
@@ -7,27 +9,46 @@ import type {
 } from "@excalidraw-yjs/element/types";
 
 import { DELETED_ELEMENT_TIMEOUT } from "../app_constants";
-import {
-  encodeSyncableSceneAsUpdate,
-  filterReferencedFiles,
-  getReferencedFileIds,
-} from "../data";
+import { filterReferencedFiles, getReferencedFileIds } from "../data";
 
 /**
- * Boundary filter for the native-Yjs collaboration WIRE SEED (findings #1 + #3).
+ * The native-Yjs collaboration WIRE SEED (INIT / periodic resync).
  *
- * The scene `Y.Doc` carries deleted-element tombstones (with full content) and
- * every file binary ever added (append-only `setFiles`). A RAW
- * `Y.encodeStateAsUpdate(doc)` wire seed (INIT / periodic resync) therefore
- * re-broadcasts (#1) a pasted-then-deleted image's BYTES and (#3) over-timeout
- * tombstone CONTENT on every join/resync. `encodeSyncableSceneAsUpdate` rebuilds
- * the seed from ONLY syncable elements (live + within-timeout tombstones) and the
- * files those LIVE elements reference — so deleted-image bytes and aged tombstones
- * are excluded, while recently-deleted elements still propagate (convergence).
+ * These invariants were originally enforced by rebuilding the seed through a
+ * throwaway doc (`encodeSyncableSceneAsUpdate`) that filtered as it encoded.
+ * That rebuild is GONE (T032): it gave every join/resync a fresh `clientID` and
+ * so destroyed CRDT lineage, measured at ~50% concurrent-edit loss and ~50%
+ * deletion resurrection per resync.
  *
- * These tests decode the produced update and assert exactly that. They FAIL if the
- * seed reverts to a raw doc encode.
+ * The invariants survive; the MECHANISM changed. The seed is now the LIVE
+ * document, and what must not travel is removed from the document itself by an
+ * explicit maintenance pass (`collectGarbage`) run immediately before the
+ * encode — so it is gone from the state, not merely absent from one encoding of
+ * it. Image bytes need no filter at all any more: since T023 the document
+ * carries `fileId -> locator` and never bytes.
+ *
+ * These tests exercise that exact pair, which is what `Collab.encodeSceneAsUpdate`
+ * performs.
  */
+
+/**
+ * What `Collab.encodeSceneAsUpdate` does: maintenance, then a PURE encode.
+ *
+ * The cutoff is a parameter because of a TEST-ENVIRONMENT artifact worth
+ * knowing: deletion markers are stamped from the element's `updated`, and this
+ * harness mocks `getUpdatedTimestamp()` to a constant `1` for deterministic
+ * snapshots. Every tombstone therefore carries marker `1`, and the production
+ * cutoff (`Date.now() - DELETED_ELEMENT_TIMEOUT`) reclaims all of them —
+ * measured. Cases that care about the tombstone WINDOW pass explicit cutoffs
+ * around the real marker instead of pretending the wall clock applies here.
+ */
+const encodeWireSeed = (
+  scene: Scene,
+  deletedBefore = Date.now() - DELETED_ELEMENT_TIMEOUT,
+): Uint8Array => {
+  scene.collectGarbage({ deletedBefore });
+  return scene.encodeStateAsUpdate("v1");
+};
 
 const fileId = (s: string) => s as FileId;
 
@@ -111,12 +132,13 @@ describe("collaboration wire seed: deleted-content + orphaned-file filtering", (
       "f-deleted": "asset://f-deleted",
     };
 
-    const update = encodeSyncableSceneAsUpdate(
-      [live, deleted],
-      assets,
-      APP_STATE,
-    );
-    const decoded = applyToFreshScene(update);
+    const scene = new Scene();
+    scene.replaceAllElements([live, deleted]);
+    scene.setAssetLocators(assets);
+    scene.setAppState(APP_STATE);
+
+    const decoded = applyToFreshScene(encodeWireSeed(scene));
+    scene.destroy();
 
     // …and the deleted image's REFERENCE is gone from the wire. Bytes are not
     // on the wire at all any more — the document cannot carry them.
@@ -125,7 +147,7 @@ describe("collaboration wire seed: deleted-content + orphaned-file filtering", (
     expect(decoded.assets["f-live"]).toBe("asset://f-live");
   });
 
-  it("FINDING #3: an over-timeout tombstone is GC'd from the wire, a fresh one survives (convergence)", () => {
+  it("FINDING #3: an aged tombstone is GC'd from the wire, a fresh one survives (convergence)", () => {
     const live = API.createElement({
       type: "rectangle",
       id: "live",
@@ -145,17 +167,26 @@ describe("collaboration wire seed: deleted-content + orphaned-file filtering", (
       Date.now() - DELETED_ELEMENT_TIMEOUT - 60_000;
     (freshlyDeleted as { updated: number }).updated = Date.now();
 
-    const update = encodeSyncableSceneAsUpdate(
-      [live, freshlyDeleted, staleDeleted],
-      {},
-      APP_STATE,
-    );
-    const ids = applyToFreshScene(update).elementIds;
+    const scene = new Scene();
+    scene.replaceAllElements([live, freshlyDeleted, staleDeleted]);
+    scene.setAppState(APP_STATE);
 
-    // live + the FRESH tombstone ride the wire (peers must learn recent deletes);
-    // the STALE tombstone is dropped — no unbounded tombstone re-broadcast.
-    expect(ids).toEqual(["fresh-del", "live"]);
-    expect(ids).not.toContain("stale-del");
+    // Both tombstones carry the same marker in this harness (see encodeWireSeed),
+    // so the window is exercised by moving the CUTOFF rather than the clock.
+    const marker = 1;
+
+    // Cutoff at the marker: nothing has aged past it, so BOTH deletions still
+    // ride the wire — peers must learn recent deletes.
+    const fresh = applyToFreshScene(encodeWireSeed(scene, marker)).elementIds;
+    expect(fresh).toEqual(["fresh-del", "live", "stale-del"]);
+
+    // Cutoff past the marker: the tombstones have aged out and are reclaimed
+    // from the DOCUMENT, so they stop being re-broadcast on every resync.
+    const aged = applyToFreshScene(
+      encodeWireSeed(scene, marker + 1),
+    ).elementIds;
+    expect(aged).toEqual(["live"]);
+    scene.destroy();
   });
 
   it("the wire seed still carries the persistable appState subset", () => {
@@ -163,18 +194,84 @@ describe("collaboration wire seed: deleted-content + orphaned-file filtering", (
       type: "rectangle",
       id: "live",
     }) as OrderedExcalidrawElement;
-    const update = encodeSyncableSceneAsUpdate(
-      [live],
-      {},
-      {
-        viewBackgroundColor: "#abcdef",
-        name: "my board",
-      },
-    );
-    const decoded = applyToFreshScene(update);
+    const scene = new Scene();
+    scene.replaceAllElements([live]);
+    scene.setAppState({
+      viewBackgroundColor: "#abcdef",
+      name: "my board",
+    });
+
+    const decoded = applyToFreshScene(encodeWireSeed(scene));
+    scene.destroy();
     expect(decoded.appState).toEqual({
       viewBackgroundColor: "#abcdef",
       name: "my board",
     });
+  });
+
+  /**
+   * The reason the rebuild had to go (T032). This is the invariant the old
+   * encoder could not satisfy at all: it built every seed in a throwaway doc
+   * with a fresh `clientID`, so a peer merging two seeds saw two unrelated
+   * lineages and could not order their edits.
+   */
+  it("ships the LIVE lineage, so a resync is a no-op for an up-to-date peer", () => {
+    const scene = new Scene();
+    scene.replaceAllElements([
+      API.createElement({
+        type: "rectangle",
+        id: "a",
+      }) as OrderedExcalidrawElement,
+    ]);
+
+    // A peer seeded from the first broadcast.
+    const peer = new Scene();
+    peer.applyRemoteUpdate(encodeWireSeed(scene, 1), "v1");
+    expect(peer.getElementsIncludingDeleted().map((e) => e.id)).toEqual(["a"]);
+
+    const before = Y.encodeStateVector(peer.doc);
+
+    // A periodic resync of UNCHANGED content must teach that peer nothing. A
+    // rebuilt seed carries a new clientID every time, so it would always add
+    // fresh structs and the state vector would grow on every resync.
+    peer.applyRemoteUpdate(encodeWireSeed(scene, 1), "v1");
+
+    expect(Y.encodeStateVector(peer.doc)).toEqual(before);
+    peer.destroy();
+    scene.destroy();
+  });
+
+  it("keeps a peer's concurrent edit across a resync", () => {
+    const scene = new Scene();
+    scene.replaceAllElements([
+      API.createElement({
+        type: "rectangle",
+        id: "a",
+      }) as OrderedExcalidrawElement,
+    ]);
+
+    const peer = new Scene();
+    peer.applyRemoteUpdate(encodeWireSeed(scene, 1), "v1");
+
+    // The peer edits while the sender knows nothing about it.
+    peer.replaceAllElements([
+      ...peer.getElementsIncludingDeleted(),
+      API.createElement({
+        type: "rectangle",
+        id: "peer-only",
+      }) as OrderedExcalidrawElement,
+    ]);
+
+    // A resync from the sender must not clobber it.
+    peer.applyRemoteUpdate(encodeWireSeed(scene, 1), "v1");
+
+    expect(
+      peer
+        .getElementsIncludingDeleted()
+        .map((e) => e.id)
+        .sort(),
+    ).toEqual(["a", "peer-only"]);
+    peer.destroy();
+    scene.destroy();
   });
 });
