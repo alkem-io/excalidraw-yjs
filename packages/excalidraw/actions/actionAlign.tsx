@@ -52,6 +52,31 @@ export const alignActionsPredicate = (
   );
 };
 
+/**
+ * Align's conflict policy — the same shape and the same reason as flip's.
+ *
+ * `alignElements` moves the selection's BOUND ARROWS through the doc via
+ * `updateBoundElements`. Those arrows are not in `updatedElements` when they are
+ * not themselves selected, so the action's returned entry for them is the
+ * pre-align input: for any geometry key the doc is right and the result is
+ * stale. Declared per KEY, applied by the boundary only to keys that are
+ * genuinely ambiguous.
+ *
+ * This replaced a post-helper whole-object re-read (spec 002 / T016f). The
+ * re-read was retired only once a test failed on its return — see
+ * `alignBoundArrowReread.test.tsx`.
+ */
+const ALIGN_OVERLAP_POLICY: ReadonlyMap<string, "result" | "applied"> = new Map(
+  [
+    ["x", "applied"],
+    ["y", "applied"],
+    ["width", "applied"],
+    ["height", "applied"],
+    ["angle", "applied"],
+    ["points", "applied"],
+  ],
+);
+
 const alignSelectedElements = (
   elements: readonly ExcalidrawElement[],
   appState: Readonly<AppState>,
@@ -69,20 +94,8 @@ const alignSelectedElements = (
 
   const updatedElementsMap = arrayToMap(updatedElements);
 
-  // fresh-snapshot: re-read post-mutation (alignElements moved the selection's
-  // BOUND ARROWS through the doc via updateBoundElements, but those arrows are
-  // not in `updatedElements` when not themselves selected — fall back to the
-  // live scene map instead of the stale input `element` so their doc-written
-  // points are not reverted)
-  const freshMap = app.scene.getNonDeletedElementsMap();
-
   return updateFrameMembershipOfSelectedElements(
-    elements.map(
-      (element) =>
-        updatedElementsMap.get(element.id) ??
-        freshMap.get(element.id) ??
-        element,
-    ),
+    elements.map((element) => updatedElementsMap.get(element.id) ?? element),
     appState,
     app,
   );
@@ -102,6 +115,7 @@ export const actionAlignTop = register({
         position: "start",
         axis: "y",
       }),
+      overlapPolicy: ALIGN_OVERLAP_POLICY,
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     };
   },
@@ -136,6 +150,7 @@ export const actionAlignBottom = register({
         position: "end",
         axis: "y",
       }),
+      overlapPolicy: ALIGN_OVERLAP_POLICY,
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     };
   },
@@ -170,6 +185,7 @@ export const actionAlignLeft = register({
         position: "start",
         axis: "x",
       }),
+      overlapPolicy: ALIGN_OVERLAP_POLICY,
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     };
   },
@@ -204,6 +220,7 @@ export const actionAlignRight = register({
         position: "end",
         axis: "x",
       }),
+      overlapPolicy: ALIGN_OVERLAP_POLICY,
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     };
   },
@@ -238,6 +255,7 @@ export const actionAlignVerticallyCentered = register({
         position: "center",
         axis: "y",
       }),
+      overlapPolicy: ALIGN_OVERLAP_POLICY,
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     };
   },
@@ -268,6 +286,7 @@ export const actionAlignHorizontallyCentered = register({
         position: "center",
         axis: "x",
       }),
+      overlapPolicy: ALIGN_OVERLAP_POLICY,
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     };
   },

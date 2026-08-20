@@ -137,8 +137,17 @@
   `applyElementChanges` inherits the same monotonic rule as every other write: content-gated, strict-regression only, with the tombstone-watermark reservation. **Live gate**: the un-skipped INV-VERSION-MONOTONIC case, green through both the authoritative and the diff route.
 
 - [ ] T016f **(OPEN — this slice removed TWO of the sites, not the family)** Revisit the remaining re-read sites, retiring each only where patch mode proves it redundant AND a test discriminates.
+
   - Removed so far: `actionFlip`'s post-flip whole-object reread, and `actionBoundText`'s wrap reread. Both were proven by a failing production test, not by inspection.
-  - **Measured, per invocation, across the six families that call side-effecting helpers**: `flip:163` 63 reached / 2 semantic; `boundText:184` 25 / 10 (`boundElements`); `boundText:358` 14 / 3 (`index`); `props:319` 9 / 1; `props:1107` and `props:1379` 8 / 0 each; `align:83` and `distribute:77` **never reached — unknown, not clean**; `actionStyles`' is already narrow (copies only `width`/`height`).
+  - **Measured, per invocation, across the six families that call side-effecting helpers**: `flip:163` 63 reached / 2 semantic; `boundText:184` 25 / 10 (`boundElements`); `boundText:358` 14 / 3 (`index`); `props:319` 9 / 1; `props:1107` and `props:1379` 8 / 0 each; `distribute:77` **never reached — unknown, not clean**; `actionStyles`' is already narrow (copies only `width`/`height`).
+  - **`align:83` — coverage gap CLOSED and the site RETIRED.** It was reachable only for an element absent from `updatedElements`: a bound arrow moved through the doc by `updateBoundElements` while not itself selected. No test had that shape. `alignBoundArrowReread.test.tsx` now does, and it discriminates in both directions:
+
+    - removing the re-read with no ownership declared → the fail-closed boundary THROWS naming `arr.points, arr.y`, rather than silently reverting;
+    - declaring `ALIGN_OVERLAP_POLICY` (geometry → `applied`, same shape and reason as flip's) → green;
+    - inverting to `result` → the arrow keeps its pre-align diagonal (`[[0,0],[188,188]]` instead of the re-routed `[[0,0],[188,0]]`), caught by asserting the arrow is FLAT once both bindables share a `y`.
+
+    Retired on exactly the stated bar: a test fails when the re-read returns.
+
   - A semantic difference is NOT an observable defect: `boundText:184` and `boundText:358` can each be deleted with the suite still green. Do not retire a site without a test that fails when it returns.
 
 **Design note (do not lose):** a base→result diff is a sound migration default but is NOT the definition of intent. "Explicitly set a key to the value it already had in base" is invisible to a diff yet must still beat an interleaved remote write — the same asymmetry FR-009 fixed one layer down. Derive for synchronous actions in the interim; the durable contract carries explicit per-id key sets plus membership intent.
