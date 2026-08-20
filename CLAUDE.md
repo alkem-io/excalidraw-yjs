@@ -19,10 +19,16 @@ Excalidraw is a **monorepo** with a clear separation between the core library an
 ## Development Commands
 
 ```bash
+pnpm run test:gates      # THE gate — mirrors CI command for command (see below)
 pnpm run test:typecheck  # TypeScript type checking
 pnpm run test:update     # Run all tests (with snapshot updates)
+pnpm run test:headless   # Build the packages, then import the BUILT bundles in bare Node
 pnpm run fix             # Auto-fix formatting and linting issues
 ```
+
+**Use `test:gates` before pushing.** It runs what CI runs, in CI's order: `pnpm install --frozen-lockfile` → `test:other` (prettier) → `test:code` (`eslint --max-warnings=0` over the whole repo) → `test:typecheck` → coverage → `test:headless`. This exists because a green local run once certified a branch whose CI was already red: every other gate operates on an already-installed tree, so none of them noticed a stale `pnpm-lock.yaml`.
+
+**A built `packages/*/dist` is local state CI never has** — no workflow builds before running tests. If something fails only locally, remove those directories and re-measure before believing it; when the two disagree, the difference is the finding. This has caused three separate incidents.
 
 ## Architecture Notes
 
@@ -37,7 +43,19 @@ pnpm run fix             # Auto-fix formatting and linting issues
 
 In this case, this is @excalidraw-yjs/excalidraw, a fork of the original Excalidraw repository. Alkemio's custom version is as similar as possible to the original to avoid conflicts when updating from master.
 
-### List of differences with standard Excalidraw
+### Differences with standard Excalidraw
+
+**The big one, and the reason most of the rest exists: the Scene's element store IS a `Y.Doc`.** This is not a binding or a sync layer bolted onto the editor — `mutateElement` writes per-property into the doc, rendering materializes JS objects out of it, and single-user history, collaboration and persistence all run on that one document. Read `specs/002-native-yjs-lineage/` before changing anything on the write path, the wire, history or assets; it records what each invariant is and, more usefully, which plausible-sounding assumptions about them turned out to be false.
+
+Consequences worth knowing before you touch adjacent code:
+
+- **Elements are immutable snapshots derived from the doc.** A captured element reference never changes; re-read it from the scene after any write.
+- **Only keys whose value actually changed are written**, so a `version` bump means a real change — the old model bumped versions incidentally.
+- **Undo/redo is `Y.UndoManager` scoped to `LOCAL_ORIGIN`**, so undo reverts only this replica's edits and never a peer's.
+- **The document carries `fileId → opaque locator`, never image bytes**, validated on every write and every encode. Hosts supply an `AssetAdapter` and call `flushAssetPublication()` before a save or close.
+- **`@excalidraw-yjs/excalidraw/headless`** is a Node-safe entry (no React, no DOM) for servers and batch jobs.
+
+### Other differences with standard Excalidraw
 
 - Selected from a non-yet-released Excalidraw version that is already upgraded to React 19.
 - Added ZoomToFit button to the zoom toolbar.
