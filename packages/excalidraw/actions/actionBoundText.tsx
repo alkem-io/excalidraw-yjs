@@ -347,16 +347,14 @@ export const actionWrapTextInContainer = register({
       }
     }
 
-    // fresh-snapshot: re-read post-mutation (the just-wrapped TEXT element + any
-    // re-bound arrows were written to the doc via scene.mutateElement /
-    // redrawTextBoundingBox, but `updatedElements` carries their stale input
-    // entries — re-read live so the wrap (containerId/autoResize/boundElements)
-    // is not reverted. New containers are not yet in the doc, so the `?? element`
-    // fallback preserves them)
-    const freshMap = app.scene.getNonDeletedElementsMap();
-    updatedElements = updatedElements.map(
-      (element) => freshMap.get(element.id) ?? element,
-    );
+    // The post-helper re-read that used to sit here is GONE (spec 002 T016b).
+    // It existed to stop stale input entries reverting helper writes — which the
+    // patch route now protects — but it also replaced the just-reindexed text
+    // with the live doc version still carrying its OLD index, tying it against
+    // the freshly-minted container. Measured: `syncMovedIndices` produces
+    // distinct `a1`/`a2`, and the re-read turned them into `a1`/`a1`, which only
+    // looked harmless while authoritative `replaceAllElements` re-indexed
+    // everything on the way in.
 
     return {
       elements: updatedElements,

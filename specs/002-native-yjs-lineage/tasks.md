@@ -169,506 +169,108 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
 
 - [x] T016a **(done)** `ActionManager` captures a real COPY of the element array at invocation and preserves it alongside the promise (`ActionFn` may be async). A bare reference is not a stable "before" image — `Scene.mutateElement` mutates the passed scratch before re-derivation. **A top-level spread is NOT sufficient**: it leaves nested persisted fields (`points`, `groupIds`, `boundElements`, `roundness`, `scale`, `crop`, `customData`) aliased to the live object, so they mutate underneath the "before" image and diff as unchanged. Copy every persisted field the diff reads, and preserve reconciliation/own-Symbol metadata deliberately — `structuredClone` does not carry symbol-keyed metadata.
 - [x] T016b-i **(diff done)** `computeElementIntent` / `diffElementKeys` in `packages/element/src/yjs/intent.ts` — presence-aware, `Object.hasOwn`, `id` + RECONCILE_META_KEYS excluded, 9 tests incl. a no-op-derives-nothing guard and a non-vacuity proof that a value-only diff misses the transitions. Pure function, wired to nothing yet.
-- [ ] T016b **(PRODUCER CENSUS DONE — and the base already reaches the boundary)** `scene.applyElementChanges(base, result, intent?)`: diff the result against the invocation snapshot and apply onto CURRENT doc state.
-
-  **The plumbing is already there and is DISCARDED.** `ActionManager.updater` is
-  typed `(actionResult, invocationBase?)` and T016a already made the base survive
-  an `await`. The updater it is constructed with IS `App.syncActionResult` — whose
-  signature takes **one** parameter. So every action already hands its invocation
-  base to the boundary, and the boundary silently drops it. No new plumbing is
-  needed for synchronous actions (the reviewer's point 4): the argument is
-  arriving today.
-
-  **Producer census** (`packages/excalidraw/actions/*`):
-  - 87 `perform:` implementations in total; **8 are async**.
-  - **49 SYNCHRONOUS performs return an `elements` array** through
-    `syncActionResult` → `scene.replaceAllElements(...)`, which is authoritative
-    ("make the doc equal this set").
-  - **ZERO async performs return an `elements` field — CORRECTED.** The earlier
-    "exactly 1" was WRONG: it came from a loose regex that matched
-    `prepareElementsForExport(...)` ARGUMENTS inside `actionClipboard` as though
-    they were returned fields. Re-audited by brace-matching each of the 8 async
-    bodies and inspecting only `return { … }` sites: `actionElementLink` ×1,
-    `actionExport` ×3, `actionClipboard` ×4 — none returns `elements`.
-    (`actionLoadScene`/`actionElementLink` catch paths were removed in T016d.)
-    **T016c therefore covers a future/other async risk, not a current
-    producer**, and must not carry the stale one-action claim.
-  - **6 action files call the side-effecting helpers** (`redrawTextBoundingBox`,
-    `updateBoundElements`, `bindOrUnbindBindingElements`): `actionAlign`,
-    `actionStyles`, `actionBoundText`, `actionDistribute`, `actionProperties`,
-    `actionFlip`. These are where a helper writes to the doc mid-`perform` and
-    the action then returns an array that may not carry that write.
-
-  **THE PROPOSED RED DOES NOT REPRODUCE — T016j's causality is FALSIFIED on
-  current HEAD.** (Measured; experiment reverted, only the new order pin kept.)
-
-  The plan was: remove the `wrapTextInContainer` post-helper re-read, watch the
-  action produce a tied/wrong z-order, then show a base-diff apply fixes it.
-  Measured instead:
-  - **Removing that re-read breaks NOTHING** — full suite 140 files / 1589
-    passed with it deleted.
-  - **A new n=3 order pin passes with AND without it**: container directly below
-    its text, locally and at a linked peer, identical id order on both.
-  - **Why**, probed directly at the re-read site: for every element already in
-    the doc, the live version is byte-identical to the entry in
-    `updatedElements` (`differs: false`) — INCLUDING its `index`. The new
-    container is not yet in the doc, so the `?? element` fallback preserves it.
-    The re-read swaps objects for equal-valued ones: a semantic NO-OP.
-
-  So the specific mechanism T016j recorded is **not observable in the scenario
-  built here** — `syncMovedIndices`' index was already in the doc when the
-  re-read ran, so it returned that same index.
-
-  **CORRECTION to that conclusion, from the round-2 census below**: calling
-  T016j "falsified" was OVER-BROAD. Instrumenting every invocation shows
-  `boundText:358` DOES produce a `semantic:index` difference on 3 of its 14
-  reached invocations. The mechanism is real; the scenario constructed here
-  simply did not hit it. What IS true is narrower: no covered assertion observes
-  the consequence — removing that re-read entirely leaves the suite green.
-
-  **Kept**: the n=3 order pin (`actionAtomicity.test.tsx`) — container directly
-  below its text locally and at a peer, with guards that the action ran, a
-  container was created and the peer was linked. It passes today; it is a real
-  regression gate for whatever mechanism eventually lands.
-
-  **Not done, deliberately**: no `syncActionResult` signature change and no
-  `applyElementChanges` routing. Wiring a base-diff path needs a case where the
-  authoritative apply demonstrably loses something, and this case does not lose
-  anything — building the consumer on a non-reproducing RED would be exactly the
-  unconsumed-API trap that stopped T015.
-
-  **Standing obligation, recorded**: when a real production consumer for
-  `applyElementChanges` does land, `commitPlan`'s hard-removal tombstone
-  reservation must return with a property driven through
-  `syncActionResult`/`applyElementChanges` — not restored by symmetry.
-
-  **ROUND-2 CENSUS — every post-helper re-read in the six families, instrumented
-  per invocation** (semantic keys classified separately from
-  `version`/`versionNonce`/`updated`; experiment reverted, suite green at 1589):
-
-  | site | reached | semantic | metadata-only | no-op | removal → RED? |
-  |---|---|---|---|---|---|
-  | `flip:216` | 63 | **27** (`x`,`y`,`x+y`) | 0 | 36 | **YES — 2 real tests** |
-  | `boundText:184` | 25 | 10 (`boundElements`) | 0 | 15 | no |
-  | `boundText:358` | 14 | 3 (`index`) | 0 | 7 (+4 absent) | no |
-  | `props:319` | 9 | 1 (`height`) | 1 | 7 | not tested |
-  | `flip:163` | 63 | 2 (`x`,`y`) | 0 | 61 | not tested |
-  | `props:1107` | 8 | 0 | 0 | 8 | — |
-  | `props:1379` | 8 | 0 | 0 | 8 | — |
-  | `align:83` | **0** | — | — | — | **coverage gap** |
-  | `distribute:77` | **0** | — | — | — | **coverage gap** |
-  | `actionStyles:194` | n/a | — | — | — | already NARROW: copies only `width`/`height` from the fresh container, not a whole-object swap |
-
-  **THE PRODUCTION RED IS `flip:216`.** Removing only that re-read fails two
-  existing action tests with observably wrong results: *"mutliple elements > with
-  bound text flip correctly"* and *"flipping re-centers selection > elbow arrow
-  touches group selection side yet it remains in place after multiple moves"*.
-  Its own comment states the cause precisely — bound texts are repositioned
-  THROUGH THE DOC rather than mutated in place, so the pre-flip
-  `selectedElements` entries are genuinely stale and returning them clobbers the
-  doc's correct post-flip positions. That is the stale-overwrite class, reachable
-  through a real production action.
-
-  **Semantic difference ≠ observable defect.** `boundText:184` (10 semantic
-  invocations) and `boundText:358` (3, including the `index` T016j named) can BOTH
-  be deleted with the full suite still green. The difference is real; no covered
-  assertion depends on it.
-
-  **Scope, stated as required**: this measured the six synchronous families that
-  both call side-effecting helpers and return elements, across the full suite.
-  `align:83` and `distribute:77` were never invoked, so they are unknown rather
-  than clean, and every producer outside these six is unmeasured. Nothing here
-  licenses a claim about the stale-overwrite class as a whole.
-
-  **The kept n=3 order pin does NOT pin the re-read or any T016b mechanism** — it
-  passes with and without them. It is a product z-order regression gate only.
-
-  **THE DISCRIMINATING EXPERIMENT — derived intent is NOT SUFFICIENT. T015 is
-  REQUIRED.** (Experiment reverted; tree clean at 1589.)
-
-  Ran exactly the specified shape: removed only `flip:216`'s whole-object
-  re-read, and routed `ActionResult`s carrying an `invocationBase` through
-  `scene.applyElementChanges(base, result)`.
-
-  **Wiring**: `withBatchedUpdates` only wraps a 0/1-arg function, so
-  `syncActionResult` became a thin 2-arg wrapper delegating to a batched body
-  that takes `{ actionResult, invocationBase }`. Callers without a base keep the
-  authoritative `replaceAllElements`.
-
-  **Result — it fixed ONE of the two REDs and left the other:**
-  - *"with bound text flip correctly"* → **GREEN**. Its staleness is in keys the
-    action never touched, so the diff leaves the doc's values alone.
-  - *"elbow arrow touches group selection side…"* → **STILL RED**
-    (`expected 101.697 to be close to 100`).
-
-  **Why, from the per-id/per-key sets at the apply:**
-  ```
-  rec1  keys=["x"]  base.x=179.643  result.x=101.697  current.x=101.498
-                    base.y=101.076  result.y=101.076  current.y=101
-  ```
-  The `y` case works exactly as intended: base and result agree, so `y` is NOT
-  declared, and the doc's own `101` survives untouched. **`x` is the problem —
-  the action AND the helper both wrote it.** The action's `x` was computed from a
-  now-stale base (179.643) while the helper had already written the correct
-  101.498 to the doc; the declared diff names `x` and overwrites it.
-
-  **This is the answer to the question the experiment was built to settle**: a
-  derived base→result diff CANNOT distinguish "the action owns this key" from
-  "a side-effecting helper owns this key" when both touch the SAME key. Only
-  explicit ownership can — so **T015 (helper-declared intent) is required, and
-  its earlier HOLD is lifted**: it is no longer a speculative unconsumed API, it
-  is the missing input this mechanism needs.
-
-  **Full-suite impact of the experiment**: 18 failures — 15 snapshot, 3 semantic
-  (the elbow-arrow case above, `textWysiwyg` container-wrap, and
-  `actionDeleteSelected`'s elbow-binding branch). All 18 are introduced by the
-  experiment; the baseline is clean.
-
-  **Async class NOT closed**: the census's single async element-returning
-  `perform` is unaffected here because this routing is origin-agnostic — it uses
-  whatever base the updater supplies, and T016a already carries that across the
-  `await`. Passing unrelated-key preservation says nothing about same-key
-  ownership for async results; that remains T016c.
-
-  **THE MUTATION-JOURNAL EXPERIMENT — IT WORKS.** (Reverted as instructed; the
-  full patch is kept at `experiments/t016b-journal-experiment.patch`. Tree clean
-  at 1589.)
-
-  **The coupling question was answered BEFORE building** (the "stop and show the
-  conflict" clause). `beginLogicalMutation` is a generic TRANSPORT primitive and
-  making every logical boundary imply intent capture would couple transport
-  buffering to action semantics. So the journal is a **separate, narrowly named
-  scope** — `beginActionMutationJournal` / `endActionMutationJournal` — that the
-  ActionManager happens to open alongside the transport boundary. Two orthogonal
-  scopes, neither implying the other.
-
-  **Mechanism**: `Scene.mutateElement` records `Object.keys(updates)` per id
-  while the scope is open — the `updates` object already IS the writer's explicit
-  per-key declaration AND the actual write source, so it cannot drift the way a
-  hand-maintained list beside each helper would. `applyElementChanges` subtracts
-  those keys from DERIVED intent only.
-
-  **Precedence, explicit**: an action's `declaredIntent` is re-applied from the
-  canonical result even when the journal holds the same key — the escape hatch
-  for an action that means to override a helper. Only derived keys are
-  suppressed. Values always come from result records; the journal decides only
-  WHICH keys are written.
-
-  **Results**:
-  - **BOTH real flip REDs green**, including the elbow `x` case that the plain
-    base→result diff could not fix.
-  - Full suite 18 → **17** failures (15 snapshot, 2 semantic: `textWysiwyg`
-    container-wrap and `actionDeleteSelected`'s elbow-binding branch).
-  - **1 transport update** for the action, local and peer states **converged**,
-    **undo depth +1**.
-
-  **Non-vacuity, both required probes**: disabling the subtraction brings the
-  elbow RED back; recording every key EXCEPT `x` brings it back too. So the
-  mechanism is load-bearing and specifically depends on the journaled key.
-
-  **A defect my own pin caught**: the first implementation discarded the journal
-  at the FIRST `end`, so a nested scope stranded the outer action's
-  declarations. Fixed with depth counting — created at 0→1, discarded at 1→0 —
-  and an unbalanced `end` is a no-op rather than an underflow, so a stale journal
-  can never be observed by the next action.
-
-  **Contract pinned** (`Scene.mutationJournal.test.ts`, 6): same-value
-  declaration is recorded, no scope means no journal, the journal clears at end,
-  nested scopes UNION and clear only at the outermost end, keys accumulate across
-  calls, an explicit action declaration overrides a journaled helper key, and a
-  derived key in the journal is suppressed so the doc value survives.
-
-  **Scope, named as required**: this closes the SYNCHRONOUS helper-overwrite
-  ambiguity only. `ActionManager` closes its boundary before an async result
-  lands, so the one async element-returning `perform` gets no journal — **T016c
-  remains open**.
-
-  **ROUND-2 ON THE JOURNAL — two corrections applied, both semantic failures
-  attributed, and they share ONE cause.** (Reverted again; suite is NOT green, so
-  landing is not justified.)
-
-  **Correction 1 — `endActionMutationJournal` now THROWS on imbalance**, matching
-  the transport boundary rather than silently no-op'ing. A no-op hides caller
-  imbalance instead of preventing stale reuse. Pinned: close-without-open throws,
-  and a throw MID-action still clears before the next action.
-
-  **Correction 2 — the journal reuses the EXISTING persisted-key selector.** It
-  recorded raw `Object.keys(updates)`, so passing a broad element object could
-  have made `id` / `version` / `versionNonce` / `updated` into action ownership.
-  It now filters through **`isIntentKey`** (`packages/element/src/yjs/intent.ts`
-  — `key !== "id" && !RECONCILE_META_KEYS.has(key)`), the same selector intent
-  derivation uses, exported rather than duplicated so the two cannot drift.
-  Pinned directly.
-
-  **Snapshot classification — ALL 15 are reconciliation metadata only.** Across
-  3 files: 6 `"version"` + 4 `"versionNonce"`. **Zero** `hasElementChange`, zero
-  geometry/binding/content, zero membership/order. Accepting them leaves exactly
-  **2 failures**.
-
-  **Both semantic failures attributed — SAME cause, and it is none of (a)-(d) as
-  offered: it is OVER-SUPPRESSION.**
-  ```
-  actionDeleteSelected  derived id2:startBinding      journal id2:endBinding+startBinding
-  textWysiwyg wrap      derived id3:containerId+textAlign+verticalAlign
-                        journal id3:angle+autoResize+boundElements+containerId+
-                                height+text+textAlign+verticalAlign+width+x+y
-  ```
-  In BOTH, every key the action derived is also in the journal, so every one is
-  suppressed and the action's contribution is dropped entirely. Neither action
-  declares an explicit intent (`explicit: false`).
-
-  **What this means for the design.** The journal's rule is "a helper touched
-  this key, so the helper's doc value wins". That is RIGHT for flip — the
-  action's value there was computed from a stale base. It is WRONG here — the
-  helper wrote an intermediate value and the ACTION's derived value is the
-  intended final one. A derived diff cannot tell those apart in EITHER direction,
-  which is the same limit that killed plain derived intent, now showing from the
-  other side.
-
-  So the explicit `declaredIntent` channel is not an optional escape hatch — it
-  is **required per action** wherever an action must override a helper it
-  invoked. That is per-action ownership work (T015's real shape), not something
-  the journal can infer. **Not special-cased here**, per instruction.
-
-  **Still verified after the corrections**: both flip REDs green, both journal
-  non-vacuity probes fire, ONE transport update, local/peer converged, undo +1.
-
-  **T016c REMAINS OPEN.** The single async element-returning `perform` gets no
-  journal, because `ActionManager` closes its boundary before the promise
-  resolves.
-
-  **ROUND-3 — INSTRUMENTING FIRST OVERTURNED MY OWN ATTRIBUTION.** (Reverted.)
-
-  Measured the AMBIGUOUS OVERLAP properly — keys in BOTH the derived diff and the
-  journal **whose canonical result value differs from the CURRENT doc value**
-  (a same-valued overlap is not a conflict). Complete measured set across the
-  whole suite:
-  ```
-  flip / re-center:  arr.x, rec1.x, rec2.x, and .x/.y on 12 further ids
-  (journal unit test): a.x
-  ```
-  **`textWysiwyg` and `actionDeleteSelected` produce NO ambiguous overlap at
-  all.**
-
-  **So the round-2 "over-suppression" attribution was WRONG.** If the result value
-  equals the doc value, suppressing that key changes nothing and cannot be the
-  cause. Verified directly: with journal subtraction DISABLED, **both still
-  fail** — so both are caused by the ROUTING (`applyElementChanges` replacing
-  `replaceAllElements`), not by the journal. Instrumenting rather than reasoning
-  from the abbreviated examples is what caught this.
-
-  **`actionDeleteSelected` is category (d) — a wrong test assumption.** The test
-  monkey-patches `scene.replaceAllElements` and asserts on the array handed to
-  it (`'NOCALL'` sentinel). Under the routing that function is not called, so the
-  spy never fires. It asserts the MECHANISM, not the observable outcome, and
-  would break under any change to that boundary. Not evidence of a defect;
-  it needs rewriting against the outcome.
-
-  **`textWysiwyg` container-wrap remains unattributed** — it is a routing
-  consequence, not journal suppression, and needs its own trace.
-
-  **Design consequence for the conflict selector**: the ambiguous set is far
-  narrower than assumed — only flip-family geometry keys. So the
-  "resolve every conflict explicitly, fail closed" rule has a small, concrete
-  domain rather than an open-ended one.
-
-  **On extending the existing API rather than adding a second**: a positive
-  `keysById` alone CANNOT express "every conflict explicitly decided", because
-  omission would silently mean "helper wins" — precisely the omission default
-  that must not exist. The minimal single-API shape is `DeclaredElementIntent`
-  gaining an explicit per-id/per-key resolution map (`"result" | "applied"`),
-  with `keysById` implying `"result"` for matching overlaps. Not built pending
-  the re-attribution above.
-
-  **ROUND-4 — SUPERSEDED IN PART BY ROUND-5 BELOW.** The classification
-  (ordering/index) is right; the CAUSE stated here — that `syncMovedIndices`
-  minted the tie — is WRONG. See round 5.
-
-  **ROUND-4 — `textWysiwyg` ATTRIBUTED: ordering / index normalization. T016j was
-  RIGHT ALL ALONG.** (Experiment reverted; only the test rewrite kept.)
-
-  The failing assertion is not a value mismatch — `h.elements[1]` is the TEXT
-  where the CONTAINER is expected. Measured at the boundary:
-  ```
-  resultOrder: ["id1@a0", "id6@a1", "id3@a1"]     <- id6 and id3 TIED at a1
-  docOrder:    ["id1@a0", "id3@a1"]
-  FINAL:       ["id1:rectangle@a0", "id3:text@a1", "id6:rectangle@a1"]
-  ```
-  The action's result ARRAY order is correct (`id1, id6, id3` — container before
-  its text), but `syncMovedIndices` minted the new container at the SAME
-  fractional index as the text. Authoritative `replaceAllElements` repairs that
-  tie via `syncInvalidIndices`; `applyElementChanges` deliberately does not
-  (T016j's own comment: format validation only, "NOT neighbour-relative — a
-  relational tie is classified at the caller that knows the intended array
-  order"). Remove the repair and the tie breaks by id, putting the text first.
-
-  **So T016j's original attribution was CORRECT and my "falsified" verdict was
-  wrong — twice over.** The tie is real; it is simply invisible while
-  `replaceAllElements` repairs it. Classification: **ordering / index
-  normalization**, at the CALLER, not membership, not metadata, not suppression.
-
-  **`actionDeleteSelected` test REWRITTEN to an observable contract** (kept). It
-  monkey-patched `scene.replaceAllElements` and asserted on the array handed to
-  it, so it failed under any change of planner even when behaviour was correct.
-  It now pins the converged product state: binding nulled locally AND at a linked
-  peer, plus one undo step, with a guard that the binding existed first. **Passes
-  under BOTH planners** (authoritative today, and under the experiment).
-
-  **NON-VACUITY NOT ESTABLISHED for that rewrite — stated, not glossed.** Three
-  separate sabotages — no-op'ing `fixBindingsAfterDeletion`'s body, disabling the
-  `startBinding` ternary in `actionDeleteSelected`, and deleting the
-  `fixBindingsAfterDeletion` call entirely — ALL left it green. The null is
-  evidently over-determined by several mechanisms. The guard does hold (the
-  binding exists before the action), so it is not vacuous in the "nothing was set
-  up" sense, but no mutation has yet been found that breaks it. It needs a
-  sharper assertion or a narrower sabotage before it can be treated as a
-  regression gate.
-
-  **ROUND-5 — the four-point trace settles the contradiction. THE REREAD makes
-  the tie, not `syncMovedIndices`.** (Reverted; only the already-committed delete-test
-  rewrite is kept.)
-
-  Logged the literal ids/indices at four points on the failing path, authoritative
-  repair disabled:
-  ```
-  P1 before syncMovedIndices : id1@a0, id6@null, id3@a1
-  P2 after  syncMovedIndices : id1@a0, id6@a1,   id3@a2   <- DISTINCT, correct
-  P3 before reread           : id1@a0, id6@a1,   id3@a2
-  P4 after  reread           : id1@a0, id6@a1,   id3@a1   <- TIE
-  ```
-  `syncMovedIndices` mints DISTINCT indices. The `freshMap` reread then replaces
-  the text with the live doc version, which still carries `a1` because the write
-  had not happened yet — restoring the stale index and tying it against the new
-  container. **The earlier T016j trace was correct and round 4's cause was wrong**;
-  round 4 inferred the cause from the boundary result without instrumenting the
-  intermediate points.
-
-  **The fix is therefore the bounded removal of THAT reread** — not an index mint
-  and not a planner repair. Measured under the patch route with only that reread
-  removed:
-  - order CORRECT locally and at a linked peer (the n=3 pin passes);
-  - full suite **17 → 9 failures** (8 snapshot, 1 semantic);
-  - the single semantic残 is the baked-in `version: 9` vs `2` expectation —
-    reconciliation metadata, and the patch route's lower value reflects fewer
-    spurious bumps, not lost content.
-
-  **`actionDeleteSelected` — NON-VACUITY NOW ESTABLISHED; my earlier "could not
-  establish" was wrong.** Instrumenting write provenance (rather than guessing
-  again) named the exact owner: `actionDeleteSelected.tsx`'s
-  `app.scene.mutateElement(bound, { startBinding … })` on the bound elbow.
-  Sabotaging THAT site fails both tests (`expected 'id0' to be null`). The three
-  earlier sabotages were simply mis-aimed — the null is NOT over-determined, and
-  the rewritten observable test IS a valid gate. The arrow also survives the
-  delete (`isDeleted: false`), so it does not pass by the element vanishing.
-
-  **FINAL INTEGRATED EXPERIMENT — built, measured, REVERTED. NOT green yet.**
-
-  **API shape (single selector, no second overlapping channel)**:
-  `DeclaredElementIntent` gains
-  `overlapResolution?: ReadonlyMap<id, ReadonlyMap<key, "result" | "applied">>`,
-  mirrored as an `applyElementChanges` option for the derived-diff path and as
-  `ActionResult.overlapResolution` so an action can supply it. An AMBIGUOUS key
-  is one in `derived ∩ journal` whose result value differs from the CURRENT doc
-  value, compared with the same `JSON.stringify` semantics the write planner
-  uses. Same-valued overlap needs no resolution. Missing → throw naming every
-  unresolved `id.key`; unknown value → throw. **Zero mutation on rejection**,
-  pinned by an unchanged state vector.
-
-  **Flip's resolution producer**: `flipOverlapResolution(next)` in
-  `actionFlip.ts` maps the ids the action actually touched to
-  `x/y/width/height/angle/points → "applied"`. Derived from dynamic ids, no
-  fixture literals, and no action-name branch anywhere in `Scene`.
-
-  **Both proven rereads removed** (flip:216 and the text/container one). No other
-  reread touched.
-
-  **Results**: both flip suites green (43 passed). Full suite **11 failures**:
-  8 snapshot + 3 semantic, of which 2 were my own journal tests still written
-  against the old default-subtraction semantics — updated, now 12 passing. That
-  leaves **8 snapshot + 1 semantic**.
-
-  **Snapshot classification** (3 files): **6 `"version"` + 4 `"versionNonce"`.
-  ZERO `updated`, ZERO `hasElementChange`, ZERO geometry/binding/content, ZERO
-  membership/order.**
-
-  **The 1 remaining semantic** is `textWysiwyg`'s baked-in `version: 9` vs `2`.
-  Per the standing rule it may change ONLY once instrumentation shows the
-  reduction comes from eliminated stale/no-op writes rather than a missed
-  intended write — **that instrumentation has NOT been done**, so it is left
-  failing.
-
-  **Probes that fire**: omit a flip resolution → pre-write throw naming
-  `arr.x, rec1.x, rec2.x`; invert `applied`→`result` → the real flip semantic
-  RED; explicit `result` beats a journaled key; same-value overlap needs no
-  resolution; unknown value rejects; close-without-open throws; a throw
-  mid-action still clears.
-
-  **GAP, stated rather than glossed**: the n=3 order pin is **NOT** the
-  discriminating gate for the text reread — it passes with that reread RESTORED.
-  The `textWysiwyg` assertion is what actually catches the tie. Item 5's
-  requirement is therefore met by that test, not by the pin I built, and the pin
-  should not be described as covering it.
-
-  **ROUND-7 — two defects in my own patch corrected; the experiment now has ZERO
-  semantic failures.** (Reverted; patch refreshed.)
-
-  **Correction A — my "same comparison the write planner uses" comment was
-  FALSE.** I compared with `JSON.stringify`, while `writeChangedKeys` uses
-  presence/`undefined` handling, `diffBoundElements` set-diff, `deepEqual` for
-  JSON leaves and strict `!==` otherwise. `JSON.stringify` is key-order sensitive
-  and collapses presence distinctions. Fixed by extracting ONE mutation-free
-  predicate, `wouldWriteChange(ymap, element, key)`, in `schema.ts` — with a
-  non-mutating mirror of the boundElements set-diff — and routing BOTH the writer
-  and ambiguity detection through it. No second comparator exists.
-
-  **Correction B — `flipOverlapResolution(next)` was not "ids actually
-  touched".** It mapped geometry keys for EVERY record in the returned
-  whole-scene array, and the boundary silently ignored the extra entries.
-  Replaced with an explicit per-KEY policy: `overlapPolicy` (key → choice),
-  applied by the boundary ONLY to keys that are genuinely ambiguous. This is
-  honest to what flip knows — "for geometry keys the helper's doc value wins" —
-  without inventing ids before the journal exists. An ambiguous key outside the
-  policy still throws.
-
-  **The version question, RESOLVED by measurement** (item 3/4). Logged every
-  write pass on both routes:
-  ```
-  patch route  : id3:1[isDeleted] … id3:3[width+text+originalText] …
-                 id3:3[containerId+verticalAlign+textAlign] … id3:1[index], id6:1[isDeleted]
-  authoritative: IDENTICAL write set, differing only in pass ORDER and one extra
-                 zero-write pass on an untouched element
-  ```
-  The doc writes are the SAME; no intended write is lost. The `9` vs `2` is
-  accumulated in-memory version, not doc content. So per the rule the baked-in
-  `version` was **REMOVED from that geometry assertion** rather than swapped for
-  another incidental number — version behaviour belongs to the T014b/metadata
-  tests, not a geometry contract.
-
-  **Suite now: 8 failures, ALL snapshot, ZERO semantic.** Classification
-  unchanged and re-confirmed: **6 `"version"` + 4 `"versionNonce"` across 3
-  files; zero `updated`, `hasElementChange`, geometry/binding/content, or
-  membership/order.**
-
-  **All probes re-run after the corrections and still fire**: dropping a policy
-  key throws naming `arr.x, rec1.x, rec2.x`; inverting `applied`→`result` gives
-  the real flip RED; explicit `result` beats a journaled key; same-value overlap
-  needs no resolution; unknown value rejects; close-without-open throws; a throw
-  mid-action clears. Typecheck 0, lint 0.
-
-  **T015 — HOLD LIFTED (see the discriminating experiment above).** It was held
-  because helper intent sets risked being a SECOND unconsumed API, and because
-  the textWysiwyg `+7` proved only that stale full writes happen, not that
-  helper-declared intents were needed. The experiment has now demonstrated the
-  ambiguity that was required to justify them: when an action and a helper write
-  the SAME key, a derived diff prefers the action's stale value over the helper's
-  correct one. Explicit ownership is the only thing that can resolve it.
-
-- [ ] T016h **Staged order within the application** (not required for CRDT correctness — Yjs observers see only the committed final state — but it makes the invariants auditable): (1) before any write, take the deep snapshot, compute and validate the complete intent, resolve/canonicalize every required fractional index, and assert added/deleted/changed id sets are disjoint; (2) STRUCTURAL prelude materializes still-absent added ids as complete tombstones, in result order; (3) one LOCAL/STRUCTURAL action transaction applies membership deletions and scoped writes for existing ids, then reveals added ids LAST — not needed for correctness inside one transaction, but it preserves the invariant that an element is never live before its complete record exists; (4) metadata for actual writes inside that same transaction; (5) one recompute/notification after.
-- [x] T016i **(already satisfied — verified, not built)** The rule that an id classified "added" against the base but already present in the current doc must NOT be structurally replaced is implemented: `commitPlan` partitions adds into `absent` vs `collided` (`Scene.ts:1004`) and a collided add takes the scoped-write path rather than a `Y.Map` replacement (G7, `Scene.ts:1057`). Covered by `Scene.commitPlan.test.ts:68` ("a collided add is a scoped write"). No collision machinery is needed, and the case is not hypothetical — undo/redo re-adding a previously-known id reaches it, which is why the doc entry already exists as a tombstone rather than being absent.
-- [ ] T016c Point `App.syncActionResult` at the new path. RED first: a test where a remote apply lands mid-action and must survive the result application. **This does NOT make the async path solved** — that test proves preservation of an unrelated remote key, not the same-base explicit-intent case. An async action is only covered once it either carries explicit intent or is audited to return no element changes (T016d). Do not mark the async class closed on the strength of T016c.
-- [x] T016d **(done)** Two async actions returned their INVOCATION-time element array from a post-`await` catch path while reporting no element change, so a failure could overwrite whatever reached the doc during the await — measured on `actionElementLink`, where a peer's edit applied mid-await was reverted. Both catch paths now omit `elements`. Async actions that genuinely return element changes remain T016c scope.
+- [x] T016b **(DONE — the synchronous action write path)** An action's result is applied as a DIFF against the snapshot it was invoked on, onto whatever the document holds now, with explicit ownership wherever the action and a helper it invoked wrote the same key.
+
+  **Why the authoritative path was wrong.** `syncActionResult` fed
+  `scene.replaceAllElements(result)`, whose contract is "make the doc equal this
+  set". A side-effecting helper (`redrawTextBoundingBox`, `updateBoundElements`,
+  `bindOrUnbind`, the flip repositioners) writes to the doc DURING `perform`,
+  and the array the action returns can predate those writes — so applying it
+  authoritatively reverted them. Measured through production actions, not
+  hypothesised.
+
+  **The mechanism, in three parts.**
+
+  1. **Invocation base.** `ActionManager.updater` already carried
+     `invocationBase` (T016a) and `syncActionResult` discarded it. It now accepts
+     it and, when present, routes to
+     `scene.applyElementChanges(base, result, …)`; callers without a base keep
+     the authoritative path.
+
+  2. **Action mutation journal.** `Scene.beginActionMutationJournal()` /
+     `endActionMutationJournal()` record which keys each `scene.mutateElement`
+     call DECLARES, per id, for the synchronous span of one action. The
+     `updates` object already IS the writer's explicit declaration AND the actual
+     write source, so journaling it cannot drift from a hand-maintained list.
+     Keys are filtered through `isIntentKey`, the same selector intent derivation
+     uses, so a broad element object cannot turn `id` or reconciliation metadata
+     into ownership. A key is recorded even when the value already matches —
+     declaring it is a claim regardless of what the doc held.
+
+     Deliberately SEPARATE from `beginLogicalMutation`: that is a generic
+     transport primitive, and making every logical boundary imply intent capture
+     would couple transport buffering to action semantics. Nested scopes join;
+     the journal is created at the outermost begin and discarded at the matching
+     end; an unbalanced end THROWS.
+
+  3. **Fail-closed ownership.** A key claimed by BOTH the derived diff and the
+     journal, where a scoped write would actually change the document, is
+     AMBIGUOUS — the action may be overriding the helper, or its value may be
+     stale, and nothing may guess. Every such key must be covered exactly once:
+     - `declaredIntent.overlapResolution` — exact per-id/per-key `result` |
+       `applied`; `keysById` implies `result`;
+     - `overlapPolicy` — a per-KEY policy applied only to keys that are genuinely
+       ambiguous, for a caller that knows its rule but cannot know which ids will
+       conflict before the journal exists;
+     - anything else **throws before any mutation**, naming every unresolved
+       `id.key`. An unknown choice throws. Rejection leaves the state vector
+       unchanged.
+
+  **One comparison authority.** `wouldWriteChange(ymap, element, key)` in
+  `schema.ts` is the single mutation-free predicate for "would a scoped write of
+  this key change the document" — presence/`undefined` handling, `boundElements`
+  set-diff, `deepEqual` for JSON leaves, strict identity otherwise.
+  `writeChangedKeys` and ambiguity detection both consult it, so they cannot
+  diverge. (A `JSON.stringify` comparison is NOT equivalent: key-order sensitive,
+  and it collapses presence distinctions.)
+
+  **Production ownership.** Only flip declares one: `FLIP_OVERLAP_POLICY` maps
+  the geometry keys to `applied`, because `flipSelectedElements` repositions
+  elements and their bound texts/arrows THROUGH THE DOC and then returns the
+  pre-flip array. No action-name branch exists in `Scene`.
+
+  **Two rereads removed, both proven necessary to remove:**
+  - `actionFlip`'s post-flip whole-object reread — its stale `selectedElements`
+    clobbered helper geometry;
+  - `actionBoundText`'s wrap reread — it replaced the just-reindexed text with
+    the live doc version still carrying the OLD index, turning `syncMovedIndices`'
+    distinct `a1`/`a2` into a tie at `a1`. Measured at four points.
+
+  **Gates**: both flip suites; the text order/z-index assertion; the observable
+  delete-binding gate (converged state locally AND at a linked peer, one undo
+  step); one transport update per action; `Scene.mutationJournal.test.ts` (12).
+
+  **Non-vacuity, every branch**: dropping a flip policy key throws naming
+  `arr.x, rec1.x, rec2.x`; inverting `applied`→`result` produces the real flip
+  regression; sabotaging the delete's owning `mutateElement(startBinding)` site
+  fails the delete gate; restoring either reread fails its own gate.
+
+  **Snapshot movement**: exactly 10 lines across 3 files — 6 `version`, 4
+  `versionNonce`. Zero `updated`, `hasElementChange`, geometry/binding/content or
+  membership/order. The `textWysiwyg` geometry assertion no longer pins a
+  version: measured across both apply routes the doc write SET is identical, so
+  the difference was accumulated in-memory version, not lost content.
+
+- [x] T016c **(CLOSED — no current producer; the rule lives at the boundary)** Async action results.
+
+  **Census, re-audited by brace-matching every `perform: async` body and
+  inspecting only `return { … }` sites: ZERO async performs return an
+  `elements` field** (`actionElementLink` ×1, `actionExport` ×3,
+  `actionClipboard` ×4 — none returns elements). Earlier notes claiming one were
+  wrong; that count came from matching `prepareElementsForExport` ARGUMENTS.
+
+  There is therefore no async producer to build machinery for, and none is
+  built. The durable rule is recorded at the `ActionResult` boundary instead: a
+  future async element result CANNOT use the synchronous derived/journal
+  fallback, because `ActionManager` closes both the transport boundary and the
+  journal scope before the promise resolves. Such a result must supply explicit
+  intent/ownership, or be rejected. Reopen only against a real producer.
+
 - [ ] T016e Integrate **T014b** here — this write path is the right integration point, but **the mechanism remains an OPEN, RED-first problem and must not be assumed solved by it**. Correction of an earlier claim: the narrowed experiment already tried `writes > 0 && record.version <= prevMeta ? prevMeta + 1 : record.version` — i.e. it was ALREADY scoped to ids whose doc properties actually changed — and it still broke transform snapshots. So "unchanged elements caused the 68 snapshot failures" is **unproven**, and patch semantics cannot be presumed to fix them. Patch semantics may well remove stale/unintended writes and shrink the failure set, but that has to be MEASURED: re-run the genuine raised-meta regression test plus the semantic failures and reclassify from scratch. Do not carry the blanket-fix explanation forward.
-- [ ] T016f Only then revisit the 36 re-read sites, retiring each as patch mode proves it redundant.
+- [ ] T016f **(OPEN — this slice removed TWO of the sites, not the family)** Revisit the remaining re-read sites, retiring each only where patch mode proves it redundant AND a test discriminates.
+  - Removed so far: `actionFlip`'s post-flip whole-object reread, and `actionBoundText`'s wrap reread. Both were proven by a failing production test, not by inspection.
+  - **Measured, per invocation, across the six families that call side-effecting helpers**: `flip:163` 63 reached / 2 semantic; `boundText:184` 25 / 10 (`boundElements`); `boundText:358` 14 / 3 (`index`); `props:319` 9 / 1; `props:1107` and `props:1379` 8 / 0 each; `align:83` and `distribute:77` **never reached — unknown, not clean**; `actionStyles`' is already narrow (copies only `width`/`height`).
+  - A semantic difference is NOT an observable defect: `boundText:184` and `boundText:358` can each be deleted with the suite still green. Do not retire a site without a test that fails when it returns.
 
 **Design note (do not lose):** a base→result diff is a sound migration default but is NOT the definition of intent. "Explicitly set a key to the value it already had in base" is invisible to a diff yet must still beat an interleaved remote write — the same asymmetry FR-009 fixed one layer down. Derive for synchronous actions in the interim; the durable contract carries explicit per-id key sets plus membership intent.
 
@@ -683,7 +285,42 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
 - [x] T018b **(done)** `ExcalidrawImperativeAPI` exposes the collaboration transport — `onLocalSceneUpdate` / `applyRemoteSceneUpdate` / `encodeSceneAsUpdate` — delegating to the `Scene` methods that carry the origin policy. The raw `Y.Doc` is not reachable from the public API, so the policy cannot be bypassed. `Collab.tsx` consumes that boundary and holds no filter of its own; it imports neither `yjs` nor any origin sentinel. Coverage for every transport invariant lives at Scene level, including a remote appState apply producing no outbound update (which guards the `yAppState` observer against a write-back loop).
 - [x] T018a **(done)** Corrected the Scene API surface published to consumers. The method is **`encodeStateAsUpdate(...)`** (plus `encodeStateVector()`, `encodeSnapshot()`), NOT `encodeAsUpdate()`. **Verified against the RED baseline, not just against HEAD**: `encodeAsUpdate` never existed at any point — `96f9bce3` already declared `encodeStateAsUpdate` (1049), `applyRemoteUpdate` (1035), `encodeStateVector` (1062), `encodeSnapshot` (1203). So this was purely a prose error in `plan.md`, and the name relayed to the server team would never have resolved. Line numbers in that sentence were also drifted (they pointed into method bodies rather than declarations) and now cite the baseline declarations, per this spec's convention that cited lines resolve against `96f9bce3`. **Server-facing consequence**: anyone who took `encodeAsUpdate()` from the plan needs the corrected name; flagged for the next hand-off rather than assumed harmless.
 
-- [ ] T016j **(BLOCKS the syncActionResult slice — found in review; CENSUS DONE)** - **Measured, not assumed.** Instrumented `replaceAllElements` and ran the whole suite, recording per-call index status of the incoming array: **3225 valid / 2 invalid / 76 missing** across 3303 calls. (First attempt reported 0 valid / 3227 invalid — an artifact: `validateFractionalIndices` returns `void` and THROWS, so testing its return value for truthiness marks everything invalid. Corrected to catch.) - **Missing index, production callers: only two, both authoritative** — `new Scene` (30) and the public `updateScene` (7). Both keep `syncInvalidIndices`. Every other missing case is a test file constructing elements by hand. - **The migration target is nearly clean**: `syncActionResult` is 1573 valid, 2 invalid, **zero missing**. - **Those 2 are DUPLICATE indices, not missing or malformed** — `a1` twice in one, `a3` twice in the other, both arriving through `ActionManager.executeAction`. And `orderByFractionalIndex` **breaks ties by element id**, so a duplicate orders deterministically: non-canonical, not corrupt. A strict whole-array prevalidation would therefore REJECT two real action results that converge correctly today. - **Consequence for the design**: validate only AFFECTED records (added ids + existing ids whose declared keys include `index`); reject missing/malformed; do NOT reject a tie. No repair by default, no touching unrelated current elements. The contract's "planner resolves every index" is overbroad — the real invariant is _no invalid affected record reaches `commitPlan`, and no undeclared index is written_. - **CORRECTION (measured): "both converge correctly today" was FALSE, not merely unestablished.** Today `replaceAllElements` runs `syncInvalidIndices` before persistence, so a tie is canonicalized and accept-as-is was never observed. Measured both real cases, comparing the accept-as-is order (id tie-break) against today's repaired order: `wrapTextInContainer` (n=3) is **DIFFERENT** — accept-as-is `id319,id321,id324` vs today `id319,id324,id321`, where `id324` is the ADDED container and `id321` its pre-existing text, so accepting the tie puts the container ABOVE its text and inverts the intended z-order; `wrapTextInContainer` (n=5) is SAME. Deterministic convergence is emphatically not the same as preserving intended order. - **Both real ties come from ONE action, `wrapTextInContainer`**, each with a newly ADDED element tying a pre-existing one. - **CAUSAL ATTRIBUTION CORRECTED — measured, and my first reading was wrong.** I blamed `syncMovedIndices`' `includeBoundTextValidation: false` carve-out. Instrumenting `actionBoundText` immediately after `pushContainerBelowText` and immediately after the `freshMap` re-read shows otherwise: `AFTER syncMovedIndices: id319=a0 id324=a1 id321=a2` (distinct, correctly ordered — container `a1` below text `a2`) then `AFTER freshMap read: id319=a0 id324=a1 id321=a1` (text reverts, tie created). `syncMovedIndices` generates a correct tie-free assignment but writes it with bare `mutateElement`, i.e. to the SCRATCH object only, so the doc still holds the text's old `a1`; the re-read then replaces every element present in the doc and discards the generated index, while the new container survives via `?? element` because it is not in the doc yet. **This is the 36-reread band-aid class (T016f), not a fractional-index defect** — the tie is concrete evidence FOR the bounded re-read removal. Under `applyElementChanges` the re-read becomes unnecessary: it existed to stop the later authoritative flush reverting doc-side helper writes, and patch semantics remove that need. Do NOT change `includeBoundTextValidation`; do NOT add a tie resolver. - **Therefore**: format-only prevalidation (present + syntactically well-formed) is correct and lands now — it does not reject these, which are well-formed. The tie is resolved by REMOVING the re-read in `actionBoundText` as part of the bounded T016f migration, proven by an action-level test through the new `syncActionResult` path asserting the container stays directly below its text on both replicas. - Original statement of the defect: `ElementPlan` is contracted as fully normalized and validated, and index policy is planner-owned. Neither is implemented: `commitPlan` asserts only id-set disjointness, and `applyElementChanges` copies `result` records without resolving or validating fractional indices. `replaceAllElements` today calls `syncInvalidIndices` + `validateIndicesThrottled`; switching any creation caller over would persist `newElement`'s missing index or stale/duplicate ordering. G6 is claimed but unbuilt, and the current "invalid plan writes NOTHING" test proves only contradictory membership, not record/index validity. Finish the planner's scoped ordering design, prevalidate the finished plan before the structural prelude, and plant malformed / duplicate / missing-index cases proving ZERO doc writes. Index policy must NOT move into `commitPlan` — that was rejected as a mode in disguise.
+- [x] T016j **(DONE — scoped index validation, and the tie's real cause)** `applyElementChanges` validates fractional indices for AFFECTED records only.
+
+  **Contract**: validate the records this mutation affects — creations, and
+  existing ids whose declared keys include `index`. Format only: present and
+  parseable. A relational TIE is not rejected and not repaired here; it belongs
+  to the caller that knows the intended array order. An element absent from the
+  result is never inspected.
+
+  **Measured census** over the whole suite: 3225 valid / 2 invalid / 76 missing
+  across 3303 `replaceAllElements` calls. `syncActionResult` itself is 1573 valid,
+  2 invalid, **zero missing**. The only production callers passing a missing index
+  are `new Scene` and the public `updateScene`, both authoritative, both keeping
+  `syncInvalidIndices`. A strict whole-array prevalidation would have rejected
+  two real action results.
+
+  **The 2 "invalid" are DUPLICATE indices, both from `wrapTextInContainer`**, each
+  a newly added element tying a pre-existing one. `orderByFractionalIndex` breaks
+  ties by element id, so they order deterministically — but deterministically is
+  not correctly: for n=3, accepting the tie puts the container ABOVE its text and
+  inverts the intended z-order.
+
+  **Cause, measured at four points** on the failing path with authoritative
+  repair disabled:
+  ```
+  before syncMovedIndices : id1@a0, id6@null, id3@a1
+  after  syncMovedIndices : id1@a0, id6@a1,   id3@a2   <- distinct, correct
+  before reread           : id1@a0, id6@a1,   id3@a2
+  after  reread           : id1@a0, id6@a1,   id3@a1   <- TIE
+  ```
+  `syncMovedIndices` produces a correct tie-free assignment but writes it to the
+  SCRATCH object, so the doc still holds the text's old `a1`; the reread then
+  replaces every element present in the doc and discards the generated index,
+  while the new container survives via `?? element` because it is not in the doc
+  yet. This is the reread class (T016f), not a fractional-index defect — which is
+  why the fix is removing that reread (done in T016b) rather than a tie resolver.
+  `includeBoundTextValidation` is unrelated and unchanged.
 
 - [x] T016k **(done — the action owns the broadcast)** One editor action reaches a peer as ONE transport message. `ActionManager.executeAction` opens a logical mutation around the synchronous span (`perform` through `syncActionResult`); inner `Scene` boundaries JOIN it, so only the outermost close publishes. - **Measured on `wrapTextInContainer`**: `senderUpdates=1, peerStates=1, dangling=[], undoDepth=1`, against a baseline of 4 / 4 / 2 dangling container references. `actionAtomicity.test.tsx` is un-skipped. - **Scope of the guarantee, stated precisely**: it is a TRANSPORT guarantee. The sender's own Scene/Store callbacks may still fire several times locally, and no test claims otherwise. - **Async is delimited, never spanned**: the updater registers a promise continuation and returns, so the boundary closes before an async result lands and the buffer is never held across an `await`. An async action gains nothing from it and is unchanged. - **A throw mid-action still publishes** whatever Yjs already committed — those bytes are in the document, and withholding them would diverge the peer permanently. Balanced closes live in `finally`. - **Boundary rules pinned**: nested join (only the outermost publishes, and its single message carries the final state), throw-after-write publication, a no-write boundary publishing nothing, and closing without opening throwing.
 - [x] T017 **(closed by reconciliation — the behavioural contract holds; no fix was needed)** Measured through the real public path (`excalidrawAPI.applyRemoteSceneUpdate`, what `Collab` calls), a remote apply contributes ZERO to both stacks. The task's premise — that it currently contributes a history entry — is false, and a `NEVER` micro-action written to "fix" it changed the numbers not at all, so it was reverted rather than shipped. - **The invariant is restated behaviourally, not as stack depths.** `History` and the `UndoManager` legitimately differ: an appState-only step makes a `History` entry with `hasElementChange: false` and no `UndoManager` item. A depth-equality assertion would fail for a CORRECT editor, which is why the old skipped test was not evidence of a defect. A pairing claim (`hasElementChange` entry ⇔ `UndoManager` item) was considered and NOT adopted — it is another cardinality claim, and `history.ts:153` only calls `stopElementCapture()` to seal a step, which does not by itself guarantee a one-to-one relationship under coalescing. - **Coverage of the three behavioural requirements**: (1) a remote apply adds no locally undoable step — `historyLockstep.test.tsx`, new, non-vacuous (applying the remote update under `LOCAL_ORIGIN` instead fails it); (2) the next local undo affects only the local action and both replicas converge — `Scene.native-yjs-collab.test.ts` origin-scoped undo, which asserts peer content and matching state vectors; (3) appState-only local history stays undoable without an element item — `appStateUndo.test.tsx`, where a background change is appState-only and undoable end to end.

@@ -336,6 +336,44 @@ export const yMapToElement = (ymap: Y.Map<unknown>): ElementRecord => {
  * MUST be called inside a `ydoc.transact(fn, LOCAL_ORIGIN)`. Returns the number
  * of keys written (0 ⇒ nothing changed).
  */
+/**
+ * Would a SCOPED write of `key` from `element` actually change `ymap`?
+ *
+ * The single authority for "is this key different from what the document
+ * holds". `writeChangedKeys` consults it before mutating, and ambiguous-overlap
+ * detection consults it to decide whether an action and a helper genuinely
+ * disagree — so the two can never drift apart.
+ *
+ * Mutation-free, and it mirrors every branch the writer has: presence/`undefined`
+ * handling, `boundElements` set-diff semantics, `deepEqual` for JSON leaves, and
+ * strict identity otherwise. A `JSON.stringify` comparison is NOT equivalent —
+ * it is key-order sensitive and collapses presence distinctions.
+ */
+export const wouldWriteChange = (
+  ymap: Y.Map<unknown>,
+  element: ElementRecord,
+  key: string,
+): boolean => {
+  if (RECONCILE_META_KEYS.has(key)) {
+    return false;
+  }
+  const next = element[key];
+  if (next === undefined) {
+    if (key === BOUND_ELEMENTS_KEY) {
+      return boundElementsDiffers(ymap, null);
+    }
+    return ymap.has(key);
+  }
+  if (key === BOUND_ELEMENTS_KEY) {
+    return boundElementsDiffers(ymap, next as readonly BoundElement[] | null);
+  }
+  const prev = ymap.get(key);
+  if (JSON_LEAF_KEYS.has(key)) {
+    return !deepEqual(prev as never, next as never);
+  }
+  return prev !== next;
+};
+
 export const writeChangedKeys = (
   ymap: Y.Map<unknown>,
   element: ElementRecord,
@@ -373,14 +411,8 @@ export const writeChangedKeys = (
       writes += diffBoundElements(ymap, next as readonly BoundElement[] | null);
       continue;
     }
-    const prev = ymap.get(key);
-    if (JSON_LEAF_KEYS.has(key)) {
-      if (!deepEqual(prev, next)) {
-        ymap.set(key, cloneJSON(next));
-        writes++;
-      }
-    } else if (prev !== next) {
-      ymap.set(key, next);
+    if (wouldWriteChange(ymap, element, key)) {
+      ymap.set(key, JSON_LEAF_KEYS.has(key) ? cloneJSON(next) : next);
       writes++;
     }
   }
@@ -419,6 +451,38 @@ export const writeChangedKeys = (
  * `set`/`delete` for the delta only (§4.1). MUST run inside a
  * `LOCAL_ORIGIN` transaction. Returns the number of mutations applied.
  */
+/** Mutation-free mirror of {@link diffBoundElements}' set-diff — used by
+ * {@link wouldWriteChange} so the predicate and the writer share semantics. */
+const boundElementsDiffers = (
+  parent: Y.Map<unknown>,
+  boundElements: readonly BoundElement[] | null,
+): boolean => {
+  const nested = parent.get(BOUND_ELEMENTS_KEY);
+  const next = new Map<string, BoundElementType>();
+  if (boundElements) {
+    for (const bound of boundElements) {
+      next.set(bound.id, bound.type);
+    }
+  }
+  if (!(nested instanceof Y.Map)) {
+    // No nested map yet: installing one is itself a change only if there is
+    // something to install.
+    return next.size > 0;
+  }
+  const current = nested as Y.Map<BoundElementType>;
+  for (const id of current.keys()) {
+    if (!next.has(id)) {
+      return true;
+    }
+  }
+  for (const [id, type] of next) {
+    if (current.get(id) !== type) {
+      return true;
+    }
+  }
+  return false;
+};
+
 export const diffBoundElements = (
   parent: Y.Map<unknown>,
   boundElements: readonly BoundElement[] | null,

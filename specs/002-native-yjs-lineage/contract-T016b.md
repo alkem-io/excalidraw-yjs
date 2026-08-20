@@ -1,10 +1,53 @@
-# T016b contract — one commit primitive, two planners
+# T016b contract — the synchronous action write path
 
-**Status**: revision 4, pre-implementation. **Spec**: FR-016, FR-017, T014b.
+**Status**: IMPLEMENTED. **Spec**: FR-016, FR-017, T014b.
 
-> Revisions 2–4 correct defects found in review (rev 2's edits silently failed to apply; rev 3 landed them with asserts; rev 4 adds the selector type, private committer, return-name and validation-scope fixes).
->
-> Rev 2 notes: Verified each before accepting: the census arithmetic (my table was **16/4**, not 15/5 — I counted table ROWS, several of which cover two sites), three omitted Scene-internal callers (I filtered out `Scene.ts` wholesale to avoid matching the method definition and lost its call sites with it), and the claim that `syncActionResult` reaches the doc via public `updateScene` — it does **not**, it calls `this.scene.replaceAllElements` directly at `App.tsx:2832`. I invented that relationship; the boundary choice must not rest on it.
+An action's result is applied as a DIFF against the snapshot it was invoked on,
+onto whatever the document holds now. Where the action and a helper it invoked
+wrote the same key, ownership is explicit and unresolved conflicts are rejected
+before any mutation.
+
+## 0. The API, literally
+
+```ts
+// Scene
+beginActionMutationJournal(): void          // nested scopes JOIN
+endActionMutationJournal(): void            // THROWS if unbalanced
+getActionMutationJournal(): ReadonlyMap<string, ReadonlySet<string>>
+
+applyElementChanges(
+  base: readonly ElementRecord[],
+  result: readonly ElementRecord[],
+  options?: {
+    declaredIntent?: DeclaredElementIntent;   // keysById implies "result"
+    alreadyAppliedIntent?: ReadonlyMap<string, ReadonlySet<string>>;
+    overlapPolicy?: ReadonlyMap<string, "result" | "applied">;  // per-KEY
+    recordHistory?: boolean;
+  },
+): { changedIds: ReadonlySet<string> }
+
+// intent.ts
+DeclaredElementIntent.overlapResolution?:
+  ReadonlyMap<string, ReadonlyMap<string, "result" | "applied">>
+
+// schema.ts — the single comparison authority
+wouldWriteChange(ymap: Y.Map<unknown>, element: ElementRecord, key: string): boolean
+
+// ActionResult
+overlapResolution?, overlapPolicy?   // an action supplies its own ownership
+```
+
+**Ambiguity** = a key in `derived ∩ journal` for which `wouldWriteChange` is
+true. Same-valued overlap is not ambiguous. Every ambiguous key must be covered
+exactly once by `overlapResolution`, `keysById`, or `overlapPolicy`; otherwise
+the apply THROWS naming each unresolved `id.key` and mutates nothing. An unknown
+choice throws.
+
+**Async**: this path is synchronous-only. `ActionManager` closes both the
+transport boundary and the journal scope before an async result resolves, so
+neither the base nor the journal describes the document it would land on. No
+async `perform` returns `elements` today (audited: zero); any future one must
+supply explicit ownership rather than use this fallback.
 
 ## 1. The plan shape
 

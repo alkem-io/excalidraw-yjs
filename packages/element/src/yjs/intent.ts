@@ -40,9 +40,34 @@ export type DeclaredElementIntent = {
    * an added id does not appear here.
    */
   readonly keysById: ReadonlyMap<string, ReadonlySet<string>>;
+  /**
+   * Ownership for keys claimed by BOTH the derived diff and the action mutation
+   * journal, where the canonical result value differs from what the doc already
+   * holds (spec 002 / T016b).
+   *
+   *  - `"result"`  — write the canonical result value (the action overrides a
+   *                  helper it invoked);
+   *  - `"applied"` — keep the value the helper already wrote to the doc (the
+   *                  action's value was computed from a now-stale base).
+   *
+   * There is NO default. Every ambiguous key must be covered exactly once, or
+   * the apply rejects before touching the document — a silent winner is what
+   * both failed designs did. `keysById` implies `"result"` for a matching
+   * overlap, so an action that explicitly declares a key need not repeat it.
+   */
+  readonly overlapResolution?: ReadonlyMap<
+    string,
+    ReadonlyMap<string, "result" | "applied">
+  >;
 };
 
-const isIntentKey = (key: string): boolean =>
+/**
+ * The persisted-key domain shared by intent derivation and the action mutation
+ * journal: never `id`, never reconciliation metadata. Exported so the journal
+ * reuses THIS selector rather than maintaining a second exclusion list that
+ * could drift from it.
+ */
+export const isIntentKey = (key: string): boolean =>
   key !== "id" && !RECONCILE_META_KEYS.has(key);
 
 /**

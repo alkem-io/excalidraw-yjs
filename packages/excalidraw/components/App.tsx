@@ -2903,95 +2903,127 @@ class App extends React.Component<AppProps, AppState> {
     });
   };
 
-  public syncActionResult = withBatchedUpdates((actionResult: ActionResult) => {
-    if (this.unmounted || actionResult === false) {
-      return;
-    }
+  public syncActionResult = (
+    actionResult: ActionResult,
+    invocationBase?: readonly ExcalidrawElement[],
+  ) => this.syncActionResultBatched({ actionResult, invocationBase });
 
-    this.store.scheduleAction(actionResult.captureUpdate);
-
-    let didUpdate = false;
-
-    let editingTextElement: AppState["editingTextElement"] | null = null;
-    if (actionResult.elements) {
-      // Native element history (M2): a `CaptureUpdateAction.NEVER` update must
-      // never become an undo step — drive the Scene write under the non-tracked
-      // origin so the doc updates but the UndoManager does not capture it (scene
-      // load, programmatic non-capturing updates, and the re-application of an
-      // undo/redo all funnel through here with NEVER).
-      this.scene.replaceAllElements(actionResult.elements, {
-        recordHistory: actionResult.captureUpdate !== CaptureUpdateAction.NEVER,
-      });
-      didUpdate = true;
-    }
-
-    if (actionResult.files) {
-      this.addMissingFiles(actionResult.files, actionResult.replaceFiles);
-      this.addNewImagesToImageCache();
-    }
-
-    if (actionResult.appState || editingTextElement || this.state.contextMenu) {
-      let viewModeEnabled = actionResult?.appState?.viewModeEnabled || false;
-      let zenModeEnabled = actionResult?.appState?.zenModeEnabled || false;
-      const theme =
-        actionResult?.appState?.theme || this.props.theme || THEME.LIGHT;
-      const name = actionResult?.appState?.name ?? this.state.name;
-      const errorMessage =
-        actionResult?.appState?.errorMessage ?? this.state.errorMessage;
-      if (typeof this.props.viewModeEnabled !== "undefined") {
-        viewModeEnabled = this.props.viewModeEnabled;
+  private syncActionResultBatched = withBatchedUpdates(
+    ({
+      actionResult,
+      invocationBase,
+    }: {
+      actionResult: ActionResult;
+      invocationBase?: readonly ExcalidrawElement[];
+    }) => {
+      if (this.unmounted || actionResult === false) {
+        return;
       }
 
-      if (typeof this.props.zenModeEnabled !== "undefined") {
-        zenModeEnabled = this.props.zenModeEnabled;
+      this.store.scheduleAction(actionResult.captureUpdate);
+
+      let didUpdate = false;
+
+      let editingTextElement: AppState["editingTextElement"] | null = null;
+      if (actionResult.elements) {
+        // Native element history (M2): a `CaptureUpdateAction.NEVER` update must
+        // never become an undo step — drive the Scene write under the non-tracked
+        // origin so the doc updates but the UndoManager does not capture it (scene
+        // load, programmatic non-capturing updates, and the re-application of an
+        // undo/redo all funnel through here with NEVER).
+        const recordHistory =
+          actionResult.captureUpdate !== CaptureUpdateAction.NEVER;
+        if (invocationBase) {
+          this.scene.applyElementChanges(
+            invocationBase as never,
+            actionResult.elements as never,
+            {
+              recordHistory,
+              alreadyAppliedIntent: this.scene.getActionMutationJournal(),
+              overlapResolution: actionResult.overlapResolution,
+              overlapPolicy: actionResult.overlapPolicy,
+            },
+          );
+        } else {
+          this.scene.replaceAllElements(actionResult.elements, {
+            recordHistory,
+          });
+        }
+        didUpdate = true;
       }
 
-      editingTextElement = actionResult.appState?.editingTextElement || null;
+      if (actionResult.files) {
+        this.addMissingFiles(actionResult.files, actionResult.replaceFiles);
+        this.addNewImagesToImageCache();
+      }
 
-      // make sure editingTextElement points to latest element reference
-      if (actionResult.elements && editingTextElement) {
-        actionResult.elements.forEach((element) => {
-          if (
-            editingTextElement?.id === element.id &&
-            editingTextElement !== element &&
-            isNonDeletedElement(element) &&
-            isTextElement(element)
-          ) {
-            editingTextElement = element;
-          }
+      if (
+        actionResult.appState ||
+        editingTextElement ||
+        this.state.contextMenu
+      ) {
+        let viewModeEnabled = actionResult?.appState?.viewModeEnabled || false;
+        let zenModeEnabled = actionResult?.appState?.zenModeEnabled || false;
+        const theme =
+          actionResult?.appState?.theme || this.props.theme || THEME.LIGHT;
+        const name = actionResult?.appState?.name ?? this.state.name;
+        const errorMessage =
+          actionResult?.appState?.errorMessage ?? this.state.errorMessage;
+        if (typeof this.props.viewModeEnabled !== "undefined") {
+          viewModeEnabled = this.props.viewModeEnabled;
+        }
+
+        if (typeof this.props.zenModeEnabled !== "undefined") {
+          zenModeEnabled = this.props.zenModeEnabled;
+        }
+
+        editingTextElement = actionResult.appState?.editingTextElement || null;
+
+        // make sure editingTextElement points to latest element reference
+        if (actionResult.elements && editingTextElement) {
+          actionResult.elements.forEach((element) => {
+            if (
+              editingTextElement?.id === element.id &&
+              editingTextElement !== element &&
+              isNonDeletedElement(element) &&
+              isTextElement(element)
+            ) {
+              editingTextElement = element;
+            }
+          });
+        }
+
+        if (editingTextElement?.isDeleted) {
+          editingTextElement = null;
+        }
+
+        this.setState((prevAppState) => {
+          const actionAppState = actionResult.appState || {};
+
+          return {
+            ...prevAppState,
+            ...actionAppState,
+            // NOTE this will prevent opening context menu using an action
+            // or programmatically from the host, so it will need to be
+            // rewritten later
+            contextMenu: null,
+            editingTextElement,
+            viewModeEnabled,
+            zenModeEnabled,
+            theme,
+            name,
+            errorMessage,
+          };
         });
+
+        didUpdate = true;
       }
 
-      if (editingTextElement?.isDeleted) {
-        editingTextElement = null;
+      if (!didUpdate) {
+        this.scene.triggerUpdate();
       }
-
-      this.setState((prevAppState) => {
-        const actionAppState = actionResult.appState || {};
-
-        return {
-          ...prevAppState,
-          ...actionAppState,
-          // NOTE this will prevent opening context menu using an action
-          // or programmatically from the host, so it will need to be
-          // rewritten later
-          contextMenu: null,
-          editingTextElement,
-          viewModeEnabled,
-          zenModeEnabled,
-          theme,
-          name,
-          errorMessage,
-        };
-      });
-
-      didUpdate = true;
-    }
-
-    if (!didUpdate) {
-      this.scene.triggerUpdate();
-    }
-  });
+    },
+  );
 
   // Lifecycle
 

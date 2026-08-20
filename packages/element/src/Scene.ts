@@ -56,7 +56,9 @@ import {
   ELEMENT_DELETIONS,
   yMapToElement,
   writeChangedKeys,
+  wouldWriteChange,
   computeElementIntent,
+  isIntentKey,
   assertIntentAgainstResult,
   writeAssetLocators,
   readAssetLocators,
@@ -496,6 +498,22 @@ export class Scene {
   /** Depth of open logical mutations; only the outermost close publishes. */
   private logicalDepth = 0;
 
+  /**
+   * Per-id declared keys of every `mutateElement` call made while an ACTION
+   * mutation scope is open — see {@link beginActionMutationJournal}.
+   *
+   * Deliberately NOT attached to {@link beginLogicalMutation}: that is a generic
+   * TRANSPORT primitive ("deliver these writes as one message") and making every
+   * logical boundary imply intent capture would couple transport buffering to
+   * action semantics. These are two orthogonal scopes that the ActionManager
+   * happens to open together.
+   */
+  private mutationJournal: Map<string, Set<string>> | null = null;
+
+  /** Nesting depth of {@link beginActionMutationJournal}; the journal is created
+   * at 0→1 and discarded at 1→0, so nested scopes JOIN rather than restart. */
+  private mutationJournalDepth = 0;
+
   private logicalBuffer: { v1: Uint8Array[]; v2: Uint8Array[] } | null = null;
 
   private internalDocHandlers: Array<[string, (...a: never[]) => void]> = [];
@@ -905,6 +923,38 @@ export class Scene {
     result: readonly ElementRecord[],
     options: {
       declaredIntent?: DeclaredElementIntent;
+      /**
+       * Keys already written to the doc during this action, per id — the
+       * `mutateElement` journal. DERIVED keys matching these are suppressed, so
+       * a helper's doc-side write is not overwritten by a value the action
+       * computed from a now-stale base.
+       *
+       * PRECEDENCE: this suppresses only keys the diff DERIVED. An explicit
+       * `declaredIntent` is re-applied from the canonical result even when the
+       * journal contains the same key — that is the escape hatch for an action
+       * that means to override a helper afterwards. Values always come from the
+       * result records; this only decides WHICH keys are written.
+       */
+      alreadyAppliedIntent?: ReadonlyMap<string, ReadonlySet<string>>;
+      /**
+       * See `DeclaredElementIntent.overlapResolution`. Supplied by the caller
+       * when the DERIVED diff is in use; an explicit `declaredIntent` carries
+       * its own and takes precedence.
+       */
+      overlapResolution?: ReadonlyMap<
+        string,
+        ReadonlyMap<string, "result" | "applied">
+      >;
+      /**
+       * A per-KEY conflict policy, applied ONLY to keys that are actually
+       * ambiguous. Modelled as a key policy rather than a fabricated per-id
+       * resolution map: a caller such as flip knows "for geometry keys the
+       * helper's doc value wins" WITHOUT knowing, before the journal exists,
+       * which ids will actually conflict. A policy key that never overlaps is
+       * simply unused; an ambiguous key with no policy and no explicit entry
+       * still throws.
+       */
+      overlapPolicy?: ReadonlyMap<string, "result" | "applied">;
       recordHistory?: boolean;
     } = {},
   ): { changedIds: ReadonlySet<string> } {
@@ -913,8 +963,91 @@ export class Scene {
       resultById.set(r.id as string, r);
     }
 
-    const declared =
-      options.declaredIntent ?? computeElementIntent(base, result);
+    let declared = options.declaredIntent ?? computeElementIntent(base, result);
+
+    // FAIL-CLOSED OWNERSHIP (T016b). A key claimed by BOTH the derived diff and
+    // the action journal, whose result value differs from what the doc already
+    // holds, is AMBIGUOUS: the action may be overriding the helper, or its value
+    // may be stale. Nothing here may guess. Every such key must be resolved
+    // exactly once, and an unresolved one rejects BEFORE any mutation.
+    //
+    // A same-valued overlap is NOT ambiguous — both sides agree, so there is
+    // nothing to choose and no resolution is required.
+    if (options.alreadyAppliedIntent?.size) {
+      const explicit = declared.overlapResolution ?? options.overlapResolution;
+      const policy = options.overlapPolicy;
+      const unresolved: string[] = [];
+      const suppress = new Map<string, Set<string>>();
+
+      for (const [id, keys] of declared.keysById) {
+        const applied = options.alreadyAppliedIntent.get(id);
+        if (!applied) {
+          continue;
+        }
+        const record = resultById.get(id);
+        const current = this.getElement(id as never) as Record<
+          string,
+          unknown
+        > | null;
+        if (!record || !current) {
+          continue;
+        }
+        for (const key of keys) {
+          if (!applied.has(key)) {
+            continue;
+          }
+          // THE write planner's own predicate — not an approximation of it.
+          const ymap = this.yElements.get(id);
+          if (!ymap || !wouldWriteChange(ymap, record, key)) {
+            continue;
+          }
+          const choice = explicit?.get(id)?.get(key) ?? policy?.get(key);
+          if (choice === undefined) {
+            unresolved.push(`${id}.${key}`);
+            continue;
+          }
+          if (choice === "applied") {
+            let set = suppress.get(id);
+            if (!set) {
+              set = new Set();
+              suppress.set(id, set);
+            }
+            set.add(key);
+          } else if (choice !== "result") {
+            throw new Error(
+              `applyElementChanges: unknown overlap resolution "${String(
+                choice,
+              )}" for ${id}.${key} — expected "result" or "applied".`,
+            );
+          }
+        }
+      }
+
+      if (unresolved.length) {
+        throw new Error(
+          `applyElementChanges: unresolved ownership for ${unresolved
+            .sort()
+            .join(
+              ", ",
+            )}. Each key written by BOTH this action and a helper it ` +
+            `invoked must declare "result" or "applied"; there is no default.`,
+        );
+      }
+
+      if (suppress.size) {
+        const keysById = new Map<string, ReadonlySet<string>>();
+        for (const [id, keys] of declared.keysById) {
+          const drop = suppress.get(id);
+          const remaining = drop
+            ? new Set([...keys].filter((k) => !drop.has(k)))
+            : new Set(keys);
+          if (remaining.size) {
+            keysById.set(id, remaining);
+          }
+        }
+        declared = { ...declared, keysById };
+      }
+    }
     assertIntentAgainstResult(declared, resultById);
 
     // T016j — validate ONLY the records this mutation affects: creations, and
@@ -1165,6 +1298,56 @@ export class Scene {
    * Deliberately narrow — the editor's action layer is the only caller. This is
    * not a general mode; see {@link openLogicalMutation} for the join rule.
    */
+  /**
+   * Start recording which keys each `mutateElement` call DECLARES, per element
+   * id, for the duration of a synchronous action.
+   *
+   * The `updates` object of a `mutateElement` call already IS the writer's
+   * explicit per-id/per-key declaration, and it is the actual write source — so
+   * journaling it cannot drift the way a hand-maintained key list beside each
+   * helper would.
+   *
+   * A key is recorded even when the value is already equal and no Yjs write
+   * results: declaring a value that happens to match is still a claim of
+   * ownership over that key, and the contract must not depend on whether the
+   * doc happened to hold it already.
+   *
+   * Nested scopes JOIN the same journal; it is created at the outermost begin
+   * and cleared at the matching end, so a stale journal cannot be reused.
+   */
+  beginActionMutationJournal(): void {
+    if (this.mutationJournalDepth === 0) {
+      this.mutationJournal = new Map();
+    }
+    this.mutationJournalDepth++;
+  }
+
+  /**
+   * Ends journaling. Discards the journal only when the OUTERMOST scope closes,
+   * so a nested end cannot strand an outer action without its declarations.
+   *
+   * An unbalanced end is a no-op rather than an underflow, so a stale journal
+   * can never be observed by the next action.
+   */
+  endActionMutationJournal(): void {
+    if (this.mutationJournalDepth === 0) {
+      // Loud, not lenient: a no-op would hide caller imbalance rather than make
+      // stale reuse impossible, and the imbalance is the actual bug.
+      throw new Error(
+        "Scene: endActionMutationJournal() without a matching beginActionMutationJournal().",
+      );
+    }
+    this.mutationJournalDepth--;
+    if (this.mutationJournalDepth === 0) {
+      this.mutationJournal = null;
+    }
+  }
+
+  /** The keys declared so far in this scope, per element id (empty when closed). */
+  getActionMutationJournal(): ReadonlyMap<string, ReadonlySet<string>> {
+    return this.mutationJournal ?? new Map();
+  }
+
   beginLogicalMutation(): void {
     this.openLogicalMutation();
   }
@@ -2213,6 +2396,23 @@ export class Scene {
       isDragging: false,
     },
   ): TElement {
+    if (this.mutationJournal) {
+      const id = element.id as string;
+      let keys = this.mutationJournal.get(id);
+      if (!keys) {
+        keys = new Set();
+        this.mutationJournal.set(id, keys);
+      }
+      // Declared, not effective: recorded even if the value already matches.
+      // Filtered through the SAME selector intent derivation uses, so passing a
+      // broad element object as `updates` cannot turn `id` or reconciliation
+      // metadata into action ownership.
+      for (const key of Object.keys(updates)) {
+        if (isIntentKey(key)) {
+          keys.add(key);
+        }
+      }
+    }
     const elementsMap = this.getNonDeletedElementsMap();
 
     const { version: prevVersion } = element;

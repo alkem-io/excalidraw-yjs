@@ -4886,7 +4886,7 @@ exports[`regression tests > given a selected element A and a not selected elemen
 
 exports[`regression tests > given a selected element A and a not selected element B with higher z-index than A and given B partially overlaps A when there's a shift-click on the overlapped section B is added to the selection > [end of test] number of elements 1`] = `0`;
 
-exports[`regression tests > given a selected element A and a not selected element B with higher z-index than A and given B partially overlaps A when there's a shift-click on the overlapped section B is added to the selection > [end of test] number of renders 1`] = `12`;
+exports[`regression tests > given a selected element A and a not selected element B with higher z-index than A and given B partially overlaps A when there's a shift-click on the overlapped section B is added to the selection > [end of test] number of renders 1`] = `11`;
 
 exports[`regression tests > given a selected element A and a not selected element B with higher z-index than A and given B partially overlaps A when there's a shift-click on the overlapped section B is added to the selection > [end of test] redo stack 1`] = `[]`;
 
@@ -10177,7 +10177,7 @@ exports[`regression tests > updates fontSize & fontFamily appState > [end of tes
 
 exports[`regression tests > updates fontSize & fontFamily appState > [end of test] number of elements 1`] = `0`;
 
-exports[`regression tests > updates fontSize & fontFamily appState > [end of test] number of renders 1`] = `5`;
+exports[`regression tests > updates fontSize & fontFamily appState > [end of test] number of renders 1`] = `4`;
 
 exports[`regression tests > updates fontSize & fontFamily appState > [end of test] redo stack 1`] = `[]`;
 

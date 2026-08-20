@@ -175,12 +175,17 @@ export class ActionManager {
     // `await`. The `finally` also guarantees that a throw mid-action still
     // publishes whatever Yjs already committed.
     this.app.scene.beginLogicalMutation();
+    // Separate, orthogonal scope: records which keys each `mutateElement` call
+    // DECLARES during this action, so the result application can tell an
+    // already-applied helper write from a stale action-derived one.
+    this.app.scene.beginActionMutationJournal();
     try {
       this.updater(
         action.perform(elements, appState, value, this.app),
         invocationBase,
       );
     } finally {
+      this.app.scene.endActionMutationJournal();
       this.app.scene.endLogicalMutation();
     }
   }

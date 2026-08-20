@@ -29,6 +29,26 @@ export type ActionResult =
       files?: BinaryFiles | null;
       captureUpdate: CaptureUpdateActionType;
       replaceFiles?: boolean;
+      /**
+       * Ownership for keys this action BOTH derives and writes through a helper
+       * it invoked (spec 002 / T016b). Required only for genuinely ambiguous
+       * keys — where the result value differs from what the doc already holds —
+       * and rejected before any mutation if one is missing.
+       */
+      overlapResolution?: ReadonlyMap<
+        string,
+        ReadonlyMap<string, "result" | "applied">
+      >;
+      /** A per-KEY conflict policy — see `Scene.applyElementChanges`. */
+      overlapPolicy?: ReadonlyMap<string, "result" | "applied">;
+      //
+      // ASYNC RULE (spec 002 / T016b). The derived-diff + journal path applies
+      // only to a SYNCHRONOUS action: `ActionManager` closes both the transport
+      // boundary and the mutation-journal scope before an async result resolves,
+      // so neither the invocation base nor the journal describes the document
+      // the result would land on. No async `perform` currently returns
+      // `elements` (audited: zero). If one is ever added it must supply explicit
+      // intent/ownership rather than rely on the synchronous fallback.
     }
   | false;
 

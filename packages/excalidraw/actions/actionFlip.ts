@@ -26,24 +26,51 @@ import { register } from "./register";
 
 import type { AppClassProperties, AppState } from "../types";
 
+/**
+ * Flip's conflict POLICY: for geometry keys, the helper's already-applied doc
+ * value wins.
+ *
+ * `flipSelectedElements` repositions elements — and their bound texts and
+ * arrows — THROUGH THE DOC via `mutateElement`, then returns the pre-flip
+ * `selectedElements`. Those carry positions computed from the pre-flip base, so
+ * wherever the two genuinely disagree the doc is right and the action's derived
+ * value is stale.
+ *
+ * Declared as a KEY policy, deliberately: the action cannot know which ids will
+ * actually conflict before the journal exists, and fabricating an entry for
+ * every record in the returned scene array would be neither "ids actually
+ * touched" nor exact coverage. The boundary applies this only to keys that are
+ * genuinely ambiguous; any ambiguous key outside it still throws.
+ */
+const FLIP_OVERLAP_POLICY: ReadonlyMap<string, "result" | "applied"> = new Map([
+  ["x", "applied"],
+  ["y", "applied"],
+  ["width", "applied"],
+  ["height", "applied"],
+  ["angle", "applied"],
+  ["points", "applied"],
+]);
+
 export const actionFlipHorizontal = register({
   name: "flipHorizontal",
   label: "labels.flipHorizontal",
   icon: flipHorizontal,
   trackEvent: { category: "element" },
   perform: (elements, appState, _, app) => {
-    return {
-      elements: updateFrameMembershipOfSelectedElements(
-        flipSelectedElements(
-          elements,
-          app.scene.getNonDeletedElementsMap(),
-          appState,
-          "horizontal",
-          app,
-        ),
+    const next = updateFrameMembershipOfSelectedElements(
+      flipSelectedElements(
+        elements,
+        app.scene.getNonDeletedElementsMap(),
         appState,
+        "horizontal",
         app,
       ),
+      appState,
+      app,
+    );
+    return {
+      elements: next,
+      overlapPolicy: FLIP_OVERLAP_POLICY,
       appState,
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     };
@@ -57,18 +84,20 @@ export const actionFlipVertical = register({
   icon: flipVertical,
   trackEvent: { category: "element" },
   perform: (elements, appState, _, app) => {
-    return {
-      elements: updateFrameMembershipOfSelectedElements(
-        flipSelectedElements(
-          elements,
-          app.scene.getNonDeletedElementsMap(),
-          appState,
-          "vertical",
-          app,
-        ),
+    const next = updateFrameMembershipOfSelectedElements(
+      flipSelectedElements(
+        elements,
+        app.scene.getNonDeletedElementsMap(),
         appState,
+        "vertical",
         app,
       ),
+      appState,
+      app,
+    );
+    return {
+      elements: next,
+      overlapPolicy: FLIP_OVERLAP_POLICY,
       appState,
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     };
@@ -211,8 +240,5 @@ const flipElements = (
   // through the doc rather than mutated in place) are stale in `selectedElements`;
   // returning them would make the action's result clobber the doc's correct
   // post-flip positions.
-  const resultMap = app.scene.getNonDeletedElementsMap();
-  return selectedElements.map(
-    (element) => resultMap.get(element.id) ?? element,
-  );
+  return selectedElements;
 };
