@@ -62,13 +62,15 @@ Step 1 is independent of 2 and 3 and can land first.
 
 **The `common` ↔ `math` cycle is broken.** `math` now declares **no** `@excalidraw-yjs` dependencies at all. `range.ts` uses a local `toInclusiveRange` instead of `common`'s `toBrandedType`. Deliberately concrete rather than a copy of the generic: reproducing that signature faithfully would mean duplicating `UnbrandForValue` (~30 lines of recursive conditional type), which is not a clean trade — and since every call site brands a number pair, the concrete helper is both simpler and _tighter_ than the generic it replaces.
 
-### A trap found while doing it — a built `dist/` fails 10 suite tests
+### A trap found while doing it — since ROOT-CAUSED and fixed
 
-**`packages/excalidraw/dist/` being present makes 10 Sidebar/DefaultSidebar tests fail**, all on a ~1000 ms `waitFor` timeout ("not initialized yet"), not a resolution error — the vitest aliases already point every `@excalidraw-yjs/*` specifier at source. Delete `dist/` and the same 19 tests pass.
+A built `packages/excalidraw/dist/` made **10 Sidebar/DefaultSidebar tests fail**, always on a ~1000 ms `waitFor` ("not initialized yet"). It presented as a startup slowdown and was nothing of the kind.
 
-**Pre-existing, not introduced here**: `build:excalidraw` predates this work and `build:packages` already invoked it, so anyone building the packages and then running the suite hit it. What changed is that `test:headless` now builds the umbrella too — necessary, since the umbrella bundle is what it tests — which makes it a second route to the same state.
+**Cause**: three test files imported the package ROOT by relative directory path — `import { Excalidraw } from "../.."`. A directory import consults that directory's `package.json`, so once `dist/` exists it resolves to the **built bundle** while everything around it still resolves to source. Two copies of the module graph, therefore two React contexts, therefore a component reading `appState` as `null` from a provider that is a different instance. The visible error was the timeout; the real one was `TypeError: Cannot read properties of null (reading 'openSidebar')` in `Sidebar.tsx`.
 
-**Practical consequence: `pnpm run test:headless` and `pnpm test` cannot both be green in the same working tree without `rm -rf packages/excalidraw/dist` in between.** Recorded rather than papered over. Not fixed here: the cause looks like startup cost rather than wrong resolution, the fix would be in vitest config, and this task was scoped to the headless export.
+**Fix**: name the entry file — `"../.."` → `"../../index"` — in the three files. `pnpm test` now passes with the build present (154 files, 1644 tests), so `test:headless` and the suite compose in one tree with no workaround. The `test:headless` cleanup step added earlier as a stopgap is removed: deleting a developer's build output as a side effect of running tests was only ever justified by the bug.
+
+**Guarded**, because it is cheap to state and expensive to rediscover: `packageRootImports.test.ts` rejects any relative import naming a directory that contains a `package.json`. Verified to fail when one is reintroduced.
 
 ## What is deliberately NOT proposed
 

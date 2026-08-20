@@ -198,24 +198,16 @@ for (const [label, bundle] of BUNDLES) {
   );
 }
 
-// Harness hygiene, not part of the contract under test.
-//
-// This command BUILDS `packages/excalidraw/dist`, and a built dist makes 10
-// Sidebar tests fail in the vitest suite on a ~1s waitFor timeout — measured,
-// and not a resolution error: the vitest aliases already point every
-// `@excalidraw-yjs/*` specifier at source. Leaving the artifact behind would
-// make `test:headless` and `test` non-composable in one working tree, which is
-// a trap for whoever runs them next rather than a real failure.
-//
-// So the build output this command produced is removed again. Deliberately NOT
-// fixed by raising a global test timeout — that would mask a genuine startup
-// regression, which is exactly what such a timeout is there to catch.
-const cleanup = () => {
-  fs.rmSync(path.resolve(process.cwd(), "packages/excalidraw/dist"), {
-    recursive: true,
-    force: true,
-  });
-};
+// NOTE: this command builds `packages/excalidraw/dist`, and it used to remove it
+// again, because a built dist made ten Sidebar tests fail and left
+// `test:headless` and `test` non-composable in one working tree. That cleanup is
+// gone: the cause was found and fixed at the root — three test files imported
+// the package ROOT by relative directory path (`from "../.."`), which consults
+// the package manifest and so resolved to the built bundle while everything
+// around them resolved to source, giving two React contexts. `pnpm test` now
+// passes with the build present, so deleting a developer's build output as a
+// side effect of running tests is no longer warranted. Guarded by
+// `packageRootImports.test.ts`.
 
 let failed = 0;
 for (const [ok, name, err] of results) {
@@ -227,5 +219,4 @@ for (const [ok, name, err] of results) {
 console.log(
   `\n${results.length - failed}/${results.length} headless checks passed`,
 );
-cleanup();
 process.exit(failed ? 1 : 0);
