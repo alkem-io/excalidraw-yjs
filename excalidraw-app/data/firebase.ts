@@ -22,6 +22,8 @@ import {
 } from "firebase/firestore";
 import { getStorage, ref, uploadBytes } from "firebase/storage";
 
+import type { SceneContentToken } from "@excalidraw-yjs/element";
+
 import type {
   ExcalidrawElement,
   FileId,
@@ -302,7 +304,7 @@ const decryptScene = async (
 };
 
 /**
- * The scene `contentRevision` (see `Scene.contentRevision`) captured at the last
+ * The scene `contentToken` (see `Scene.contentToken`) captured at the last
  * successful save, per socket.
  *
  * This replaces a cache of summed element `version`s, which T007 measured broken
@@ -315,27 +317,30 @@ const decryptScene = async (
  *    report clean and be dropped with nothing to retry it.
  */
 class FirebaseSavedRevisionCache {
-  private static cache = new WeakMap<Socket, number>();
+  private static cache = new WeakMap<Socket, SceneContentToken>();
   static get = (socket: Socket) => {
     return FirebaseSavedRevisionCache.cache.get(socket);
   };
-  static set = (socket: Socket, contentRevision: number) => {
-    FirebaseSavedRevisionCache.cache.set(socket, contentRevision);
+  static set = (socket: Socket, contentToken: SceneContentToken) => {
+    FirebaseSavedRevisionCache.cache.set(socket, contentToken);
   };
 }
 
 /**
- * Whether the scene at `contentRevision` has already been persisted.
+ * Whether the scene at `contentToken` has already been persisted.
  *
- * The caller passes the CURRENT revision; a match means no document-changing
- * transaction has happened since the last successful save.
+ * The caller passes the CURRENT token; identity equality means no
+ * document-changing transaction has happened since the last successful save.
+ * This cache is keyed by SOCKET and so outlives a Scene: a token from a
+ * replaced generation can never compare equal to one from the old generation,
+ * which a numeric counter could not guarantee.
  */
 export const isSavedToFirebase = (
   portal: Portal,
-  contentRevision: number,
+  contentToken: SceneContentToken,
 ): boolean => {
   if (portal.socket && portal.roomId && portal.roomKey) {
-    return FirebaseSavedRevisionCache.get(portal.socket) === contentRevision;
+    return FirebaseSavedRevisionCache.get(portal.socket) === contentToken;
   }
   // if no room exists, consider the room saved so that we don't unnecessarily
   // prevent unload (there's nothing we could do at that point anyway)
@@ -406,16 +411,16 @@ export const saveToFirebase = async (
   appState: AppState,
   assets: Readonly<Record<string, string>> = {},
   /**
-   * The scene's `contentRevision` AT THE MOMENT `elements`/`assets`/`appState`
-   * were captured — see `Scene.contentRevision`.
+   * The scene's `contentToken` AT THE MOMENT `elements`/`assets`/`appState`
+   * were captured — see `Scene.contentToken`.
    *
    * It is recorded as saved only on success, and only as this value: anything
-   * that changed the document while the save was in flight advanced the live
-   * revision past it, so the scene correctly stays dirty and the next pass
-   * persists it. Reading the revision after the await instead would mark that
-   * concurrent change saved when it never was.
+   * that changed the document while the save was in flight — including a
+   * generation swap — replaced the live token, so the scene correctly stays
+   * dirty and the next pass persists it. Reading the token after the await
+   * instead would mark that concurrent change saved when it never was.
    */
-  contentRevision: number,
+  contentToken: SceneContentToken,
 ): Promise<readonly SyncableExcalidrawElement[] | null> => {
   const { roomId, roomKey, socket } = portal;
   if (
@@ -423,7 +428,7 @@ export const saveToFirebase = async (
     !roomId ||
     !roomKey ||
     !socket ||
-    isSavedToFirebase(portal, contentRevision)
+    isSavedToFirebase(portal, contentToken)
   ) {
     return null;
   }
@@ -483,7 +488,7 @@ export const saveToFirebase = async (
     restoreElements((await decryptScene(storedScene, roomKey)).elements, null),
   );
 
-  FirebaseSavedRevisionCache.set(socket, contentRevision);
+  FirebaseSavedRevisionCache.set(socket, contentToken);
 
   return storedElements;
 };
@@ -531,7 +536,7 @@ export const loadFromFirebase = async (
   // Deliberately NOT marking the room saved here. Since T020 a cold load ADOPTS
   // the stored document into the live scene, and that adoption is itself a
   // document-changing transaction that happens AFTER this function returns — so
-  // no revision known here corresponds to the post-adoption scene. Guessing one
+  // no token known here corresponds to the post-adoption scene. Guessing one
   // would risk the dangerous direction (a false-skip: a dirty scene reported
   // clean, dropped with nothing to retry it). The cost of omitting it is one
   // redundant save after a cold load, which is the harmless direction.

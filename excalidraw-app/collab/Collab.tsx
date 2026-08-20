@@ -364,7 +364,7 @@ class Collab extends PureComponent<CollabProps, CollabState> {
       (this.fileManager.shouldPreventUnload(syncableElements) ||
         !isSavedToFirebase(
           this.portal,
-          this.excalidrawAPI.getSceneContentRevision(),
+          this.excalidrawAPI.getSceneContentToken(),
         ))
     ) {
       // this won't run in time if user decides to leave the site, but
@@ -386,9 +386,10 @@ class Collab extends PureComponent<CollabProps, CollabState> {
   ) => {
     syncableElements = cloneJSON(syncableElements);
     // Captured BEFORE the await, alongside the state being saved: anything that
-    // changes the doc while the save is in flight advances the live revision
-    // past this one, so the scene correctly stays dirty (T026).
-    const contentRevision = this.excalidrawAPI.getSceneContentRevision();
+    // changes the doc while the save is in flight — a peer edit, or a whole
+    // generation swap — replaces the live token, so the scene correctly stays
+    // dirty (T026).
+    const contentToken = this.excalidrawAPI.getSceneContentToken();
     try {
       // Persistence only — the scene `Y.Doc` is the source of truth and already
       // holds the merged state, so there is nothing to reconcile back in from
@@ -400,7 +401,7 @@ class Collab extends PureComponent<CollabProps, CollabState> {
         syncableElements,
         this.excalidrawAPI.getAppState(),
         this.excalidrawAPI.getSceneAssetLocators(),
-        contentRevision,
+        contentToken,
       );
 
       this.resetErrorIndicator();

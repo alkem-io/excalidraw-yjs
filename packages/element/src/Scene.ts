@@ -321,6 +321,20 @@ const hashSelectionOpts = (
 // in our codebase
 export type ExcalidrawElementsIncludingDeleted = readonly ExcalidrawElement[];
 
+/**
+ * Opaque identity token for a scene document's content — see
+ * {@link Scene.contentToken}. Nominally typed so a numeric counter cannot be
+ * passed where one is expected: the whole point is that these are compared by
+ * identity, never by order or value.
+ */
+declare const sceneContentTokenBrand: unique symbol;
+export type SceneContentToken = {
+  readonly [sceneContentTokenBrand]: true;
+};
+
+const newContentToken = (): SceneContentToken =>
+  Object.freeze({}) as SceneContentToken;
+
 export class Scene {
   // ---------------------------------------------------------------------------
   // native-Yjs core — the element store IS the doc
@@ -493,13 +507,10 @@ export class Scene {
   /** Detaches the `observeDeep` handler on `destroy()`. */
   private readonly detachObserver: () => void;
 
-  /**
-   * Monotonic count of transactions that changed this document — see
-   * {@link contentRevision}.
-   */
-  private _contentRevision = 0;
+  /** The current content token — see {@link contentToken}. */
+  private _contentToken: SceneContentToken = newContentToken();
 
-  /** Detaches the content-revision handler on `destroy()`. */
+  /** Detaches the content-token handler on `destroy()`. */
   private readonly detachRevisionCounter: () => void;
 
   // ---------------------------------------------------------------------------
@@ -685,7 +696,7 @@ export class Scene {
     // asset references and appState alike, since all three live on this doc.
     const revisionCounter = (transaction: Y.Transaction) => {
       if (transaction.changed.size > 0) {
-        this._contentRevision++;
+        this._contentToken = newContentToken();
       }
     };
     this.doc.on("afterTransaction", revisionCounter);
@@ -1958,33 +1969,39 @@ export class Scene {
   }
 
   /**
-   * A monotonic counter of document-changing transactions — the exact "has
-   * anything changed since?" token for persistence.
+   * An opaque identity token for "the content of this document, right now".
    *
-   * Compare a value captured before a save against this afterwards: equal means
-   * nothing changed in between. That is what makes save-skipping sound, and it
-   * replaces summing element `version`s, which was broken in BOTH directions
-   * (T007):
-   *  - a sum COLLIDES whenever one element's version rises as much as another's
-   *    falls, and versions do move backwards here — a false-skip is silent data
-   *    loss with nothing to retry it;
-   *  - and the compared values had been renormalised by `restoreElements`, so
-   *    the live and stored sums never matched at all and every save was
-   *    redundant.
+   * Compare with `===` and nothing else — it carries no order and no value, by
+   * design. Capture it before a save and compare afterwards: identical means
+   * nothing changed in between. That is what makes save-skipping sound.
    *
-   * Counts transactions from EVERY origin, deliberately. A peer's edit applied
-   * under `REMOTE_ORIGIN` leaves the durable store just as stale as a local one;
-   * scoping this to `LOCAL_ORIGIN` would let a client skip persisting a peer's
-   * change that no one else saved.
+   * It replaced summing element `version`s, which was broken in BOTH directions
+   * (T007): a sum COLLIDES whenever one element's version rises as much as
+   * another's falls — and versions do move backwards here — while the values
+   * being compared had also been renormalised by `restoreElements`, so live and
+   * stored never matched and every save was redundant.
    *
-   * It is a change COUNTER, not a content hash: a change and its exact reversal
-   * both count, so this can report "changed" for a document that is byte-identical
-   * to the stored one. That direction is safe (a redundant save), and the
-   * opposite direction — reporting "unchanged" for a document that differs — is
-   * the one that loses work.
+   * It is an OBJECT rather than a counter because a counter is only monotonic
+   * within one Scene, and persistence caches outlive a Scene. A replaced
+   * generation starts counting again and reaches numbers the old generation
+   * already used, so a save of the old scene would mark the new one clean —
+   * measured: two independent scenes both reach revision 2. A fresh object is
+   * distinct from every other object even at "revision 0", which closes that
+   * hole at the root instead of offsetting around it.
+   *
+   * Changes for transactions of EVERY origin, deliberately. A peer's edit
+   * applied under `REMOTE_ORIGIN` leaves the durable store just as stale as a
+   * local one; scoping this to `LOCAL_ORIGIN` would let a client skip persisting
+   * a peer's change that no one else saved.
+   *
+   * It is a CHANGE token, not a content hash: a change and its exact reversal
+   * yield a new token, so this can report "changed" for a document that is
+   * byte-identical to the stored one. That direction is safe (a redundant save);
+   * the opposite — reporting "unchanged" for a document that differs — loses
+   * work.
    */
-  get contentRevision(): number {
-    return this._contentRevision;
+  get contentToken(): SceneContentToken {
+    return this._contentToken;
   }
 
   destroy() {

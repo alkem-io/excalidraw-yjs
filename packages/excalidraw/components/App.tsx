@@ -781,7 +781,7 @@ class App extends React.Component<AppProps, AppState> {
       scrollToContent: this.scrollToContent,
       getSceneElements: this.getSceneElements,
       getSceneAssetLocators: this.getSceneAssetLocators,
-      getSceneContentRevision: this.getSceneContentRevision,
+      getSceneContentToken: this.getSceneContentToken,
       getAppState: () => this.state,
       // Doc-backed (M4): files live on `scene.doc`, so always read them from the
       // doc (refreshing the cache) — a host calling `getFiles()` sees files added
@@ -2552,11 +2552,12 @@ class App extends React.Component<AppProps, AppState> {
   public getSceneAssetLocators = () => this.scene.getAssetLocators();
 
   /**
-   * The scene document's change token — see `Scene.contentRevision`. A host
-   * captures it before persisting and compares it afterwards to decide whether
-   * anything changed in the meantime.
+   * The scene document's opaque content token — see `Scene.contentToken`. A host
+   * captures it before persisting and compares it (with `===`) afterwards to
+   * decide whether anything changed in the meantime. It is deliberately not a
+   * number: a counter would collide across Scene generations.
    */
-  public getSceneContentRevision = () => this.scene.contentRevision;
+  public getSceneContentToken = () => this.scene.contentToken;
 
   public getSceneElements = () => {
     return this.scene.getNonDeletedElements();

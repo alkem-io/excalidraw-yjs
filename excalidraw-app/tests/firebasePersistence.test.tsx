@@ -1,5 +1,5 @@
 import * as Y from "yjs";
-import { newElement, newImageElement } from "@excalidraw-yjs/element";
+import { newElement, newImageElement, Scene } from "@excalidraw-yjs/element";
 import { it, vi } from "vitest";
 
 import type {
@@ -7,6 +7,8 @@ import type {
   OrderedExcalidrawElement,
 } from "@excalidraw-yjs/element/types";
 import type { AppState } from "@excalidraw-yjs/excalidraw/types";
+
+import type { SceneContentToken } from "@excalidraw-yjs/element";
 
 import type { SyncableExcalidrawElement } from "../data";
 import type Portal from "../collab/Portal";
@@ -107,20 +109,21 @@ const { saveToFirebase, loadFromFirebase, isSavedToFirebase } = await import(
 );
 
 /**
- * `saveToFirebase` takes the scene `contentRevision` its input was captured at
- * (T026). Most cases here only need "some revision that differs from whatever
- * was last saved", so the helper supplies a fresh monotonic one; the
- * INV-SAVE-SKIP cases pass explicit values because the revision IS what they
- * are testing.
+ * `saveToFirebase` takes the scene `contentToken` its input was captured at
+ * (T026). Most cases here only need "some token that differs from whatever was
+ * last saved", so the helper mints a fresh one; the INV-SAVE-SKIP cases pass
+ * explicit tokens because the token IS what they are testing.
  */
-let testRevision = 0;
+/** A fresh content token, standing in for one a live Scene would produce. */
+const tok = () => Object.freeze({}) as SceneContentToken;
+
 const saveScene = (
   portal: Portal,
   elements: readonly SyncableExcalidrawElement[],
   appState: AppState,
   assets: Readonly<Record<string, string>> = {},
-  contentRevision: number = ++testRevision,
-) => saveToFirebase(portal, elements, appState, assets, contentRevision);
+  contentToken: SceneContentToken = tok(),
+) => saveToFirebase(portal, elements, appState, assets, contentToken);
 
 const ROOM = "room-1";
 const KEY = "0123456789abcdefghijkl"; // 22 chars, shape of a room key
@@ -515,12 +518,13 @@ describe("firebase persistence boundary", () => {
   describe("INV-SAVE-SKIP", () => {
     it("reports saved immediately after a successful save", async () => {
       const portal = portalFor();
+      const token = tok();
       const stored = await saveScene(
         portal,
         [rect("a"), rect("b")],
         appStateWith({}),
         {},
-        7,
+        token,
       );
 
       // GUARD: the save really happened, so a mismatch below is a live-vs-stored
@@ -528,36 +532,37 @@ describe("firebase persistence boundary", () => {
       expect(stored).not.toBeNull();
       expect(stored!.map((e) => e.id).sort()).toEqual(["a", "b"]);
 
-      expect(isSavedToFirebase(portal, 7)).toBe(true);
+      expect(isSavedToFirebase(portal, token)).toBe(true);
     });
 
-    it("skips the redundant save at the same revision", async () => {
+    it("skips the redundant save at the same token", async () => {
       const portal = portalFor();
-      await saveScene(portal, [rect("a")], appStateWith({}), {}, 3);
+      const token = tok();
+      await saveScene(portal, [rect("a")], appStateWith({}), {}, token);
 
-      // A second save at an unchanged revision must not touch the store.
+      // A second save at an unchanged token must not touch the store.
       expect(
-        await saveScene(portal, [rect("a")], appStateWith({}), {}, 3),
+        await saveScene(portal, [rect("a")], appStateWith({}), {}, token),
       ).toBe(null);
     });
 
     it("stays dirty when the document changed while the save was in flight", async () => {
       const portal = portalFor();
-      // The save captured revision 4; by the time it completed the scene had
-      // moved on to 5. Recording 5 as saved would mark a change that was never
-      // persisted.
-      await saveScene(portal, [rect("a")], appStateWith({}), {}, 4);
+      // The save captured one token; by the time it completed the scene had
+      // moved on. Recording the later one would mark a change never persisted.
+      await saveScene(portal, [rect("a")], appStateWith({}), {}, tok());
 
-      expect(isSavedToFirebase(portal, 5)).toBe(false);
+      expect(isSavedToFirebase(portal, tok())).toBe(false);
     });
 
     it("stays dirty when the save FAILED", async () => {
       const portal = portalFor();
+      const token = tok();
 
       faults.failTransaction = true;
       let failed = false;
       try {
-        await saveScene(portal, [rect("a")], appStateWith({}), {}, 9);
+        await saveScene(portal, [rect("a")], appStateWith({}), {}, token);
       } catch {
         failed = true;
       }
@@ -567,39 +572,68 @@ describe("firebase persistence boundary", () => {
       // would be asserting against a save that quietly succeeded.
       expect(failed).toBe(true);
 
-      // A failed save must never record its revision as saved — doing so would
-      // drop the content permanently, since nothing retries a "saved" scene.
-      expect(isSavedToFirebase(portal, 9)).toBe(false);
+      // A failed save must never record its token as saved — doing so would drop
+      // the content permanently, since nothing retries a "saved" scene.
+      expect(isSavedToFirebase(portal, token)).toBe(false);
 
-      // ...and the very next attempt at that same revision must go through.
+      // ...and the very next attempt at that same token must go through.
       expect(
-        await saveScene(portal, [rect("a")], appStateWith({}), {}, 9),
+        await saveScene(portal, [rect("a")], appStateWith({}), {}, token),
       ).not.toBeNull();
-      expect(isSavedToFirebase(portal, 9)).toBe(true);
-    });
-
-    it("cannot false-clear on a change whose version SUM collides", async () => {
-      const portal = portalFor();
-      // The exact T007 false-skip: `a` up one, `b` down one — identical sum,
-      // genuinely different content. Under the old cache this reported saved.
-      await saveScene(
-        portal,
-        [rect("a", { version: 5 }), rect("b", { version: 5 })],
-        appStateWith({}),
-        {},
-        11,
-      );
-      expect(isSavedToFirebase(portal, 11)).toBe(true);
-
-      // Any real mutation advances the revision, so the collision is
-      // unreachable: the token no longer derives from element versions at all.
-      expect(isSavedToFirebase(portal, 12)).toBe(false);
+      expect(isSavedToFirebase(portal, token)).toBe(true);
     });
 
     it("treats an unknown socket as dirty, never as saved", async () => {
       // A room that was never saved must not report clean, or its first save
       // would be skipped and its content never persisted.
-      expect(isSavedToFirebase(portalForRoom("never-saved"), 0)).toBe(false);
+      expect(isSavedToFirebase(portalForRoom("never-saved"), tok())).toBe(
+        false,
+      );
+    });
+
+    /**
+     * The cache is keyed by SOCKET, so it outlives the Scene: a reset replaces
+     * the generation underneath it. A numeric revision is only monotonic within
+     * one Scene — measured, two independent scenes both reached revision 2 — so
+     * a save of the old generation would have marked the new one clean.
+     */
+    describe("across a generation swap", () => {
+      it("does not report a REPLACED generation saved", async () => {
+        const portal = portalFor();
+        const generationA = new Scene();
+        generationA.replaceAllElements([rect("a")]);
+        await saveScene(
+          portal,
+          [rect("a")],
+          appStateWith({}),
+          {},
+          generationA.contentToken,
+        );
+        expect(isSavedToFirebase(portal, generationA.contentToken)).toBe(true);
+
+        // The scene is replaced and driven to the SAME number of edits.
+        const generationB = new Scene();
+        generationB.replaceAllElements([rect("b")]);
+
+        expect(isSavedToFirebase(portal, generationB.contentToken)).toBe(false);
+      });
+
+      it("does not let an OLD generation's late save clean the new one", async () => {
+        const portal = portalFor();
+        const generationA = new Scene();
+        generationA.replaceAllElements([rect("a")]);
+        const capturedByA = generationA.contentToken;
+
+        // The scene is replaced and edited while A's save is still in flight.
+        const generationB = new Scene();
+        generationB.replaceAllElements([rect("b")]);
+
+        // A's save only now completes, caching the token IT captured.
+        await saveScene(portal, [rect("a")], appStateWith({}), {}, capturedByA);
+
+        // B's content was never persisted, so B must still be dirty.
+        expect(isSavedToFirebase(portal, generationB.contentToken)).toBe(false);
+      });
     });
   });
 });

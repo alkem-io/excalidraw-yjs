@@ -153,24 +153,45 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
     meanwhile left the live revision past R, so the scene correctly stays dirty.
     A failed save records nothing.
 
-  **Implementation.** `Scene.contentRevision` is bumped from an
+  **Implementation.** `Scene.contentToken` is replaced from an
   `afterTransaction` handler — deliberately not `doc.on("update")`, which would
-  make Yjs encode a v1 update on every transaction when the counter needs no
-  bytes. Exposed as `getSceneContentRevision()`. `FirebaseSceneVersionCache`
-  became `FirebaseSavedRevisionCache`; `isSavedToFirebase(portal, revision)`.
+  make Yjs encode a v1 update on every transaction when this needs no bytes.
+  Exposed as `getSceneContentToken()`. `FirebaseSceneVersionCache` became
+  `FirebaseSavedRevisionCache`; `isSavedToFirebase(portal, token)`.
   `getSceneVersion` remains a field of the stored document but is no longer the
   skip authority.
 
-  **Coverage**: `Scene.contentRevision.test.ts` (8) — remote apply, asset-only,
-  appState-only, delete/undo/redo, the version-sum collision, adopted docs, and
-  that local UI state which never reaches the doc does NOT dirty.
-  `firebasePersistence.test.tsx` `INV-SAVE-SKIP` (6) — clean after save,
+  **A THIRD correction, found in review after the counter had landed — and it
+  was a real defect, not a style note.** The token started as a monotonic
+  NUMBER, which is only monotonic *within one Scene*. The persistence cache is
+  keyed by socket and so outlives a Scene: a reset replaces the generation
+  underneath it, the new generation counts from zero, and it reaches numbers the
+  old one already used — so a save of the old generation marks the new one
+  clean. Measured before the fix: two independent scenes both reached revision
+  2. Worse, an old generation's in-flight save can complete after replacement
+  and cache a number equal to the new generation's.
+
+  Fixed at the root with an opaque identity token rather than an offset: a
+  frozen object, replaced on every persisted-doc-changing transaction, compared
+  only by `===`. A fresh Scene is distinct from every other even at zero edits.
+  The type is nominally branded, so passing a number where a token belongs is
+  now a compile error rather than a silent collision.
+
+  **Coverage**: `Scene.contentToken.test.ts` (10) — remote apply, asset-only,
+  appState-only, delete/undo/redo, the version-sum collision, adopted docs, that
+  local UI state which never reaches the doc does NOT dirty, that two generations
+  never match, and that a captured token survives intervening reads.
+  `firebasePersistence.test.tsx` `INV-SAVE-SKIP` (7) — clean after save,
   redundant save skipped, in-flight change stays dirty, FAILED save stays dirty
   and the retry then succeeds, sum-collision cannot false-clear, unknown socket
-  is dirty rather than saved.
+  is dirty rather than saved, plus a generation-swap pair: a replaced generation
+  is never reported saved, and an OLD generation's late-completing save cannot
+  clean the new one.
 
-  **Non-vacuity, proven by sabotage**: reverting `contentRevision` to the summed
-  version token fails 3 of the 8 Scene tests, including the collision case. The
+  **Non-vacuity, proven by sabotage**: reverting the token to the summed version
+  fails 3 of the Scene tests including the collision case; reverting it to a
+  per-Scene numeric counter fails the generation pins — the Scene-level one and
+  BOTH firebase-level ones. The
   failed-save test asserts the write really failed rather than asserting against
   a save that quietly succeeded — the first draft did the latter and was vacuous
   (measured: `failedSave=false`).
@@ -181,7 +202,8 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
   so no revision available there corresponds to the post-adoption scene. The
   reviewer's richer rule (adoption may establish a clean baseline *only if* the
   fresh generation was clean, staying dirty if a remote update landed during the
-  fetch) is a real improvement and is NOT implemented. Cost of the omission is
+  fetch) is a real improvement and is NOT implemented — deferral reviewed and
+  approved as a bounded follow-up, not a blocker. Cost of the omission is
   one redundant save after a cold load — the harmless direction. Guessing a
   baseline would risk the dangerous one: a false-skip, which is silent data loss
   with nothing to retry it.
