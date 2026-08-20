@@ -128,6 +128,56 @@
   anything lands; and 3 genuinely semantic (`expected true to be false`,
   `expected 3 to be 2`, one `ObjectContaining` mismatch).
 
+  **ATTRIBUTION (round 2, requested before any code — done; tree restored clean).**
+
+  *The 13 "Found multiple elements with tool name: rectangle" are NOT defects —
+  they are a CASCADE, proven causally.* All 13 sit in one file
+  (`contextmenu.test.tsx`). Run that file alone and the FIRST two failures are
+  snapshot mismatches; the selector error appears only from the third test on.
+  Run any ONE of the 13 in isolation and it fails with a plain snapshot
+  mismatch, not the selector error. A snapshot assertion aborts its test before
+  unmount, so every later test in the file then finds two toolbars. Root cause is
+  the same version movement as the snapshot set; independent defect count: zero.
+
+  *The 3 semantic failures all reproduce in isolation*, so they are real:
+  - `collab.test` "should emit two ephemeral increments even though updates get
+    batched" — **3 instead of 2**. Both updates run under
+    `captureUpdate: NEVER`, so an EXTRA Store-visible increment is a phantom
+    change manufactured by the version advance.
+  - `reappearReveal` "the STORE re-detects the reappearing element" — inverted.
+  - `textWysiwyg` container-wrap — element mismatch against `ObjectContaining`.
+
+  *Snapshot classification — NOT merely version movement, which is the finding
+  that matters.* `selection.test.tsx` is clean: the only changed key is
+  `"version"` (3 lines). But `history.test.tsx` changes 112 `"version"` lines AND
+  **10 `"hasElementChange"` lines — 5 entries flipping `false` → `true`**.
+
+  **This direction is genuinely ambiguous and must NOT be assumed either way.**
+  `false → true` is equally consistent with (a) the fix working — history now
+  records element changes that were previously dropped, which is exactly the
+  defect T014b describes — or (b) phantom entries. The `captureUpdate: NEVER`
+  extra increment above leans toward (b) for at least that case. Each of the 5
+  needs adjudicating against whether a real element change occurred; blanket
+  snapshot updates are therefore refused.
+
+  **Conclusion: 70 → 61 is evidence the boundary is NARROWER, not that it is
+  SAFE.** The mechanism demonstrably changes Store-visible change detection.
+
+  **Proposed no-write meta rule** (for the `writes === 0` case, which currently
+  refreshes everything):
+  - refresh **`symbols` only**. Own-Symbols (e.g. `ORIG_ID`) are carried by the
+    live object, are not doc content, and legitimately differ after operations
+    like duplicate — the derived snapshot must expose them.
+  - leave **`version`** untouched — advancing it with no content change is
+    precisely the phantom-change source.
+  - leave **`versionNonce`** untouched — it is the reconciliation partner of
+    `version`; moving it alone is invisible to the Store's gate but still
+    perturbs `hashElementsVersion`.
+  - leave **`updated`** untouched — the deletion marker dates a tombstone from
+    it, so refreshing on a no-op would silently push an expiry into the future.
+  - leave **`boundElementsEmpty`** untouched — it is derived from content that,
+    by definition, did not change.
+
   **Proposed boundary, NOT implemented pending review**: `meta.version` stays the
   exact ordered per-element counter that history/delta require, and advances iff
   the element's doc content changed — which is what makes it a faithful change
