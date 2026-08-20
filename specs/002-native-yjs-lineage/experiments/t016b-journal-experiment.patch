@@ -1,0 +1,567 @@
+diff --git a/packages/element/src/Scene.ts b/packages/element/src/Scene.ts
+index 7b51c8af..c13a949a 100644
+--- a/packages/element/src/Scene.ts
++++ b/packages/element/src/Scene.ts
+@@ -496,6 +496,22 @@ export class Scene {
+   /** Depth of open logical mutations; only the outermost close publishes. */
+   private logicalDepth = 0;
+ 
++  /**
++   * Per-id declared keys of every `mutateElement` call made while an ACTION
++   * mutation scope is open — see {@link beginActionMutationJournal}.
++   *
++   * Deliberately NOT attached to {@link beginLogicalMutation}: that is a generic
++   * TRANSPORT primitive ("deliver these writes as one message") and making every
++   * logical boundary imply intent capture would couple transport buffering to
++   * action semantics. These are two orthogonal scopes that the ActionManager
++   * happens to open together.
++   */
++  private mutationJournal: Map<string, Set<string>> | null = null;
++
++  /** Nesting depth of {@link beginActionMutationJournal}; the journal is created
++   * at 0→1 and discarded at 1→0, so nested scopes JOIN rather than restart. */
++  private mutationJournalDepth = 0;
++
+   private logicalBuffer: { v1: Uint8Array[]; v2: Uint8Array[] } | null = null;
+ 
+   private internalDocHandlers: Array<[string, (...a: never[]) => void]> = [];
+@@ -905,6 +921,19 @@ export class Scene {
+     result: readonly ElementRecord[],
+     options: {
+       declaredIntent?: DeclaredElementIntent;
++      /**
++       * Keys already written to the doc during this action, per id — the
++       * `mutateElement` journal. DERIVED keys matching these are suppressed, so
++       * a helper's doc-side write is not overwritten by a value the action
++       * computed from a now-stale base.
++       *
++       * PRECEDENCE: this suppresses only keys the diff DERIVED. An explicit
++       * `declaredIntent` is re-applied from the canonical result even when the
++       * journal contains the same key — that is the escape hatch for an action
++       * that means to override a helper afterwards. Values always come from the
++       * result records; this only decides WHICH keys are written.
++       */
++      alreadyAppliedIntent?: ReadonlyMap<string, ReadonlySet<string>>;
+       recordHistory?: boolean;
+     } = {},
+   ): { changedIds: ReadonlySet<string> } {
+@@ -913,8 +942,21 @@ export class Scene {
+       resultById.set(r.id as string, r);
+     }
+ 
+-    const declared =
+-      options.declaredIntent ?? computeElementIntent(base, result);
++    let declared = options.declaredIntent ?? computeElementIntent(base, result);
++    if (!options.declaredIntent && options.alreadyAppliedIntent?.size) {
++      // DERIVED intent only — see `alreadyAppliedIntent`'s precedence note.
++      const keysById = new Map<string, Set<string>>();
++      for (const [id, keys] of declared.keysById) {
++        const applied = options.alreadyAppliedIntent.get(id);
++        const remaining = applied
++          ? new Set([...keys].filter((k) => !applied.has(k)))
++          : new Set(keys);
++        if (remaining.size) {
++          keysById.set(id, remaining);
++        }
++      }
++      declared = { ...declared, keysById };
++    }
+     assertIntentAgainstResult(declared, resultById);
+ 
+     // T016j — validate ONLY the records this mutation affects: creations, and
+@@ -1165,6 +1207,52 @@ export class Scene {
+    * Deliberately narrow — the editor's action layer is the only caller. This is
+    * not a general mode; see {@link openLogicalMutation} for the join rule.
+    */
++  /**
++   * Start recording which keys each `mutateElement` call DECLARES, per element
++   * id, for the duration of a synchronous action.
++   *
++   * The `updates` object of a `mutateElement` call already IS the writer's
++   * explicit per-id/per-key declaration, and it is the actual write source — so
++   * journaling it cannot drift the way a hand-maintained key list beside each
++   * helper would.
++   *
++   * A key is recorded even when the value is already equal and no Yjs write
++   * results: declaring a value that happens to match is still a claim of
++   * ownership over that key, and the contract must not depend on whether the
++   * doc happened to hold it already.
++   *
++   * Nested scopes JOIN the same journal; it is created at the outermost begin
++   * and cleared at the matching end, so a stale journal cannot be reused.
++   */
++  beginActionMutationJournal(): void {
++    if (this.mutationJournalDepth === 0) {
++      this.mutationJournal = new Map();
++    }
++    this.mutationJournalDepth++;
++  }
++
++  /**
++   * Ends journaling. Discards the journal only when the OUTERMOST scope closes,
++   * so a nested end cannot strand an outer action without its declarations.
++   *
++   * An unbalanced end is a no-op rather than an underflow, so a stale journal
++   * can never be observed by the next action.
++   */
++  endActionMutationJournal(): void {
++    if (this.mutationJournalDepth === 0) {
++      return;
++    }
++    this.mutationJournalDepth--;
++    if (this.mutationJournalDepth === 0) {
++      this.mutationJournal = null;
++    }
++  }
++
++  /** The keys declared so far in this scope, per element id (empty when closed). */
++  getActionMutationJournal(): ReadonlyMap<string, ReadonlySet<string>> {
++    return this.mutationJournal ?? new Map();
++  }
++
+   beginLogicalMutation(): void {
+     this.openLogicalMutation();
+   }
+@@ -2213,6 +2301,18 @@ export class Scene {
+       isDragging: false,
+     },
+   ): TElement {
++    if (this.mutationJournal) {
++      const id = element.id as string;
++      let keys = this.mutationJournal.get(id);
++      if (!keys) {
++        keys = new Set();
++        this.mutationJournal.set(id, keys);
++      }
++      // Declared, not effective: recorded even if the value already matches.
++      for (const key of Object.keys(updates)) {
++        keys.add(key);
++      }
++    }
+     const elementsMap = this.getNonDeletedElementsMap();
+ 
+     const { version: prevVersion } = element;
+diff --git a/packages/element/src/__tests__/Scene.mutationJournal.test.ts b/packages/element/src/__tests__/Scene.mutationJournal.test.ts
+new file mode 100644
+index 00000000..f864f2fc
+--- /dev/null
++++ b/packages/element/src/__tests__/Scene.mutationJournal.test.ts
+@@ -0,0 +1,176 @@
++import { Scene } from "../Scene";
++import { newElement } from "../newElement";
++
++import type { ExcalidrawElement } from "../types";
++
++const rect = (id: string, over: Partial<ExcalidrawElement> = {}) =>
++  newElement({
++    type: "rectangle",
++    id,
++    x: 0,
++    y: 0,
++    width: 10,
++    height: 10,
++    ...over,
++  } as Parameters<typeof newElement>[0]);
++
++/**
++ * The action mutation journal (T016b).
++ *
++ * A `mutateElement` call's `updates` object already IS the writer's explicit
++ * per-id/per-key declaration, AND it is the actual write source — so journaling
++ * it cannot drift the way a hand-maintained key list beside each helper would.
++ *
++ * Deliberately a SEPARATE scope from `beginLogicalMutation`: that is a generic
++ * transport primitive, and making every logical boundary imply intent capture
++ * would couple transport buffering to action semantics.
++ */
++describe("Scene action mutation journal", () => {
++  it("records DECLARED keys even when the value is already equal", () => {
++    const scene = new Scene();
++    scene.replaceAllElements([rect("a", { x: 5 })]);
++
++    scene.beginActionMutationJournal();
++    // Same value as the doc already holds: no Yjs write results, but declaring
++    // it is still a claim of ownership over that key.
++    scene.mutateElement(
++      scene.getElement("a" as never)! as never,
++      { x: 5 } as never,
++    );
++
++    expect([
++      ...((scene.getActionMutationJournal() as Map<string, Set<string>>).get(
++        "a",
++      ) ?? []),
++    ]).toContain("x");
++    scene.endActionMutationJournal();
++  });
++
++  it("is empty when no scope is open, and is cleared at end", () => {
++    const scene = new Scene();
++    scene.replaceAllElements([rect("a")]);
++
++    scene.mutateElement(
++      scene.getElement("a" as never)! as never,
++      { x: 1 } as never,
++    );
++    expect(scene.getActionMutationJournal().size).toBe(0);
++
++    scene.beginActionMutationJournal();
++    scene.mutateElement(
++      scene.getElement("a" as never)! as never,
++      { x: 2 } as never,
++    );
++    expect(scene.getActionMutationJournal().size).toBe(1);
++
++    scene.endActionMutationJournal();
++    // A stale journal must not be reusable by the next action.
++    expect(scene.getActionMutationJournal().size).toBe(0);
++  });
++
++  it("UNIONS nested scopes and clears only at the outermost end", () => {
++    const scene = new Scene();
++    scene.replaceAllElements([rect("a")]);
++
++    scene.beginActionMutationJournal();
++    scene.mutateElement(
++      scene.getElement("a" as never)! as never,
++      { x: 1 } as never,
++    );
++
++    // A nested begin joins the same journal rather than starting a fresh one.
++    scene.beginActionMutationJournal();
++    scene.mutateElement(
++      scene.getElement("a" as never)! as never,
++      { y: 2 } as never,
++    );
++    scene.endActionMutationJournal();
++
++    const keys = [
++      ...((scene.getActionMutationJournal() as Map<string, Set<string>>).get(
++        "a",
++      ) ?? []),
++    ];
++    expect(keys).toEqual(expect.arrayContaining(["x", "y"]));
++
++    scene.endActionMutationJournal();
++    expect(scene.getActionMutationJournal().size).toBe(0);
++  });
++
++  it("accumulates keys across several calls to the same id", () => {
++    const scene = new Scene();
++    scene.replaceAllElements([rect("a")]);
++
++    scene.beginActionMutationJournal();
++    scene.mutateElement(
++      scene.getElement("a" as never)! as never,
++      { x: 1 } as never,
++    );
++    scene.mutateElement(
++      scene.getElement("a" as never)! as never,
++      { y: 2 } as never,
++    );
++
++    expect(
++      [
++        ...((scene.getActionMutationJournal() as Map<string, Set<string>>).get(
++          "a",
++        ) ?? []),
++      ].sort(),
++    ).toEqual(expect.arrayContaining(["x", "y"]));
++    scene.endActionMutationJournal();
++  });
++
++  it("an EXPLICIT action declaration overrides a journaled helper key", () => {
++    const scene = new Scene();
++    scene.replaceAllElements([rect("a", { x: 0 })]);
++    const base = scene.getElementsIncludingDeleted().map((e) => ({ ...e }));
++
++    scene.beginActionMutationJournal();
++    // A helper writes x to the doc.
++    scene.mutateElement(
++      scene.getElement("a" as never)! as never,
++      { x: 50 } as never,
++    );
++    const journal = scene.getActionMutationJournal();
++    expect([...(journal.get("a") ?? [])]).toContain("x");
++
++    // The action then explicitly declares x — the escape hatch. Its canonical
++    // result value must win over the helper's doc-side write.
++    const result = base.map((e) => ({ ...e, x: 99 }));
++    scene.applyElementChanges(base as never, result as never, {
++      declaredIntent: {
++        addedIds: new Set(),
++        removedIds: new Set(),
++        keysById: new Map([["a", new Set(["x"])]]),
++      } as never,
++      alreadyAppliedIntent: journal,
++    });
++    scene.endActionMutationJournal();
++
++    expect(scene.getElement("a")!.x).toBe(99);
++  });
++
++  it("a DERIVED key already in the journal is suppressed, so the doc value survives", () => {
++    const scene = new Scene();
++    scene.replaceAllElements([rect("a", { x: 0 })]);
++    const base = scene.getElementsIncludingDeleted().map((e) => ({ ...e }));
++
++    scene.beginActionMutationJournal();
++    // The helper writes the CORRECT value to the doc...
++    scene.mutateElement(
++      scene.getElement("a" as never)! as never,
++      { x: 50 } as never,
++    );
++
++    // ...while the action's result carries a value derived from the stale base.
++    const result = base.map((e) => ({ ...e, x: 99 }));
++    scene.applyElementChanges(base as never, result as never, {
++      alreadyAppliedIntent: scene.getActionMutationJournal(),
++    });
++    scene.endActionMutationJournal();
++
++    // The helper's write survives — this is the whole point of the journal.
++    expect(scene.getElement("a")!.x).toBe(50);
++  });
++});
+diff --git a/packages/excalidraw/actions/actionFlip.ts b/packages/excalidraw/actions/actionFlip.ts
+index fbf2af52..e0339479 100644
+--- a/packages/excalidraw/actions/actionFlip.ts
++++ b/packages/excalidraw/actions/actionFlip.ts
+@@ -211,8 +211,5 @@ const flipElements = (
+   // through the doc rather than mutated in place) are stale in `selectedElements`;
+   // returning them would make the action's result clobber the doc's correct
+   // post-flip positions.
+-  const resultMap = app.scene.getNonDeletedElementsMap();
+-  return selectedElements.map(
+-    (element) => resultMap.get(element.id) ?? element,
+-  );
++  return selectedElements;
+ };
+diff --git a/packages/excalidraw/actions/manager.tsx b/packages/excalidraw/actions/manager.tsx
+index fef8b7ed..5a5c3a5a 100644
+--- a/packages/excalidraw/actions/manager.tsx
++++ b/packages/excalidraw/actions/manager.tsx
+@@ -175,12 +175,17 @@ export class ActionManager {
+     // `await`. The `finally` also guarantees that a throw mid-action still
+     // publishes whatever Yjs already committed.
+     this.app.scene.beginLogicalMutation();
++    // Separate, orthogonal scope: records which keys each `mutateElement` call
++    // DECLARES during this action, so the result application can tell an
++    // already-applied helper write from a stale action-derived one.
++    this.app.scene.beginActionMutationJournal();
+     try {
+       this.updater(
+         action.perform(elements, appState, value, this.app),
+         invocationBase,
+       );
+     } finally {
++      this.app.scene.endActionMutationJournal();
+       this.app.scene.endLogicalMutation();
+     }
+   }
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+index 14544f1f..401f0069 100644
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -2903,95 +2903,125 @@ class App extends React.Component<AppProps, AppState> {
+     });
+   };
+ 
+-  public syncActionResult = withBatchedUpdates((actionResult: ActionResult) => {
+-    if (this.unmounted || actionResult === false) {
+-      return;
+-    }
+-
+-    this.store.scheduleAction(actionResult.captureUpdate);
+-
+-    let didUpdate = false;
++  public syncActionResult = (
++    actionResult: ActionResult,
++    invocationBase?: readonly ExcalidrawElement[],
++  ) => this.syncActionResultBatched({ actionResult, invocationBase });
++
++  private syncActionResultBatched = withBatchedUpdates(
++    ({
++      actionResult,
++      invocationBase,
++    }: {
++      actionResult: ActionResult;
++      invocationBase?: readonly ExcalidrawElement[];
++    }) => {
++      if (this.unmounted || actionResult === false) {
++        return;
++      }
+ 
+-    let editingTextElement: AppState["editingTextElement"] | null = null;
+-    if (actionResult.elements) {
+-      // Native element history (M2): a `CaptureUpdateAction.NEVER` update must
+-      // never become an undo step — drive the Scene write under the non-tracked
+-      // origin so the doc updates but the UndoManager does not capture it (scene
+-      // load, programmatic non-capturing updates, and the re-application of an
+-      // undo/redo all funnel through here with NEVER).
+-      this.scene.replaceAllElements(actionResult.elements, {
+-        recordHistory: actionResult.captureUpdate !== CaptureUpdateAction.NEVER,
+-      });
+-      didUpdate = true;
+-    }
++      this.store.scheduleAction(actionResult.captureUpdate);
+ 
+-    if (actionResult.files) {
+-      this.addMissingFiles(actionResult.files, actionResult.replaceFiles);
+-      this.addNewImagesToImageCache();
+-    }
++      let didUpdate = false;
+ 
+-    if (actionResult.appState || editingTextElement || this.state.contextMenu) {
+-      let viewModeEnabled = actionResult?.appState?.viewModeEnabled || false;
+-      let zenModeEnabled = actionResult?.appState?.zenModeEnabled || false;
+-      const theme =
+-        actionResult?.appState?.theme || this.props.theme || THEME.LIGHT;
+-      const name = actionResult?.appState?.name ?? this.state.name;
+-      const errorMessage =
+-        actionResult?.appState?.errorMessage ?? this.state.errorMessage;
+-      if (typeof this.props.viewModeEnabled !== "undefined") {
+-        viewModeEnabled = this.props.viewModeEnabled;
++      let editingTextElement: AppState["editingTextElement"] | null = null;
++      if (actionResult.elements) {
++        // Native element history (M2): a `CaptureUpdateAction.NEVER` update must
++        // never become an undo step — drive the Scene write under the non-tracked
++        // origin so the doc updates but the UndoManager does not capture it (scene
++        // load, programmatic non-capturing updates, and the re-application of an
++        // undo/redo all funnel through here with NEVER).
++        const recordHistory =
++          actionResult.captureUpdate !== CaptureUpdateAction.NEVER;
++        if (invocationBase) {
++          this.scene.applyElementChanges(
++            invocationBase as never,
++            actionResult.elements as never,
++            {
++              recordHistory,
++              alreadyAppliedIntent: this.scene.getActionMutationJournal(),
++            },
++          );
++        } else {
++          this.scene.replaceAllElements(actionResult.elements, {
++            recordHistory,
++          });
++        }
++        didUpdate = true;
+       }
+ 
+-      if (typeof this.props.zenModeEnabled !== "undefined") {
+-        zenModeEnabled = this.props.zenModeEnabled;
++      if (actionResult.files) {
++        this.addMissingFiles(actionResult.files, actionResult.replaceFiles);
++        this.addNewImagesToImageCache();
+       }
+ 
+-      editingTextElement = actionResult.appState?.editingTextElement || null;
++      if (
++        actionResult.appState ||
++        editingTextElement ||
++        this.state.contextMenu
++      ) {
++        let viewModeEnabled = actionResult?.appState?.viewModeEnabled || false;
++        let zenModeEnabled = actionResult?.appState?.zenModeEnabled || false;
++        const theme =
++          actionResult?.appState?.theme || this.props.theme || THEME.LIGHT;
++        const name = actionResult?.appState?.name ?? this.state.name;
++        const errorMessage =
++          actionResult?.appState?.errorMessage ?? this.state.errorMessage;
++        if (typeof this.props.viewModeEnabled !== "undefined") {
++          viewModeEnabled = this.props.viewModeEnabled;
++        }
+ 
+-      // make sure editingTextElement points to latest element reference
+-      if (actionResult.elements && editingTextElement) {
+-        actionResult.elements.forEach((element) => {
+-          if (
+-            editingTextElement?.id === element.id &&
+-            editingTextElement !== element &&
+-            isNonDeletedElement(element) &&
+-            isTextElement(element)
+-          ) {
+-            editingTextElement = element;
+-          }
+-        });
+-      }
++        if (typeof this.props.zenModeEnabled !== "undefined") {
++          zenModeEnabled = this.props.zenModeEnabled;
++        }
+ 
+-      if (editingTextElement?.isDeleted) {
+-        editingTextElement = null;
+-      }
++        editingTextElement = actionResult.appState?.editingTextElement || null;
+ 
+-      this.setState((prevAppState) => {
+-        const actionAppState = actionResult.appState || {};
++        // make sure editingTextElement points to latest element reference
++        if (actionResult.elements && editingTextElement) {
++          actionResult.elements.forEach((element) => {
++            if (
++              editingTextElement?.id === element.id &&
++              editingTextElement !== element &&
++              isNonDeletedElement(element) &&
++              isTextElement(element)
++            ) {
++              editingTextElement = element;
++            }
++          });
++        }
+ 
+-        return {
+-          ...prevAppState,
+-          ...actionAppState,
+-          // NOTE this will prevent opening context menu using an action
+-          // or programmatically from the host, so it will need to be
+-          // rewritten later
+-          contextMenu: null,
+-          editingTextElement,
+-          viewModeEnabled,
+-          zenModeEnabled,
+-          theme,
+-          name,
+-          errorMessage,
+-        };
+-      });
++        if (editingTextElement?.isDeleted) {
++          editingTextElement = null;
++        }
+ 
+-      didUpdate = true;
+-    }
++        this.setState((prevAppState) => {
++          const actionAppState = actionResult.appState || {};
+ 
+-    if (!didUpdate) {
+-      this.scene.triggerUpdate();
+-    }
+-  });
++          return {
++            ...prevAppState,
++            ...actionAppState,
++            // NOTE this will prevent opening context menu using an action
++            // or programmatically from the host, so it will need to be
++            // rewritten later
++            contextMenu: null,
++            editingTextElement,
++            viewModeEnabled,
++            zenModeEnabled,
++            theme,
++            name,
++            errorMessage,
++          };
++        });
++
++        didUpdate = true;
++      }
++
++      if (!didUpdate) {
++        this.scene.triggerUpdate();
++      }
++    },
++  );
+ 
+   // Lifecycle
+ 

@@ -307,6 +307,59 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
   `await`. Passing unrelated-key preservation says nothing about same-key
   ownership for async results; that remains T016c.
 
+  **THE MUTATION-JOURNAL EXPERIMENT — IT WORKS.** (Reverted as instructed; the
+  full patch is kept at `experiments/t016b-journal-experiment.patch`. Tree clean
+  at 1589.)
+
+  **The coupling question was answered BEFORE building** (the "stop and show the
+  conflict" clause). `beginLogicalMutation` is a generic TRANSPORT primitive and
+  making every logical boundary imply intent capture would couple transport
+  buffering to action semantics. So the journal is a **separate, narrowly named
+  scope** — `beginActionMutationJournal` / `endActionMutationJournal` — that the
+  ActionManager happens to open alongside the transport boundary. Two orthogonal
+  scopes, neither implying the other.
+
+  **Mechanism**: `Scene.mutateElement` records `Object.keys(updates)` per id
+  while the scope is open — the `updates` object already IS the writer's explicit
+  per-key declaration AND the actual write source, so it cannot drift the way a
+  hand-maintained list beside each helper would. `applyElementChanges` subtracts
+  those keys from DERIVED intent only.
+
+  **Precedence, explicit**: an action's `declaredIntent` is re-applied from the
+  canonical result even when the journal holds the same key — the escape hatch
+  for an action that means to override a helper. Only derived keys are
+  suppressed. Values always come from result records; the journal decides only
+  WHICH keys are written.
+
+  **Results**:
+  - **BOTH real flip REDs green**, including the elbow `x` case that the plain
+    base→result diff could not fix.
+  - Full suite 18 → **17** failures (15 snapshot, 2 semantic: `textWysiwyg`
+    container-wrap and `actionDeleteSelected`'s elbow-binding branch).
+  - **1 transport update** for the action, local and peer states **converged**,
+    **undo depth +1**.
+
+  **Non-vacuity, both required probes**: disabling the subtraction brings the
+  elbow RED back; recording every key EXCEPT `x` brings it back too. So the
+  mechanism is load-bearing and specifically depends on the journaled key.
+
+  **A defect my own pin caught**: the first implementation discarded the journal
+  at the FIRST `end`, so a nested scope stranded the outer action's
+  declarations. Fixed with depth counting — created at 0→1, discarded at 1→0 —
+  and an unbalanced `end` is a no-op rather than an underflow, so a stale journal
+  can never be observed by the next action.
+
+  **Contract pinned** (`Scene.mutationJournal.test.ts`, 6): same-value
+  declaration is recorded, no scope means no journal, the journal clears at end,
+  nested scopes UNION and clear only at the outermost end, keys accumulate across
+  calls, an explicit action declaration overrides a journaled helper key, and a
+  derived key in the journal is suppressed so the doc value survives.
+
+  **Scope, named as required**: this closes the SYNCHRONOUS helper-overwrite
+  ambiguity only. `ActionManager` closes its boundary before an async result
+  lands, so the one async element-returning `perform` gets no journal — **T016c
+  remains open**.
+
   **T015 — HOLD LIFTED (see the discriminating experiment above).** It was held
   because helper intent sets risked being a SECOND unconsumed API, and because
   the textWysiwyg `+7` proved only that stale full writes happen, not that
