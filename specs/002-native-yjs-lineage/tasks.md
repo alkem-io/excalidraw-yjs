@@ -4,14 +4,14 @@
 
 **Strategy** (plan §Migration): suite-first (author each invariant RED against current HEAD, proving non-vacuity), single-owner (one author holds the lineage seam — no parallel-agent edge edits), edge-by-edge (each FR keeps the whole suite + typecheck + lint green before the next). Land on `split/native-yjs-core`, superseding the throwaway-detour code (commit `96f9bce3`, retained as the RED baseline).
 
-**LANE STATUS (2026-08-20).** **T030 is the only open task**, and it is paused by design rather than blocked on anything in this repo:
+**LANE STATUS (2026-08-20).** **T030 is the only open task.** It has been run once; it stays open on one finding (F1), whose fix is in the consumer lane:
 
 | task | state |
 | --- | --- |
 | T011 | CLOSED — both halves done |
 | T023 | CLOSED — consumer lane landed and verified. Contract is Route A (`audit-one-artifact-feasibility.md`): one direct package per consumer — client → umbrella, server → slim `element` — at the same build identifier, five internals as transitives. |
 | T027 | CLOSED — truncation has no shipped producer; nothing owed |
-| T030 | PAUSED by design — waiting only on collab-unification's clean-close corrective, then run fresh on complete HEAD |
+| T030 | OPEN — integration pass run, 3 findings; held open by F1 until the client bound lands and is reviewed |
 
 T002 is closed by replacement, not repair — see its entry before reading its "36 failures" as debt. T027 is closed by _unreachability_: the truncation class it measured has no shipped producer, so the measurements are evidence and not an open gate.
 
@@ -480,9 +480,15 @@ T030's precondition is now specifically collab-unification's clean-close correct
 
   Not a fork defect to fix in code — a timeout inside `flushAssetPublication` would either abandon bytes the host still holds or report success for a locator that never committed, and the host owns the network call. But the fork's contract _invited_ the unbounded await without saying so, which is the part that is mine: **`AssetAdapter.store` and `flushAssetPublication` now state that `store` MUST settle and that bounding it is the host's job.** The client-side bound is routed to that owner.
 
+  **The remedy is routed and its shape is agreed**, written here so the later reconciliation checks the landed fix against a stated expectation rather than re-deriving one: a **60 s host bound** (unless a measured SLA says otherwise), a **per-call `AbortController`** passed into Apollo's `fetchOptions.signal`, **plus a timer rejection** so `store` settles even if the transport ignores the abort. A timeout stays a **failed flush** — no save, no teardown, retry allowed. **No fork timeout.**
+
+  The fork side of that contract is already gated and needs nothing new: `assetFlush.test.tsx` covers a rejecting `store` (reported, bytes retained, nothing published) and a retry after failure succeeding. A delayed rejection is the timeout shape and takes the same path.
+
+  **T030 stays OPEN until that lands and is reviewed**, then reruns. A user-facing hang is a finding, not a footnote.
+
   **F2 — T023's own entry contradicted itself**, the same drift as T027's four-places problem. Its closure note recorded the `dataURL` fallback as gone while two older paragraphs still called it a "live blocker" and instructed its deletion, naming a module that no longer exists. Relabelled as historical record rather than instruction.
 
-  **F3 — the cold-load adoption path has NO consumer.** `encodedScene` appears **zero** times in `client-web`; both wrappers pass `initialData` that is "just the empty tool defaults — NO content elements/files/appState" and take content over the provider's sync instead. `EncodedSceneDocument` / T020 / INV-COLD-LOAD-LINEAGE are shipped, gated and unused. Not a defect, and it strengthens T027's closure rather than weakening it — but "shipped and unused" must not be read as "shipped and load-bearing", so it is recorded. Worth revisiting only if a host ever owns whiteboard persistence directly.
+  **F3 — the cold-load adoption path has NO consumer.** `encodedScene` appears **zero** times in `client-web`; both wrappers pass `initialData` that is "just the empty tool defaults — NO content elements/files/appState" and take content over the provider's sync instead. `EncodedSceneDocument` / T020 / INV-COLD-LOAD-LINEAGE are shipped, gated and unused. Not a defect, and it strengthens T027's closure rather than weakening it — but "shipped and unused" must not be read as "shipped and load-bearing", so it is recorded. **A factual note, NOT work**: do not invent a consumer for it and do not remove the API during this gate. Worth revisiting only if a host ever owns whiteboard persistence directly.
 
   **Verified still true**, so they are not silently assumed: `EncodedSceneDocument.format` is the literal `"v2"`; `assetAdapter` is forwarded through the `Excalidraw` wrapper and reaches the client; `flushAssetPublication` is on the imperative API and the client consumes it exactly as documented — awaiting it BEFORE teardown and treating a non-empty `failed` as "do not report a clean close"; the transport claim "no `join-room`" still holds (zero occurrences).
 
@@ -520,7 +526,7 @@ T030's precondition is now specifically collab-unification's clean-close correct
 
   **What the two rounds say about the suite**: 24 mutations, 22 killed on the first run, and both survivors were of the same kind — a contract whose _state_ outcome is asserted from several directions while the thing that actually varies (which origin was used; how many uploads happened) is asserted nowhere. Both are now covered.
 
-- [ ] T030 **(PAUSED — deliberately, until the consumer work lands)** SC-003 gate: a fresh FULL adversarial review of the complete HEAD returns ZERO findings of any kind. Ratchet any finding → a new invariant test + back to its phase.
+- [ ] T030 **(OPEN — run once; held open by F1, a user-facing hang)** SC-003 gate: a fresh FULL adversarial review of the complete HEAD returns ZERO findings of any kind. Ratchet any finding → a new invariant test + back to its phase.
 
 ## Analyze (spec↔plan↔tasks consistency — pre-implement gate)
 
