@@ -1,6 +1,6 @@
 import * as Y from "yjs";
 import { newElement, newImageElement } from "@excalidraw-yjs/element";
-import { vi } from "vitest";
+import { it, vi } from "vitest";
 
 import type {
   ExcalidrawElement,
@@ -96,7 +96,9 @@ vi.mock("firebase/firestore", () => {
   };
 });
 
-const { saveToFirebase, loadFromFirebase } = await import("../data/firebase");
+const { saveToFirebase, loadFromFirebase, isSavedToFirebase } = await import(
+  "../data/firebase"
+);
 
 const ROOM = "room-1";
 const KEY = "0123456789abcdefghijkl"; // 22 chars, shape of a room key
@@ -516,5 +518,75 @@ describe("firebase persistence boundary", () => {
         (loaded as unknown as { docBytes?: Uint8Array }).docBytes,
       ).toBeInstanceOf(Uint8Array);
     });
+  });
+
+  /**
+   * INV-SAVE-SKIP (T007) — `isSaved` must mean live == stored.
+   *
+   * MEASURED, both halves broken, for two independent reasons:
+   *
+   * 1. FALSE-DIRTY (every save redundant). The cache is set from the elements
+   *    that came back through `restoreElements`, which RENORMALISES versions.
+   *    Measured: live `[a:5, b:5]` (sum 10) stores as `[a:2, b:2]` (sum 4). The
+   *    cached sum therefore never equals the live sum, so `isSavedToFirebase`
+   *    is false immediately after a successful save — every cycle pays a full
+   *    firestore transaction, and the unload guard always claims unsaved work.
+   *
+   * 2. FALSE-SKIP (silent loss). `getSceneVersion` is a plain SUM, which
+   *    collides whenever one element's version rises as much as another's
+   *    falls. T014b established versions DO move backwards here, so the
+   *    collision is a recorded mechanism, not a contrivance. A false-skip drops
+   *    the save with nothing to retry it.
+   *
+   * Both are why T026 replaces the sum-cache with an explicit dirty flag.
+   *
+   * These are `it.fails` rather than `it.skip`: the defect stays EXECUTABLE and
+   * the suite stays green, and the moment T026 makes either assertion hold the
+   * test fails loudly instead of sitting silently skipped.
+   */
+  describe("INV-SAVE-SKIP", () => {
+    it.fails("reports saved immediately after a successful save", async () => {
+      const portal = portalFor();
+      const live = [rect("a", { version: 5 }), rect("b", { version: 5 })];
+
+      const stored = await saveToFirebase(portal, live, appStateWith({}), {});
+
+      // GUARD: the save really happened, so `false` below is a live-vs-stored
+      // mismatch and not an empty/aborted save.
+      expect(stored).not.toBeNull();
+      expect(stored!.map((e) => e.id).sort()).toEqual(["a", "b"]);
+
+      expect(isSavedToFirebase(portal, live)).toBe(true);
+    });
+
+    it.fails(
+      "does not report saved when content changed but the version SUM collides",
+      async () => {
+        const portal = portalFor();
+        const stored = await saveToFirebase(
+          portal,
+          [rect("a", { version: 5 }), rect("b", { version: 5 })],
+          appStateWith({}),
+          {},
+        );
+
+        // GUARD (non-vacuity): anchor on the set the cache was actually built
+        // from, so this reports `true` and the assertion below is a real
+        // transition rather than the permanent `false` of defect 1.
+        expect(isSavedToFirebase(portal, stored!)).toBe(true);
+
+        // One version up, one down — identical sum, genuinely different content.
+        const byId = (id: string) => stored!.find((e) => e.id === id)!;
+        const collided = [
+          { ...byId("a"), version: byId("a").version + 1, x: 999 },
+          { ...byId("b"), version: byId("b").version - 1 },
+        ] as unknown as typeof stored;
+        expect(collided!.reduce((n, e) => n + e.version, 0)).toBe(
+          stored!.reduce((n, e) => n + e.version, 0),
+        );
+
+        expect(isSavedToFirebase(portal, collided!)).toBe(false);
+      },
+    );
   });
 });
