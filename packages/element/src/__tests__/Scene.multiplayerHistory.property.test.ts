@@ -65,10 +65,13 @@ const sidecarDisagreements = (scene: Scene) =>
  * the same doc, on a fourth origin (the `Y.UndoManager` itself), interleaved
  * with both replicas' edits and with sync points. This fuzzes that interleaving.
  *
- * NON-VACUITY, measured over the 60 trials below rather than assumed: 263 undos
- * and 44 redos actually did something (they returned `true`), alongside 297
- * deletes and 287 adds. `redoElements()` returns `false` far more often (292) —
- * expected, since any new edit clears the redo stack.
+ * NON-VACUITY IS ASSERTED, NOT DOCUMENTED. Counting successful undos and redos
+ * per replica and asserting each is positive is the guard; a number quoted in a
+ * comment is a statement about one past run, and if history capture or the op
+ * mix ever changed so undo/redo became a no-op, convergence + sidecar + cache
+ * would all stay green while this stopped being a history test at all. Current
+ * run, for orientation only: undo A=133 B=143, redo A=23 B=26, 286 deletes,
+ * 247 adds.
  *
  * SABOTAGE: dropping `yElementDeletions` from the UndoManager's scope — exactly
  * the hazard `Scene`'s constructor warns about — FAILS this test on multiple
@@ -82,6 +85,20 @@ describe("INV-CONVERGE under local history: two replicas, undo/redo interleaved"
 
   it("converges, keeps the deletion sidecar in lockstep, and never drifts from the doc", () => {
     const failures: string[] = [];
+    /**
+     * Live non-vacuity accounting. This used to be a measured claim in the
+     * docblock, which is a statement about ONE past run, not a guard: if history
+     * capture or the op distribution ever changes so undo/redo becomes a no-op,
+     * convergence + sidecar + cache would all stay green and this "history"
+     * property would quietly stop testing history. Counted here and asserted
+     * below instead.
+     */
+    const did = {
+      undo: { A: 0, B: 0 },
+      redo: { A: 0, B: 0 },
+      deletes: 0,
+      adds: 0,
+    };
 
     for (let trial = 0; trial < TRIALS; trial++) {
       const rand = rng(0xc0ffee + trial * 7919);
@@ -98,7 +115,7 @@ describe("INV-CONVERGE under local history: two replicas, undo/redo interleaved"
       };
 
       let created = 0;
-      const step = (scene: Scene, tag: string) => {
+      const step = (scene: Scene, tag: "A" | "B") => {
         const els = scene.getElementsIncludingDeleted();
         const pick = els[Math.floor(rand() * els.length)];
         const roll = rand();
@@ -115,24 +132,36 @@ describe("INV-CONVERGE under local history: two replicas, undo/redo interleaved"
             ),
           );
         } else if (roll < 0.62) {
+          did.adds++;
           scene.replaceAllElements([...els, mk(`${tag}-new-${created++}`)]);
         } else if (roll < 0.74 && pick) {
+          did.deletes++;
           scene.replaceAllElements(
             els.map((e) => (e.id === pick.id ? { ...e, isDeleted: true } : e)),
           );
         } else if (roll < 0.86) {
-          scene.undoElements();
-        } else {
-          scene.redoElements();
+          if (scene.undoElements()) {
+            did.undo[tag]++;
+          }
+        } else if (scene.redoElements()) {
+          did.redo[tag]++;
         }
-        // Discrete undo steps: `captureTimeout` is disabled by being huge, so
-        // WITHOUT this every edit in a trial merges into a single stack item and
-        // `undoElements()` is almost a no-op — the fuzz would be vacuous.
+        // Mirrors the editor, which ends a capture at each durable-commit
+        // boundary. NOT load-bearing for this test, contrary to what an earlier
+        // revision of this comment claimed: removing it was measured, and the
+        // successful-undo counts barely move (133/143 -> 128/127). Interleaved
+        // remote applies and structural adds already break the stack into items,
+        // so the huge `captureTimeout` never gets to merge a whole trial.
         scene.stopElementCapture();
       };
 
       for (let i = 0; i < STEPS; i++) {
-        step(rand() < 0.5 ? a : b, rand() < 0.5 ? "a" : "b");
+        // NB: the tag names the replica actually stepped. It was previously
+        // rolled independently of the scene, which made per-replica accounting
+        // meaningless (ids stayed unique via the shared counter, so nothing else
+        // depended on it).
+        const which = rand() < 0.5 ? "A" : "B";
+        step(which === "A" ? a : b, which);
         if (rand() < 0.25) {
           sync();
         }
@@ -160,6 +189,17 @@ describe("INV-CONVERGE under local history: two replicas, undo/redo interleaved"
       a.destroy();
       b.destroy();
     }
+
+    // Non-vacuity, asserted rather than documented, and PER REPLICA so one side
+    // cannot fall silent behind a healthy global total. Redo is rarer than undo
+    // (any new edit clears the redo stack) but comfortably positive on both
+    // sides, and the PRNG is seeded, so these can only move when the code or the
+    // workload moves — exactly when the guard should fire.
+    const counts = JSON.stringify(did);
+    expect(`undo A=${did.undo.A} ${counts}`).toMatch(/undo A=[1-9]/);
+    expect(`undo B=${did.undo.B} ${counts}`).toMatch(/undo B=[1-9]/);
+    expect(`redo A=${did.redo.A} ${counts}`).toMatch(/redo A=[1-9]/);
+    expect(`redo B=${did.redo.B} ${counts}`).toMatch(/redo B=[1-9]/);
 
     expect(failures).toEqual([]);
   });
