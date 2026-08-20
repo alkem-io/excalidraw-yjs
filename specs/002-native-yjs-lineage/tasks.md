@@ -152,6 +152,10 @@
 
     So this is coverage, not a retirement: the site moves from unknown to known, and it stays in place because nothing fails when it returns. Retiring it would be exactly the "suite is green, so delete it" reasoning the bar exists to prevent.
 
+  - **`boundText:184` — measured, KEPT, and it establishes the general pattern.** `bindTextReread.test.tsx` covers `actionBindText`. Instrumented across the whole suite, the container's `boundElements` differs between the stale entry and the live doc on **every** reached invocation (`cont:boundElements`, `id0:boundElements`, …) — so the census's "10 semantic" is real, and in fact universal at this site. Yet removing the re-read leaves the full suite green (1612 passed) and this scenario byte-identical.
+
+  - **THE PATTERN, now measured at three sites** (`distribute:77`, `boundText:184`, `boundText:358`): the re-read IS genuinely redundant under the patch route, because the derived diff compares the result against the INVOCATION BASE and the stale entry EQUALS that base — so no key is declared, nothing is written, and the helper's doc value survives. **Redundant is not retirable**: removal is unobservable, which is exactly the state the "a test must discriminate" bar exists to refuse, so these three stay. Only `align:83` and `flip:216` behaved otherwise — there the action's entry had genuinely diverged from its base, removal WAS observable, and both were retired behind an ownership policy.
+
   - A semantic difference is NOT an observable defect: `boundText:184` and `boundText:358` can each be deleted with the suite still green. Do not retire a site without a test that fails when it returns.
 
 **Design note (do not lose):** a base→result diff is a sound migration default but is NOT the definition of intent. "Explicitly set a key to the value it already had in base" is invisible to a diff yet must still beat an interleaved remote write — the same asymmetry FR-009 fixed one layer down. Derive for synchronous actions in the interim; the durable contract carries explicit per-id key sets plus membership intent.
