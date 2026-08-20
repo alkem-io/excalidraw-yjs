@@ -47,6 +47,24 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
         with:
+          # Build the PR HEAD, not GitHub's synthetic merge commit.
+          #
+          # On `pull_request` the default checkout is an ephemeral merge of head
+          # into base, and `pkg-pr-new` publishes the preview under THAT sha. The
+          # head sha — the one `gh run list` reports, the one in `git log`, the
+          # one a person pins — then has no artifacts and 404s on install. That
+          # cost a consuming repo two failed installs before the cause was found,
+          # and no amount of green CI revealed it.
+          #
+          # Empty for tag and workflow_dispatch runs, where `actions/checkout`
+          # falls back to the triggering ref — so those paths are unchanged.
+          #
+          # Tradeoff, stated: the preview is now built WITHOUT the base branch
+          # merged in. That is the right call for something consumers pin — the
+          # artifact matches a commit that actually exists and can be checked
+          # out — but it means a preview does not prove the PR merges cleanly.
+          # The normal PR checks cover that.
+          ref: ${{ github.event.pull_request.head.sha }}
           # No later step runs authenticated git (publish uses npm OIDC /
           # pkg.pr.new, not git push), so don't persist repo credentials.
           persist-credentials: false
