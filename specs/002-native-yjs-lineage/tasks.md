@@ -139,6 +139,16 @@
 - [ ] T016f **(OPEN — this slice removed TWO of the sites, not the family)** Revisit the remaining re-read sites, retiring each only where patch mode proves it redundant AND a test discriminates.
 
   - Removed so far: `actionFlip`'s post-flip whole-object reread, and `actionBoundText`'s wrap reread. Both were proven by a failing production test, not by inspection.
+  - **SCOPE CORRECTED — the "36 `freshMap.get(id) ?? element` sites" figure does not match the code.** Counted directly (multi-line tolerant, production only, excluding tests and `dist`):
+
+    - **9 DOC RE-READ sites** of the `freshMap`/`resultMap` … `??` shape — `actionProperties` ×5, `actionFinalize` ×1, `actionBoundText` ×1, `actionDistribute` ×1, `actionFlip` ×1. That is the class T016b/T016f has been measuring, and it is **9, not 36**.
+    - **34 production `fresh-snapshot` markers** in total across 14 files, so roughly 25 annotated sites are a DIFFERENT shape — chiefly single-element re-reads such as `scene.getElement(x.id)` after a helper write (`Stats/*`, `resizeElements`, `transform`, `binding`). Those are category 3 (helper/consumer input), never censused, and are not retirable by an ownership policy.
+    - `actionAlign` now has **zero** doc re-reads: its remaining `updatedElementsMap.get(id) ?? element` is the action's own updated map, not a doc read. An earlier count mistook that for one.
+
+  - **`actionProperties`' five guarded sites — measured, KEPT.** Neutralising every `editedTextIds`/`editedArrowIds`-guarded re-read in that file (8 replacements) leaves the full suite green at 1613. Unobservable, so they stay by the standing bar.
+
+  - **HARNESS CAPACITY LIMIT, not a product flake**: `npx vitest run --maxWorkers=32 --minWorkers=32` on a 10-core machine deterministically produces `still loading` failures. Normal configured parallelism has adequate margin; defaults are deliberately unchanged.
+
   - **Measured, per invocation, across the six families that call side-effecting helpers**: `flip:163` 63 reached / 2 semantic; `boundText:184` 25 / 10 (`boundElements`); `boundText:358` 14 / 3 (`index`); `props:319` 9 / 1; `props:1107` and `props:1379` 8 / 0 each; `distribute:77` **now KNOWN — reached but NOT load-bearing** (see below); `actionStyles`' is already narrow (copies only `width`/`height`).
   - **`align:83` — coverage gap CLOSED and the site RETIRED.** It was reachable only for an element absent from `updatedElements`: a bound arrow moved through the doc by `updateBoundElements` while not itself selected. No test had that shape. `alignBoundArrowReread.test.tsx` now does, and it discriminates in both directions:
 
