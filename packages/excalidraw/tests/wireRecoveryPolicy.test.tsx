@@ -277,6 +277,58 @@ describe("INV-WIRE-ROBUST: receiver recovery policy", () => {
     },
   );
 
+  it.fails(
+    "V2 — the format the COLD-LOAD path always speaks — is no worse than v1 under corruption",
+    () => {
+      // `EncodedSceneDocument.format` is the literal `"v2"` (types.ts), so the
+      // cold-load adoption path — one of the three production receivers — always
+      // applies V2 bytes, while every other T027 measurement was v1. Measured
+      // over the same bounded flip budget, v2 is MATERIALLY WORSE: it silently
+      // diverged 91 times to v1's 42, and 69 of those resisted a resync to v1's
+      // 25. Its run-length encoding means one flipped bit perturbs a wider
+      // decoded span. Worse still, this is the one path with no live authority
+      // to resync FROM — the stored document IS the authority.
+      const measure = (format: "v1" | "v2") => {
+        const src = new Scene();
+        src.replaceAllElements([
+          API.createElement({ type: "rectangle", id: "a", x: 1 }),
+          API.createElement({ type: "rectangle", id: "b", x: 2 }),
+        ]);
+        const seed = src.encodeStateAsUpdate(format);
+        src.replaceAllElements([
+          ...src.getElementsIncludingDeleted(),
+          API.createElement({ type: "rectangle", id: "c", x: 3 }),
+        ]);
+        const good = src.encodeStateAsUpdate(format);
+        const authority = rederive(src);
+        let diverged = 0;
+        for (let i = 0; i < Math.min(64, good.length); i++) {
+          for (let bit = 0; bit < 8; bit++) {
+            const bad = good.slice();
+            bad[i] ^= 1 << bit;
+            const recv = new Scene();
+            recv.applyRemoteUpdate(seed, format);
+            try {
+              recv.applyRemoteUpdate(bad, format);
+              if (rederive(recv) !== authority) {
+                diverged++;
+              }
+            } catch {
+              // announced
+            }
+            recv.destroy();
+          }
+        }
+        src.destroy();
+        return diverged;
+      };
+
+      // RED, and the gap is the point: the cold-load path is both the most
+      // exposed to silent corruption and the least able to recover from it.
+      expect(measure("v2")).toBeLessThanOrEqual(measure("v1"));
+    },
+  );
+
   it.fails("a silent divergence is repaired by a state-vector resync", () => {
     // The sting: the class that is NOT announced is also the class the CRDT
     // catch-up cannot repair. The receiver's state vector claims it already

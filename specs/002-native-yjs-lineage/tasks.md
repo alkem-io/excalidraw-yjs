@@ -362,6 +362,23 @@
 
   **THE OPEN HOLE — silent corruption, and it is not ours.** Yjs's binary format carries no integrity check. Exhaustive single-bit corruption of a real 1590-byte update (12 720 trials): **8598 applied WITHOUT throwing**, **258 silently diverged** from the authority, and **134 of those survived a full state-vector resync** — the resync never threw, it just could not help, because the receiver's state vector claims those clocks are already held so the authority's delta omits the real structs. The sting is structural: **the class a resync cannot repair is exactly the class that never announces itself**, so no receiver policy can be triggered for it. Two REDs pin this (`silentlyDiverged`, `unrepairable`). Closing it needs integrity on the wire or validation at ingress — transport/service, not this repo. In production the accidental case is already covered by TLS/TCP integrity; the residual is a malicious or buggy peer, which is the same owner as the poison class.
 
+  **ADVERSARIAL SELF-REVIEW OF THE ABOVE — a gap in my own measurement, and it lands on the worst path.** Every T027 number up to here was measured on the **v1** wire format. `EncodedSceneDocument.format` in `packages/excalidraw/types.ts` is the LITERAL `"v2"` — not a union — so the **cold-load adoption path** (`App.tsx:3286`), one of the three production receivers this task's own census named, always applies **v2** bytes. The measurements did not cover it.
+
+  Re-measured across both formats, same scene, same flip budget (first 96 bytes x 8 bits = 768 trials):
+
+  |                                        | v1     | v2     |
+  | -------------------------------------- | ------ | ------ |
+  | update size                            | 1623 B | 1010 B |
+  | truncation: threw AND mutated          | 23     | 23     |
+  | truncation: silent divergence          | 0      | 0      |
+  | corruption: applied without throwing   | 481    | 407    |
+  | corruption: **silently diverged**      | 42     | **91** |
+  | corruption: **unrepairable by resync** | 25     | **69** |
+
+  Truncation behaves identically in both. **Corruption is materially worse in v2 — 2.2x the silent divergences and 2.8x the unrepairable ones** — even though FEWER flips decode at all. Its run-length encoding means one flipped bit perturbs a wider decoded span.
+
+  **And this is the one path with no authority to resync FROM.** The drafted policy assumes a live peer or server answering `SyncStep1`. At cold load the stored document IS the authority, so a corrupted snapshot has nothing to be repaired against. The recovery policy therefore does NOT cover the adoption path, and it must not be described as if it did. Pinned by a fifth RED asserting v2 is no worse than v1, which fails today.
+
   **Policy summary — three classes, three owners.**
 
   | class | announced? | resync repairs? | owner |
