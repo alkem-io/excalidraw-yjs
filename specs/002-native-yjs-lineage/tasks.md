@@ -139,7 +139,7 @@
 - [ ] T016f **(OPEN — this slice removed TWO of the sites, not the family)** Revisit the remaining re-read sites, retiring each only where patch mode proves it redundant AND a test discriminates.
 
   - Removed so far: `actionFlip`'s post-flip whole-object reread, and `actionBoundText`'s wrap reread. Both were proven by a failing production test, not by inspection.
-  - **Measured, per invocation, across the six families that call side-effecting helpers**: `flip:163` 63 reached / 2 semantic; `boundText:184` 25 / 10 (`boundElements`); `boundText:358` 14 / 3 (`index`); `props:319` 9 / 1; `props:1107` and `props:1379` 8 / 0 each; `distribute:77` **never reached — unknown, not clean**; `actionStyles`' is already narrow (copies only `width`/`height`).
+  - **Measured, per invocation, across the six families that call side-effecting helpers**: `flip:163` 63 reached / 2 semantic; `boundText:184` 25 / 10 (`boundElements`); `boundText:358` 14 / 3 (`index`); `props:319` 9 / 1; `props:1107` and `props:1379` 8 / 0 each; `distribute:77` **now KNOWN — reached but NOT load-bearing** (see below); `actionStyles`' is already narrow (copies only `width`/`height`).
   - **`align:83` — coverage gap CLOSED and the site RETIRED.** It was reachable only for an element absent from `updatedElements`: a bound arrow moved through the doc by `updateBoundElements` while not itself selected. No test had that shape. `alignBoundArrowReread.test.tsx` now does, and it discriminates in both directions:
 
     - removing the re-read with no ownership declared → the fail-closed boundary THROWS naming `arr.points, arr.y`, rather than silently reverting;
@@ -147,6 +147,10 @@
     - inverting to `result` → the arrow keeps its pre-align diagonal (`[[0,0],[188,188]]` instead of the re-routed `[[0,0],[188,0]]`), caught by asserting the arrow is FLAT once both bindables share a `y`.
 
     Retired on exactly the stated bar: a test fails when the re-read returns.
+
+  - **`distribute:77` — coverage gap CLOSED; deliberately NOT retired.** Same reachable shape as align's, and `distributeBoundArrowReread.test.tsx` now has it (three bindables plus an unselected bound arrow). Instrumented: the site IS reached and the live arrow DIFFERS from the stale entry at that moment. But removing the re-read fails nothing and leaves the final arrow byte-identical (`[[0,0],[188,0]]`, `x` 106.00000000000001) — because the action's entry for the unselected arrow equals its INVOCATION BASE, so the derived diff declares no keys for it and the helper's write is already protected.
+
+    So this is coverage, not a retirement: the site moves from unknown to known, and it stays in place because nothing fails when it returns. Retiring it would be exactly the "suite is green, so delete it" reasoning the bar exists to prevent.
 
   - A semantic difference is NOT an observable defect: `boundText:184` and `boundText:358` can each be deleted with the suite still green. Do not retire a site without a test that fails when it returns.
 
