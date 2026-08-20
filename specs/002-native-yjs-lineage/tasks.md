@@ -358,7 +358,7 @@
 
   No policy implemented; the reproduction and costing had to come first.
 
-  **RECEIVER RECOVERY POLICY — drafted, with the requested premise FALSIFIED.** Gate: `wireRecoveryPolicy.test.tsx` (4 tests: 2 green evidence, 2 `it.fails` REDs). No transport code written — held pending the server ingress policy, as agreed.
+  **RECEIVER RECOVERY POLICY — drafted, with the requested premise FALSIFIED.** Gate: `wireRecoveryPolicy.test.tsx` (5 tests: 2 green evidence, 3 `it.fails` — all three recorded as ACCEPTED RISK, see the scope decision below). No transport code written; the implementation is the embedder's, per that decision.
 
   **The mechanism, named.** A resync is requested with the y-protocols exchange the transport already speaks: the receiver sends **`SyncStep1`** carrying its state vector, the authority replies **`SyncStep2`** with exactly the structs the receiver lacks (`collaboration-service`: `EncodeSyncStep2(r.doc, info.Body)` in `internal/domain/service/sync.go`, driven from `room.go:965`). Nothing new is needed on either side, and **no new package API is needed either** — `applyRemoteSceneUpdate` already throws through to the embedder and `encodeSceneStateVector` is already exported, so the whole recovery is `catch → encodeSceneStateVector() → transport asks → applyRemoteSceneUpdate(delta)`. Pinned by a test that runs it through the public API only. That keeps the policy in the embedder (`Collab`, the client-web adapter), which is where the session lives, and satisfies the fork's standing rule that customisations come from outside the package.
 
