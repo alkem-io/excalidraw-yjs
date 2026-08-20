@@ -242,124 +242,122 @@ beforeEach(() => {
 });
 
 describe("firebase persistence boundary", () => {
-  // FINDING #2 — concurrent-save merge. The store is a SEPARATE replica built by a
-  // fresh `buildSnapshotDoc` per save (its own random `clientID`), and a save hands
-  // `saveToFirebase` a plain element ARRAY, not the live `scene.doc`. So the merge
-  // canNOT be a Yjs `applyUpdateV2` fold (whole-element LWW by `clientID` across
-  // disjoint lineages — drops concurrent edits, resurrects deletions). It is a
-  // decoded VALUE merge: deletions union (either side, both directions), disjoint
-  // ids union, and a same-element concurrent edit resolves last-writer-wins by the
-  // saving replica. Each case below is RED if the merge is reverted to the
-  // fresh-doc `applyUpdateV2` (or to a wholesale replace).
-  //
-  // Each sub-case models the race by: writer B's save lands first (so the store
-  // holds B's state), then writer A — on a fresh socket so the scene-version cache
-  // never short-circuits — saves from a view that never saw B's change. A's save
-  // must fold B's committed state in via the in-transaction read+merge.
+  /**
+   * Concurrent-save merge.
+   *
+   * The store is a SEPARATE replica from the live socket: two clients can each
+   * commit a save built from a view that had not yet seen the other's committed
+   * write. `saveToFirebase` takes the scene's own DOCUMENT (T021) and folds the
+   * stored one into it with `applyUpdateV2`, so both sides carry lineage and the
+   * merge is a real per-property CRDT merge.
+   *
+   * Every case builds its replicas from ONE shared base. That is not a
+   * convenience: under the post-cutover protocol two independently-created
+   * documents cannot race (the stored doc descends from a live doc, and every
+   * peer's descends from the room seed or from adopting the stored one), so a
+   * fixture with disjoint lineages would be measuring a situation the protocol
+   * does not produce.
+   *
+   * Each case is deterministic — dropping the prior fold loses the other
+   * replica's contribution outright, with no tiebreak involved — so none of them
+   * needs repetition to be reliably red.
+   */
 
-  it("FINDING #2 (disjoint adds): a concurrent writer's new element is NOT lost", async () => {
-    // B committed {a, b}; A saves from a stale view {a, c} that never saw b.
-    await saveScene(portalFor(), [rect("a"), rect("b")], appStateWith({}), {});
-    await saveScene(portalFor(), [rect("a"), rect("c")], appStateWith({}), {});
+  it("disjoint adds: a concurrent writer's new element is NOT lost", async () => {
+    const base = sharedBase([rect("a")]);
+    const addB = replicaFrom(base, (scene) =>
+      scene.replaceAllElements([
+        ...scene.getElementsIncludingDeleted(),
+        rect("b"),
+      ] as never),
+    );
+    const addC = replicaFrom(base, (scene) =>
+      scene.replaceAllElements([
+        ...scene.getElementsIncludingDeleted(),
+        rect("c"),
+      ] as never),
+    );
+
+    // B commits first; A saves from a view that never saw b.
+    await saveDoc(portalFor(), addB);
+    await saveDoc(portalFor(), addC);
 
     const loaded = await loadFromFirebase(ROOM, KEY, null);
     const ids = (loaded!.elements as readonly OrderedExcalidrawElement[])
       .map((e) => e.id)
       .sort();
 
-    // b (the concurrent writer's element) survived alongside a and c. A wholesale
-    // replace would have dropped b.
+    // b survived alongside a and c. A wholesale replace would have dropped it.
     expect(ids).toEqual(["a", "b", "c"]);
   });
 
-  // A merge that resolves a shared element id by `clientID` tiebreak can land the
-  // right answer ~half the time on any single race. Each discriminating case
-  // therefore runs the race RACE_ITERATIONS times on independent rooms and
-  // asserts the invariant EVERY time, so a broken merge is red with probability
-  // 1 − 2^−RACE_ITERATIONS (≈ 0.9998 at 12) rather than a coin flip.
-  const RACE_ITERATIONS = 12;
-
-  it("FINDING #2 (same-element, DIFFERENT properties): both concurrent edits survive", async () => {
-    for (let i = 0; i < RACE_ITERATIONS; i++) {
-      const room = `same-el-props-${i}`;
-      const base = sharedBase([
-        rect("e1", { strokeColor: "#000000", backgroundColor: "#ffffff" }),
-      ]);
-
-      // B recolours the stroke; A, from the SAME base and never having seen B,
-      // changes the background.
-      await saveDoc(
-        portalForRoom(room),
-        replicaFrom(base, (scene) =>
-          scene.replaceAllElements(
-            scene
-              .getElementsIncludingDeleted()
-              .map((e) => ({ ...e, strokeColor: "#ff0000" })) as never,
-          ),
-        ),
-      );
-      await saveDoc(
-        portalForRoom(room),
-        replicaFrom(base, (scene) =>
-          scene.replaceAllElements(
-            scene
-              .getElementsIncludingDeleted()
-              .map((e) => ({ ...e, backgroundColor: "#0000ff" })) as never,
-          ),
-        ),
+  it("same element, DIFFERENT properties: both concurrent edits survive", async () => {
+    const room = "same-el-props";
+    const base = sharedBase([
+      rect("e1", { strokeColor: "#000000", backgroundColor: "#ffffff" }),
+    ]);
+    const patch = (over: Partial<ExcalidrawElement>) => (scene: Scene) =>
+      scene.replaceAllElements(
+        scene
+          .getElementsIncludingDeleted()
+          .map((e) => ({ ...e, ...over })) as never,
       );
 
-      const loaded = await loadFromFirebase(room, KEY, null);
-      const e1 = (loaded!.elements as readonly OrderedExcalidrawElement[]).find(
-        (e) => e.id === "e1",
-      );
+    await saveDoc(
+      portalForRoom(room),
+      replicaFrom(base, patch({ strokeColor: "#ff0000" })),
+    );
+    await saveDoc(
+      portalForRoom(room),
+      replicaFrom(base, patch({ backgroundColor: "#0000ff" })),
+    );
 
-      // This is what the lineage fold buys and the old value merge could not do:
-      // whole-element LWW had to discard one side entirely.
-      expect(e1).toBeDefined();
-      expect(e1!.strokeColor).toBe("#ff0000");
-      expect(e1!.backgroundColor).toBe("#0000ff");
-    }
+    const loaded = await loadFromFirebase(room, KEY, null);
+    const e1 = (loaded!.elements as readonly OrderedExcalidrawElement[]).find(
+      (e) => e.id === "e1",
+    );
+
+    // What the lineage fold buys: whole-element LWW had to discard one side.
+    expect(e1).toBeDefined();
+    expect(e1!.strokeColor).toBe("#ff0000");
+    expect(e1!.backgroundColor).toBe("#0000ff");
   });
 
-  it("FINDING #2 (same-element, SAME property): one edit wins and the store CONVERGES", async () => {
-    for (let i = 0; i < RACE_ITERATIONS; i++) {
-      const room = `same-el-same-prop-${i}`;
-      const base = sharedBase([rect("e1", { strokeColor: "#000000" })]);
-
-      const colour = (c: string) => (scene: Scene) =>
-        scene.replaceAllElements(
-          scene
-            .getElementsIncludingDeleted()
-            .map((e) => ({ ...e, strokeColor: c })) as never,
-        );
-
-      await saveDoc(portalForRoom(room), replicaFrom(base, colour("#ff0000")));
-      await saveDoc(portalForRoom(room), replicaFrom(base, colour("#0000ff")));
-
-      const first = await loadFromFirebase(room, KEY, null);
-      const e1 = (first!.elements as readonly OrderedExcalidrawElement[]).find(
-        (e) => e.id === "e1",
+  it("same element, SAME property: one edit wins and the store CONVERGES", async () => {
+    const room = "same-el-same-prop";
+    const base = sharedBase([rect("e1", { strokeColor: "#000000" })]);
+    const colour = (c: string) => (scene: Scene) =>
+      scene.replaceAllElements(
+        scene
+          .getElementsIncludingDeleted()
+          .map((e) => ({ ...e, strokeColor: c })) as never,
       );
 
-      // A genuine same-property conflict is resolved by the CRDT, not by "whoever
-      // saved last" — so the assertion is that ONE of them won and the element
-      // was not dropped, NOT which. Claiming the saving replica wins would be
-      // asserting the old value merge's behaviour.
-      expect(e1).toBeDefined();
-      expect(["#ff0000", "#0000ff"]).toContain(e1!.strokeColor);
+    await saveDoc(portalForRoom(room), replicaFrom(base, colour("#ff0000")));
+    await saveDoc(portalForRoom(room), replicaFrom(base, colour("#0000ff")));
 
-      // ...and re-saving an unchanged replica must not flip it: the store has
-      // converged.
-      const settled = e1!.strokeColor;
-      await saveDoc(portalForRoom(room), replicaFrom(base, colour(settled)));
-      const again = await loadFromFirebase(room, KEY, null);
-      expect(
-        (again!.elements as readonly OrderedExcalidrawElement[]).find(
-          (e) => e.id === "e1",
-        )!.strokeColor,
-      ).toBe(settled);
-    }
+    const first = await loadFromFirebase(room, KEY, null);
+    const e1 = (first!.elements as readonly OrderedExcalidrawElement[]).find(
+      (e) => e.id === "e1",
+    );
+
+    // A genuine same-property conflict is resolved by the CRDT, not by "whoever
+    // saved last" — so the assertion is that ONE of them won and the element was
+    // not dropped, NOT which. Claiming the saving replica wins would be asserting
+    // the old value merge's behaviour.
+    expect(e1).toBeDefined();
+    expect(["#ff0000", "#0000ff"]).toContain(e1!.strokeColor);
+
+    // ...and re-saving an unchanged replica must not flip it: the store has
+    // converged.
+    const settled = e1!.strokeColor;
+    await saveDoc(portalForRoom(room), replicaFrom(base, colour(settled)));
+    const again = await loadFromFirebase(room, KEY, null);
+    expect(
+      (again!.elements as readonly OrderedExcalidrawElement[]).find(
+        (e) => e.id === "e1",
+      )!.strokeColor,
+    ).toBe(settled);
   });
 
   /**

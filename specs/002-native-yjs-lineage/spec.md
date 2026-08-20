@@ -48,7 +48,7 @@ Two people edit the same shape at once — one drags it (position), the other re
 
 **Independent Test**: N in-process docs sharing seeded lineage; apply a position change on A and a `strokeColor` change on B while partitioned; trigger a full resync from A; exchange updates; assert every replica shows the new position **and** the new color, byte-identical. (Realized by the re-enabled multiplayer-undo block + a new N-replica fuzz property test.)
 
-**Invariant INV-CONVERGE**: ∀ sequences of concurrent ops across N replicas interleaved with arbitrary full-resyncs/INITs, after all updates are exchanged every replica is byte-equal, with **zero lost edits** and **zero resurrected deletions**.
+**Invariant INV-CONVERGE**: ∀ sequences of concurrent ops across N replicas interleaved with arbitrary full-resyncs/INITs, after all updates are exchanged every replica agrees on canonical CONTENT (id/x/y/isDeleted fingerprints), with **zero lost edits** and **zero resurrected deletions**. Not Yjs byte equality: replicas legitimately differ in byte layout — integration order, pending-struct packing and GC state all vary — so byte equality is neither necessary nor achievable, and asserting it would fail on correct implementations.
 
 ### User Story 2 — A deletion is never resurrected by a resync or a join (Priority: P1)
 
@@ -94,11 +94,11 @@ A tracked subset-replace drops an element, then undo restores it; the editor's S
 
 Over-timeout tombstones and orphaned asset references are actually reclaimed; a deleted image's reference is not re-broadcast to every joiner forever. _(Fixes review finding [2].)_
 
-**Why P2**: A privacy + unbounded-growth guarantee. Today the expiry check reads `updated`, which the doc strips, so it is dead code — tombstones are immortal and re-broadcast on every load.
+**Why P2**: A privacy + unbounded-growth guarantee. The original defect was that the expiry check read `updated`, which the doc strips, so it was dead code and tombstones were immortal, re-broadcast on every load. Age now comes from the `elementDeletions` sidecar, written atomically with the `isDeleted` flip, and the sweep is an explicit maintenance call run before each full-state encode.
 
 **Independent Test**: delete an image element; advance past the timeout; run the reclamation; assert the asset reference and over-timeout tombstone are gone from what a joiner receives, and store size does not grow monotonically under repeated delete/save churn.
 
-**Invariant INV-BOUNDED**: reclamation is driven by data that survives the encode (not a stripped field); storage does not grow monotonically across save cycles under churn; an over-timeout deleted element's binary is not transmitted to new joiners.
+**Invariant INV-BOUNDED**: reclamation is driven by data that survives the encode (not a stripped field); storage does not grow monotonically across save cycles under churn; an over-timeout deleted element's asset REFERENCE is not transmitted to new joiners. Bytes cannot be transmitted in any case — they never enter the document (T023) — so what the sweep reclaims is the locator, never storage.
 
 ### User Story 7 — The save-skip cache is correct post-cutover (Priority: P3)
 
@@ -148,7 +148,7 @@ Pasting a large image into a room works, and does not disconnect anyone.
 
 **Why P1**: User-visible today and independent of the CRDT work — the frame exceeds socket.io's default `maxHttpBufferSize`, so the image never reaches peers even though the out-of-band upload succeeded, and every peer that later fetches it re-broadcasts the whole binary again.
 
-**Independent Test**: paste a multi-MB image while in a room; assert no broadcast frame contains `yFiles` content and that no frame exceeds a declared size ceiling; assert peers still receive the element and resolve the binary out-of-band.
+**Independent Test**: paste a multi-MB image while in a room; assert no broadcast frame contains image bytes — the document holds only a bounded `fileId -> locator`, validated on every encode — and that no frame exceeds a declared size ceiling; assert peers still receive the element and resolve the bytes out-of-band through the asset adapter.
 
 **Invariant INV-NO-BINARY-WIRE**: no file binary is ever included in a collaboration broadcast, on any path, for any origin.
 
@@ -200,7 +200,7 @@ Ctrl+Z after changing the canvas background restores the previous colour — per
 
 ## Success Criteria _(mandatory)_
 
-- **SC-001** INV-CONVERGE + INV-NO-RESURRECT proven by a non-vacuous N-replica property test over the path the app actually uses. **Two halves**: the Scene-level gate exists and is sharp (it fails when the Scene encoder is made to rebuild through a throwaway `clientID`), but it passes on current code because the Scene encoder is already correct. SC-001 is NOT satisfied until the app's INIT/resync stops rebuilding through `encodeSyncableSceneAsUpdate` and is covered by that same property. **Gated by T001 + T032, not T001 alone.**
+- **SC-001** INV-CONVERGE + INV-NO-RESURRECT proven by a non-vacuous N-replica property test over the path the app actually uses. **SATISFIED**: the Scene-level property gate exists and is sharp (all seeds fail when the Scene encoder is made to rebuild through a throwaway `clientID`), and the app's INIT/resync no longer rebuilds — `encodeSyncableSceneAsUpdate` is deleted and the producer encodes the live document (T032), with its own pins including the concurrent per-property loss a rebuild causes.
 - **SC-002** The 34-test `multiplayer undo/redo` block (`history.test.tsx`) is re-enabled and green, and the removed `collab.test.tsx` cases are restored and green.
 - **SC-003** A full adversarial re-review of the redesigned seam returns **ZERO findings of any kind** — defects AND observations. _(the done-gate)_
 - **SC-004** `pnpm run test:typecheck`, lint (`--max-warnings=0`), and all touched suites green.

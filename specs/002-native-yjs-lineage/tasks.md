@@ -24,10 +24,18 @@
     save-skip token cache cannot be what makes the second save a no-op.
   - the different-property survival case lives with the concurrent-save group.
 
-  **Non-vacuity**: dropping the prior fold fails order-independence (and 3 of the
-  concurrent-save cases). Stated honestly — it does NOT fail idempotence, since
-  without a fold the second save simply overwrites with identical bytes; that
-  case pins a real property but is not a fold detector.
+  **Non-vacuity**: dropping the prior fold fails order-independence and the
+  concurrent-save cases — FIVE cases, identically on every run (verified across 3
+  runs), because on shared lineage a dropped fold loses the other replica's
+  contribution outright with no tiebreak involved. The old `RACE_ITERATIONS = 12`
+  loop and its probabilistic rationale are therefore REMOVED: they described a
+  `clientID` coin-flip that the shared-lineage fixtures no longer produce, and one
+  deterministic case is the stronger test.
+
+  Stated honestly, two cases are NOT fold detectors and are not counted as such:
+  idempotence (without a fold the second save simply overwrites with identical
+  bytes) and the explicit `isDeleted` conflict (it asserts agreement with a live
+  Yjs merge, which is `clientID`-dependent, so it flaps under sabotage by design).
 
 - [x] T004 **(DONE)** INV-COLD-LOAD-LINEAGE — a cold-loaded replica per-property-merges with an INIT-seeded one.
 
