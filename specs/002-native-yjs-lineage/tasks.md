@@ -11,7 +11,7 @@
 | T011 | CLOSED — both halves done |
 | T023 | CLOSED — consumer lane landed and verified. Contract is Route A (`audit-one-artifact-feasibility.md`): one direct package per consumer — client → umbrella, server → slim `element` — at the same build identifier, five internals as transitives. |
 | T027 | CLOSED — truncation has no shipped producer; nothing owed |
-| T030 | CLOSED — F1 fixed in `ab24babad` and re-verified against the written expectation; F2 corrected here; F3 a factual note |
+| T030 | CLOSED, amended — F1 fixed and re-verified; F2 corrected; F3 a factual note; **F4 (stale lockfile) missed by the review and caught by CI**, fixed in `750697b8` |
 
 T002 is closed by replacement, not repair — see its entry before reading its "36 failures" as debt. T027 is closed by _unreachability_: the truncation class it measured has no shipped producer, so the measurements are evidence and not an open gate.
 
@@ -472,7 +472,15 @@ T030's precondition is now specifically collab-unification's clean-close correct
 
   **Closed by `Scene.originPolicyTable.test.ts`** (7): the closed set is enumerated from the module itself and each origin's publish/undo behaviour is asserted against a declared policy. Non-vacuous — adding a `SNEAKY_ORIGIN` export with no policy fails it twice; removing it is clean again. The undo case asserts on the reverted VALUE rather than `undoElements()`'s return, because an untracked write leaves undo free to revert an earlier step, which would prove nothing.
 
-  **SECOND PASS (2026-08-20) — CLOSED.** Re-ran the integration-facing gate against the final cross-repo state. Every link in the close chain is now bounded; every other claim this repo makes about its consumers still holds, re-checked rather than assumed: zero `encodedScene` consumers (F3 unchanged), zero `@excalidraw-yjs/element` imports in `client-web`, one pin each in `client-web` and `server`, no `getUploadedFiles` anywhere, no `join-room`. **No new finding.**
+  **AMENDED — F4, a finding the review MISSED, caught by CI afterwards.** T030 certified this branch while its CI was already red, and had been for hours.
+
+  `ab081379` removed `@excalidraw-yjs/common` from `packages/math/package.json` and did not regenerate `pnpm-lock.yaml`. CI's first step is `pnpm install --frozen-lockfile`, which rejects a stale lockfile — so **Lint and Test Coverage were both red from `ab081379` onward**, one cause, not two: the install dies, so `vitest` never runs, so the coverage action finds no `coverage-summary.json`. Chronology walked rather than assumed — last green `78a6d753`, first failure `ab081379`, exactly the commit that edited that manifest.
+
+  **Why the review could not see it, which is the real lesson**: every gate I ran — typecheck, eslint, headless, vitest — operates on an already-installed tree. **None of them ran CI's install command.** A gate set that does not run what CI runs cannot certify what CI will do. `test:gates` now begins with `pnpm install --frozen-lockfile`.
+
+  Fixed in `750697b8`; all five workflows green at that head (Lint, Test Coverage, Release, Semantic PR title, Cancel).
+
+  **Two near-misses recorded so nobody re-chases them**: (1) running `vitest --coverage` locally reports 45.4% lines and _fails_ the 60% threshold, purely because built `dist/` directories are present and counted — remove them and it is 67.4% and passes. CI never builds before coverage, so CI was never affected. Same class as the `dist`-breaks-Sidebar bug, and it nearly became a false finding. (2) A `MermaidToExcalidraw` snapshot mismatched in CI at `b34c997a`, a **docs-only** commit, and did not recur in the green run — environment-dependent flake, not a regression. **SECOND PASS (2026-08-20) — CLOSED.** Re-ran the integration-facing gate against the final cross-repo state. Every link in the close chain is now bounded; every other claim this repo makes about its consumers still holds, re-checked rather than assumed: zero `encodedScene` consumers (F3 unchanged), zero `@excalidraw-yjs/element` imports in `client-web`, one pin each in `client-web` and `server`, no `getUploadedFiles` anywhere, no `join-room`. **No new finding.**
 
   **Closing gates on `98ce869c`**: typecheck **0 errors** · eslint **exit 0** across `packages` + `excalidraw-app` at `--max-warnings=0` · headless **16/16** (both entries, built bundles, bare Node) · vitest **154 files / 1644 passed**, 49 skipped, 1 todo.
 
@@ -530,7 +538,7 @@ T030's precondition is now specifically collab-unification's clean-close correct
 
   **What the two rounds say about the suite**: 24 mutations, 22 killed on the first run, and both survivors were of the same kind — a contract whose _state_ outcome is asserted from several directions while the thing that actually varies (which origin was used; how many uploads happened) is asserted nowhere. Both are now covered.
 
-- [x] T030 **(CLOSED — reviewed twice; F1 found, fixed and re-verified)** SC-003 gate: a fresh FULL adversarial review of the complete HEAD returns ZERO findings of any kind. Ratchet any finding → a new invariant test + back to its phase.
+- [x] T030 **(CLOSED — reviewed twice, then AMENDED with F4, which CI caught after closure)** SC-003 gate: a fresh FULL adversarial review of the complete HEAD returns ZERO findings of any kind. Ratchet any finding → a new invariant test + back to its phase.
 
 ## Analyze (spec↔plan↔tasks consistency — pre-implement gate)
 
