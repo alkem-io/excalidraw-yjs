@@ -674,11 +674,20 @@ export const readAssetLocators = (
 export const writeAppState = (
   yAppState: Y.Map<unknown>,
   appState: Readonly<Partial<Record<AppStateAllowKey, unknown>>>,
+  options?: { prune?: boolean },
 ): number => {
   let mutations = 0;
   for (const key of APPSTATE_ALLOW_LIST) {
     const next = appState[key];
     if (next === undefined) {
+      // MERGE (default): the caller said nothing about this key, so leave the
+      // doc's value alone. PRUNE: the caller described the whole allow-list, so
+      // saying nothing means "not present" and a stale value must go — otherwise
+      // an exact replacement silently keeps a key the desired state omitted.
+      if (options?.prune && yAppState.has(key)) {
+        yAppState.delete(key);
+        mutations++;
+      }
       continue;
     }
     if (yAppState.get(key) !== next) {

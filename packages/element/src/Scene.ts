@@ -2023,9 +2023,25 @@ export class Scene {
    * NOT make it undoable: the `UndoManager` is scoped to `yElements` and
    * {@link yElementDeletions}, so a reference write produces no undo step.
    */
-  setAssetLocators(locators: Readonly<Record<string, AssetLocator>>): void {
+  setAssetLocators(
+    locators: Readonly<Record<string, AssetLocator>>,
+    options?: {
+      /**
+       * Treat `locators` as the COMPLETE desired reference set: ids the document
+       * holds but `locators` omits are removed. Default `false` — merge, which
+       * is what ordinary editing wants (publishing one new image must not drop
+       * every other image on the board).
+       *
+       * `prune` exists for a caller replacing a whole scene from a desired
+       * snapshot. The entire desired map is validated BEFORE anything is
+       * removed, so one bad locator cannot leave a half-pruned root — a `data:`
+       * URL still throws, and throws before the first deletion.
+       */
+      prune?: boolean;
+    },
+  ): void {
     this.doc.transact(() => {
-      writeAssetLocators(this.yAssets, locators);
+      writeAssetLocators(this.yAssets, locators, { prune: options?.prune });
     }, LOCAL_ORIGIN);
   }
 
@@ -2150,9 +2166,22 @@ export class Scene {
    */
   setAppState(
     appState: Readonly<Partial<Record<AppStateAllowKey, unknown>>>,
+    options?: {
+      /**
+       * Treat `appState` as the COMPLETE desired allow-list: an allow-listed key
+       * the document holds but `appState` omits is removed. Default `false` —
+       * merge, so an ordinary background change does not clear the scene name.
+       *
+       * Scoped to the allow-list and nothing else. In prune mode `undefined`
+       * means "not present" rather than "no opinion", which is the whole point:
+       * without it an exact replacement silently keeps a key the desired state
+       * never mentioned.
+       */
+      prune?: boolean;
+    },
   ): void {
     this.doc.transact(() => {
-      writeAppState(this.yAppState, appState);
+      writeAppState(this.yAppState, appState, { prune: options?.prune });
     }, LOCAL_ORIGIN);
   }
 
