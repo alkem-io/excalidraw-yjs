@@ -400,9 +400,7 @@ class Collab extends PureComponent<CollabProps, CollabState> {
       // asset store instead.
       await saveToFirebase(
         this.portal,
-        syncableElements,
-        this.excalidrawAPI.getAppState(),
-        this.excalidrawAPI.getSceneAssetLocators(),
+        this.excalidrawAPI.encodeSceneStateAsUpdate("v2"),
         contentToken,
       );
 

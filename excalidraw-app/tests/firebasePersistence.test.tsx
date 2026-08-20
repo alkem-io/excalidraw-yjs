@@ -117,13 +117,77 @@ const { saveToFirebase, loadFromFirebase, isSavedToFirebase } = await import(
 /** A fresh content token, standing in for one a live Scene would produce. */
 const tok = () => Object.freeze({}) as SceneContentToken;
 
-const saveScene = (
+/**
+ * Build a real lineage-bearing scene document from the pieces a case describes,
+ * then save THAT — mirroring what Collab does (T021). Cases keep expressing
+ * themselves in elements/assets/appState; only the boundary changed.
+ *
+ * Returns the merged elements the store ended up holding, which is what these
+ * cases assert on.
+ */
+const saveScene = async (
   portal: Portal,
   elements: readonly SyncableExcalidrawElement[],
   appState: AppState,
   assets: Readonly<Record<string, string>> = {},
   contentToken: SceneContentToken = tok(),
-) => saveToFirebase(portal, elements, appState, assets, contentToken);
+): Promise<readonly SyncableExcalidrawElement[] | null> => {
+  const scene = new Scene();
+  scene.replaceAllElements(elements as never);
+  if (Object.keys(assets).length) {
+    scene.setAssetLocators(assets);
+  }
+  scene.setAppState(pickPersistable(appState));
+  const update = scene.encodeStateAsUpdate("v2");
+  scene.destroy();
+  return saveToFirebase(portal, update, contentToken);
+};
+
+/**
+ * Two replicas derived from ONE shared update — the model T021's fold requires
+ * and T003 called for.
+ *
+ * Production never has two independently-created documents racing: the stored
+ * doc descends from a live doc (via a save), and every peer's doc descends from
+ * the room's INIT/resync seed (T032) or from adopting the stored one (T020). A
+ * test that builds each side with `new Scene()` models DISJOINT lineages, which
+ * no production path produces — and a CRDT fold across disjoint lineages really
+ * is whole-element LWW, so such a test would be measuring a situation that
+ * cannot arise.
+ */
+const sharedBase = (elements: readonly SyncableExcalidrawElement[]) => {
+  const base = new Scene();
+  base.replaceAllElements(elements as never);
+  const bytes = base.encodeStateAsUpdate("v2");
+  base.destroy();
+  return bytes;
+};
+
+/** A replica that descends from `baseBytes`, edited by `edit`. */
+const replicaFrom = (
+  baseBytes: Uint8Array,
+  edit: (scene: Scene) => void,
+): Uint8Array => {
+  const doc = new Y.Doc();
+  Y.applyUpdateV2(doc, baseBytes);
+  const scene = new Scene(null, { doc });
+  edit(scene);
+  const bytes = scene.encodeStateAsUpdate("v2");
+  scene.destroy();
+  return bytes;
+};
+
+const saveDoc = (
+  portal: Portal,
+  update: Uint8Array,
+  contentToken: SceneContentToken = tok(),
+) => saveToFirebase(portal, update, contentToken);
+
+/** The doc only carries the allow-listed appState keys. */
+const pickPersistable = (appState: AppState) => ({
+  viewBackgroundColor: appState.viewBackgroundColor,
+  name: appState.name,
+});
 
 const ROOM = "room-1";
 const KEY = "0123456789abcdefghijkl"; // 22 chars, shape of a room key
@@ -209,57 +273,122 @@ describe("firebase persistence boundary", () => {
   // deterministic, so it passes all iterations.
   const RACE_ITERATIONS = 12;
 
-  it("FINDING #2 (same-element concurrent edit): the saving replica's edit wins, element not dropped", async () => {
+  it("FINDING #2 (same-element, DIFFERENT properties): both concurrent edits survive", async () => {
     for (let i = 0; i < RACE_ITERATIONS; i++) {
-      const room = `same-edit-${i}`;
-      // B committed e1 with a red stroke.
-      await saveScene(
+      const room = `same-el-props-${i}`;
+      const base = sharedBase([
+        rect("e1", { strokeColor: "#000000", backgroundColor: "#ffffff" }),
+      ]);
+
+      // B recolours the stroke; A, from the SAME base and never having seen B,
+      // changes the background.
+      await saveDoc(
         portalForRoom(room),
-        [rect("e1", { strokeColor: "#ff0000" })],
-        appStateWith({}),
-        {},
+        replicaFrom(base, (scene) =>
+          scene.replaceAllElements(
+            scene
+              .getElementsIncludingDeleted()
+              .map((e) => ({ ...e, strokeColor: "#ff0000" })) as never,
+          ),
+        ),
       );
-      // A concurrently re-colours e1 blue (A's view; A never saw B's red). A is the
-      // live save — last-writer-wins by whole element: blue wins and e1 is not
-      // dropped. The fresh-doc `applyUpdateV2` merge keeps ONE element-map by
-      // `clientID` tiebreak, so it drops A's whole blue map (red survives) whenever
-      // the stored doc wins the tiebreak.
-      await saveScene(
+      await saveDoc(
         portalForRoom(room),
-        [rect("e1", { strokeColor: "#0000ff" })],
-        appStateWith({}),
-        {},
+        replicaFrom(base, (scene) =>
+          scene.replaceAllElements(
+            scene
+              .getElementsIncludingDeleted()
+              .map((e) => ({ ...e, backgroundColor: "#0000ff" })) as never,
+          ),
+        ),
       );
 
       const loaded = await loadFromFirebase(room, KEY, null);
       const e1 = (loaded!.elements as readonly OrderedExcalidrawElement[]).find(
         (e) => e.id === "e1",
       );
+
+      // This is what the lineage fold buys and the old value merge could not do:
+      // whole-element LWW had to discard one side entirely.
       expect(e1).toBeDefined();
-      expect(e1!.strokeColor).toBe("#0000ff");
+      expect(e1!.strokeColor).toBe("#ff0000");
+      expect(e1!.backgroundColor).toBe("#0000ff");
     }
   });
 
-  it("FINDING #2 (delete-union, live delete): a live deletion is not resurrected by a stale stored alive", async () => {
+  it("FINDING #2 (same-element, SAME property): one edit wins and the store CONVERGES", async () => {
+    for (let i = 0; i < RACE_ITERATIONS; i++) {
+      const room = `same-el-same-prop-${i}`;
+      const base = sharedBase([rect("e1", { strokeColor: "#000000" })]);
+
+      const colour = (c: string) => (scene: Scene) =>
+        scene.replaceAllElements(
+          scene
+            .getElementsIncludingDeleted()
+            .map((e) => ({ ...e, strokeColor: c })) as never,
+        );
+
+      await saveDoc(portalForRoom(room), replicaFrom(base, colour("#ff0000")));
+      await saveDoc(portalForRoom(room), replicaFrom(base, colour("#0000ff")));
+
+      const first = await loadFromFirebase(room, KEY, null);
+      const e1 = (first!.elements as readonly OrderedExcalidrawElement[]).find(
+        (e) => e.id === "e1",
+      );
+
+      // A genuine same-property conflict is resolved by the CRDT, not by "whoever
+      // saved last" — so the assertion is that ONE of them won and the element
+      // was not dropped, NOT which. Claiming the saving replica wins would be
+      // asserting the old value merge's behaviour.
+      expect(e1).toBeDefined();
+      expect(["#ff0000", "#0000ff"]).toContain(e1!.strokeColor);
+
+      // ...and re-saving an unchanged replica must not flip it: the store has
+      // converged.
+      const settled = e1!.strokeColor;
+      await saveDoc(portalForRoom(room), replicaFrom(base, colour(settled)));
+      const again = await loadFromFirebase(room, KEY, null);
+      expect(
+        (again!.elements as readonly OrderedExcalidrawElement[]).find(
+          (e) => e.id === "e1",
+        )!.strokeColor,
+      ).toBe(settled);
+    }
+  });
+
+  it("FINDING #2 (soft delete, live side): a deletion is not resurrected by a stale stored ALIVE", async () => {
     for (let i = 0; i < RACE_ITERATIONS; i++) {
       const room = `del-live-${i}`;
-      // B committed e1 alive.
-      await saveScene(
+      const base = sharedBase([rect("e1", { strokeColor: "#000000" })]);
+
+      // B re-colours e1, never touching its deleted flag.
+      await saveDoc(
         portalForRoom(room),
-        [rect("e1", { strokeColor: "#ff0000" })],
-        appStateWith({}),
-        {},
+        replicaFrom(base, (scene) =>
+          scene.replaceAllElements(
+            scene
+              .getElementsIncludingDeleted()
+              .map((e) => ({ ...e, strokeColor: "#ff0000" })) as never,
+          ),
+        ),
       );
-      // A deletes e1 (recent tombstone) — A's view never saw a concurrent re-add.
-      const deleted = rect("e1");
-      (deleted as unknown as { isDeleted: boolean }).isDeleted = true;
-      (deleted as unknown as { updated: number }).updated = Date.now();
-      await saveScene(portalForRoom(room), [deleted], appStateWith({}), {});
+
+      // A, from the SAME base and never having seen B's recolour, deletes it.
+      await saveDoc(
+        portalForRoom(room),
+        replicaFrom(base, (scene) =>
+          scene.replaceAllElements(
+            scene
+              .getElementsIncludingDeleted()
+              .map((e) => ({ ...e, isDeleted: true })) as never,
+          ),
+        ),
+      );
 
       const loaded = await loadFromFirebase(room, KEY, null);
-      // The deletion-union keeps e1 tombstoned (load drops it, or returns it with
-      // isDeleted:true) — never alive. The fresh-doc `applyUpdateV2` merge lets the
-      // stored `isDeleted:false` win the tiebreak and RESURRECT e1 (alive on load).
+      // The deletion survives. Excalidraw deletes SOFTLY — `isDeleted` is an
+      // ordinary property, not a Yjs delete — so this holds because only one
+      // replica wrote that property, NOT because Yjs unions delete sets.
       expect(
         (loaded!.elements as readonly OrderedExcalidrawElement[]).some(
           (e) => e.id === "e1" && !e.isDeleted,
@@ -268,22 +397,34 @@ describe("firebase persistence boundary", () => {
     }
   });
 
-  it("FINDING #2 (delete-union, stored delete): a stored deletion the live view never saw is not revived", async () => {
+  it("FINDING #2 (soft delete, stored side): a stored deletion the live view never saw is not revived", async () => {
     for (let i = 0; i < RACE_ITERATIONS; i++) {
       const room = `del-stored-${i}`;
-      // B committed e1 as a DELETED tombstone (recent).
-      const bDeleted = rect("e1");
-      (bDeleted as unknown as { isDeleted: boolean }).isDeleted = true;
-      (bDeleted as unknown as { updated: number }).updated = Date.now();
-      await saveScene(portalForRoom(room), [bDeleted], appStateWith({}), {});
+      const base = sharedBase([rect("e1", { strokeColor: "#000000" })]);
 
-      // A saves e1 ALIVE — A's view never saw B's deletion. The deletion must still
-      // win (union), so A's stale alive does not revive the element.
-      await saveScene(
+      // B deletes e1 and commits.
+      await saveDoc(
         portalForRoom(room),
-        [rect("e1", { strokeColor: "#00ff00" })],
-        appStateWith({}),
-        {},
+        replicaFrom(base, (scene) =>
+          scene.replaceAllElements(
+            scene
+              .getElementsIncludingDeleted()
+              .map((e) => ({ ...e, isDeleted: true })) as never,
+          ),
+        ),
+      );
+
+      // A, from the same base, edits a DIFFERENT property, never having seen the
+      // deletion. Its stale view must not revive the element.
+      await saveDoc(
+        portalForRoom(room),
+        replicaFrom(base, (scene) =>
+          scene.replaceAllElements(
+            scene
+              .getElementsIncludingDeleted()
+              .map((e) => ({ ...e, strokeColor: "#00ff00" })) as never,
+          ),
+        ),
       );
 
       const loaded = await loadFromFirebase(room, KEY, null);

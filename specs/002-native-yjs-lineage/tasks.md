@@ -10,7 +10,7 @@
 
 - [x] T001 **(done — Scene-level convergence gate)** `Scene.convergence.property.test.ts`. N-replica property for INV-CONVERGE / INV-NO-RESURRECT over the `Scene` wire path: 4 replicas × 12 rounds × 5 fixed seeds, each round making unexchanged concurrent edits (move / soft-delete / create), then exchanging in a seeded Fisher–Yates order, roughly half as full-state resyncs and half as state-vector deltas. Asserts identical canonical content fingerprints (id/x/y/isDeleted — semantic convergence, NOT Yjs byte equality) and that nothing soft-deleted returns. Per-seed guards reject a vacuous pass: >20 edits, ≥1 full-state resync, non-empty live set. - **Proven sharp**: all 5 seeds fail when the Scene encoder is made to rebuild through a throwaway `Y.Doc` with a fresh `clientID`. - **Does NOT satisfy SC-001 on its own.** It passes on current code, because the Scene encoder is already correct; it does not exercise the app's INIT/resync, which still rebuilds through `encodeSyncableSceneAsUpdate`. SC-001 is gated by **T001 + T032**.
 - [ ] T002 **(MEASURED — the failures are recorded; their causes are NOT yet attributed)** Re-enabling `describe.skip("multiplayer undo/redo")` (history.test.tsx:2218) plus the removed `collab.test.tsx` cases. **Measured by un-skipping and reverting: 36 of 37 fail.** - **Measured clusters** (the only established facts): ~24 snapshot mismatches, concentrated in "conflicts in bound text elements and their containers" and "conflicts in arrows and their bindable elements"; ~16 element-shape mismatches; and several history-depth assertions off by one or more (`expected 4 to be 1`, `expected 1 to be 3`). - **Investigation LEADS, not dependencies**: **T014b** (meta version regression) and **T016b/T016c** (intent-scoped result application) are plausible causes given the clusters, but **no failing case has been traced to either**, so neither is recorded as a blocker. Trace one concrete failure to a cause before treating that cause as required work. - **T017 is excluded, not merely untraced**: its premise was falsified — a remote apply already contributes zero to both stacks — so no failure here can originate from it. - Do not fix the 36 as a batch; each cluster needs its own attribution first.
-- [ ] T003 **(PARTIAL — current-boundary evidence established; the shared-lineage gate is BLOCKED ON T021)** INV-PERSIST-MERGE against the real path (`saveToFirebase` → `encryptScene` → `loadFromFirebase`), in `firebasePersistence.test.tsx`. - **Scope limit, stated because it matters**: these exercise the CURRENT flattened boundary. `saveToFirebase` takes a plain element array, so by the time it is called the information that would distinguish "B intentionally reset x" from "B never saw A's x" is already gone. They reproduce the resulting loss; they are NOT the final gate. The final gate needs two real Scenes derived from ONE shared update whose lineage-bearing updates are persisted, which requires the post-T021 boundary — not invented here. - **Three REDs, all measured, committed `it.skip`**: (1) _concurrent property loss_ — A's `x=100` is lost, stored `x=0 y=200`; (2) _order-dependence_ — `A→B` stores `e1:0,200` while `B→A` stores `e1:100,0`, i.e. the save order decides the outcome entirely; (3) _lineage idempotence_ — two IDENTICAL saves produce different stored state vectors (`[1,201,210,…]` vs `[1,162,169,…]`), because `buildSnapshotDoc` mints a fresh `clientID` every time. - **A vacuous test of mine was caught and replaced**: the first idempotence case compared only decoded `id/x/y/isDeleted` and PASSED, while the stored CRDT state was changing underneath it. The weaker semantic-stability property it actually proved is kept as a separate live test, correctly named. - **Attribution**: `mergeStoredElements` (firebase.ts:162), live-vs-prior branch at :191 — "both alive: whole-element LWW, saving replica wins" — followed by a `buildSnapshotDoc` rebuild with a fresh `clientID`. - **Fix is T021.** Not done here.
+- [x] T003 **(DONE — the shared-lineage gate landed with T021)** INV-PERSIST-MERGE against the real path (`saveToFirebase` → `encryptScene` → `loadFromFirebase`), in `firebasePersistence.test.tsx`. - **Scope limit, stated because it matters**: these exercise the CURRENT flattened boundary. `saveToFirebase` takes a plain element array, so by the time it is called the information that would distinguish "B intentionally reset x" from "B never saw A's x" is already gone. They reproduce the resulting loss; they are NOT the final gate. The final gate needs two real Scenes derived from ONE shared update whose lineage-bearing updates are persisted, which requires the post-T021 boundary — not invented here. - **Three REDs, all measured, committed `it.skip`**: (1) _concurrent property loss_ — A's `x=100` is lost, stored `x=0 y=200`; (2) _order-dependence_ — `A→B` stores `e1:0,200` while `B→A` stores `e1:100,0`, i.e. the save order decides the outcome entirely; (3) _lineage idempotence_ — two IDENTICAL saves produce different stored state vectors (`[1,201,210,…]` vs `[1,162,169,…]`), because `buildSnapshotDoc` mints a fresh `clientID` every time. - **A vacuous test of mine was caught and replaced**: the first idempotence case compared only decoded `id/x/y/isDeleted` and PASSED, while the stored CRDT state was changing underneath it. The weaker semantic-stability property it actually proved is kept as a separate live test, correctly named. - **Attribution**: `mergeStoredElements` (firebase.ts:162), live-vs-prior branch at :191 — "both alive: whole-element LWW, saving replica wins" — followed by a `buildSnapshotDoc` rebuild with a fresh `clientID`. - **Fix is T021.** Not done here.
 - [ ] T004 **(HELD — downstream of the persisted shape)** INV-COLD-LOAD-LINEAGE (a cold-loaded replica per-property-merges with an INIT-seeded one). **Expected RED.** Cold load adopts the persisted bytes, so what it adopts is defined by the T023 asset/persistence shape and by T021. Authoring the gate before that shape is settled would pin the wrong artifact.
 - [x] T005 **(done — covered by the Store-level case in `reappearReveal.test.tsx`; its "Expected RED (ties at V+1)" is FALSIFIED)** INV-REVEAL. A reappearing element must be re-detected by the editor Store, which retains the synthesized `isDeleted:true` tombstone and gates on `prevElement.version < nextElement.version`. The Store case passes on current code and fails when the reseed is pinned to a constant or to a value equal to the high-water mark, so it is non-vacuous in both directions. The Scene and a peer converge regardless of the seeded version, which is why assertions on them cannot cover this invariant. See T024 for the accompanying finding that no `+= 2` fix is needed.
 - [ ] T007 **(RED LANDED — and the dominant defect is NOT the one this task predicted)** INV-SAVE-SKIP (isSaved ⇔ live==stored; no redundant save, no false-skip).
@@ -202,7 +202,47 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
   the test now pins the surfaced message plus the fact that NEITHER form was
   applied.
 
-- [ ] T021 **(BLOCKED ON T023 — verified in code, not assumed)** `encryptScene`: `applyUpdateV2`-fold prior + live into a scratch doc over shared lineage, encode that. DELETE `mergeStoredElements` + `isExpiredTombstone`. Green **INV-PERSIST-MERGE**. - **Why it is not independent**: `saveToFirebase(portal, elements: flat[], appState, files)` takes FLAT inputs that carry no lineage, so folding "over shared lineage" requires the boundary to accept a lineage-bearing update instead — a signature change. Any such update is a Yjs doc, and a Yjs doc carries `yFiles`; `buildSnapshotDoc` writes binaries into the same doc, and a live encode was measured to carry an image payload verbatim. T023 proposes removing binaries from the authoritative document and having persistence carry the update plus separately enumerated assets. Implementing T021 first would freeze the mixed binary/reference persistence shape currently under review and force a second boundary rewrite. - **Do NOT** build an intermediate live-update save signature, or retain `yFiles` binaries, merely to turn T003's REDs green. - Its acceptance criteria already exist and are measured: T003's three REDs (property loss, order-dependence, lineage idempotence) plus T001's convergence property.
+- [x] T021 **(DONE)** `encryptScene` `applyUpdateV2`-folds prior + live over SHARED lineage and encodes that. `mergeStoredElements` + `isExpiredTombstone` deleted. Green **INV-PERSIST-MERGE**.
+
+  **The blocker cleared itself.** This was blocked because the boundary took flat
+  elements carrying no lineage, and because the stored doc was REBUILT on every
+  save (fresh `clientID`), making a Yjs fold whole-element LWW across disjoint
+  lineages. Both premises are now false: T032 made the wire ship the live
+  document, T020 made cold load adopt the stored one, and T023 settled assets as
+  locators. So `saveToFirebase(portal, docUpdate, contentToken)` now takes the
+  live document itself — everything else (elements, references, persistable
+  appState) already lives on it — and the fold is the CORRECT merge while the
+  value merge became the lossy one.
+
+  **What the fold buys, measured**: two replicas from ONE shared base editing
+  DIFFERENT properties of the same element now BOTH survive a concurrent save.
+  Whole-element LWW could only take one side entirely. Same-property conflicts
+  resolve by `clientID` — the same resolution the live socket gives — so
+  persistence no longer has merge semantics of its own to disagree with.
+
+  **A claim I wrote and had to correct.** The obvious justification — "Yjs unions
+  delete sets, so deletions survive" — is FALSE here. Excalidraw deletes SOFTLY:
+  `isDeleted` is an ordinary property, not a Yjs delete, so the delete set is not
+  involved. Deletions survive because the write is normally UNCONTESTED (the other
+  replica edits geometry or colour and never touches `isDeleted`). The residual
+  genuine conflict — one replica deleting while another undoes a deletion —
+  resolves by `clientID`. Both are now stated precisely in the code.
+
+  **The test harness was the real work.** The existing FINDING #2 cases built each
+  side with `new Scene()`, i.e. DISJOINT lineages — a situation no production path
+  produces, since the stored doc descends from a live doc and every peer's doc
+  descends from the room seed. Folding those really is whole-element LWW, so the
+  cases were measuring an impossible scenario. They are rebuilt on `sharedBase` +
+  `replicaFrom`, which is the "two real Scenes derived from ONE shared update"
+  gate T003 said was needed. The persistence save helper now builds a real
+  lineage-bearing document too.
+
+  **Non-vacuity by sabotage**: dropping the prior fold fails 3 cases — disjoint
+  adds, the per-property merge, and the stored-side deletion.
+
+  **Maintenance on the merged result**: the fold can reintroduce tombstones the
+  live scene had already swept, so `collectGarbage` runs on the merged document
+  before encoding, mirroring the wire path.
 
 ## Phase 7 — Origin policy + binaries off the wire (FR-012, FR-013)
 

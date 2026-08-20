@@ -5,12 +5,7 @@ import {
   decryptData,
 } from "@excalidraw-yjs/excalidraw/data/encryption";
 import { restoreElements } from "@excalidraw-yjs/excalidraw/data/restore";
-import {
-  getSceneVersion,
-  buildSnapshotDoc,
-  decodeSnapshot,
-  APPSTATE_ALLOW_LIST,
-} from "@excalidraw-yjs/element";
+import { getSceneVersion, decodeSnapshot } from "@excalidraw-yjs/element";
 import { initializeApp } from "firebase/app";
 import * as Y from "yjs";
 import {
@@ -22,15 +17,15 @@ import {
 } from "firebase/firestore";
 import { getStorage, ref, uploadBytes } from "firebase/storage";
 
-import type { SceneContentToken } from "@excalidraw-yjs/element";
+import { Scene } from "@excalidraw-yjs/element";
 
 import type {
-  ExcalidrawElement,
-  FileId,
-  OrderedExcalidrawElement,
-} from "@excalidraw-yjs/element/types";
+  SceneContentToken,
+  APPSTATE_ALLOW_LIST,
+} from "@excalidraw-yjs/element";
+
+import type { ExcalidrawElement, FileId } from "@excalidraw-yjs/element/types";
 import type {
-  AppState,
   BinaryFileData,
   BinaryFileMetadata,
   DataURL,
@@ -41,7 +36,7 @@ import {
   FILE_CACHE_MAX_AGE_SEC,
 } from "../app_constants";
 
-import { filterReferencedFiles, getSyncableElements } from ".";
+import { getSyncableElements } from ".";
 
 import type { SyncableExcalidrawElement } from ".";
 import type Portal from "../collab/Portal";
@@ -99,169 +94,78 @@ type FirebaseStoredScene = {
   ciphertext: Bytes;
 };
 
-/** The persistable appState subset (`APPSTATE_ALLOW_LIST` — background + name)
- * carried in the snapshot doc; everything else in appState is local-only and is
- * never persisted (native-Yjs core, M4). */
-const pickPersistableAppState = (
-  appState: AppState,
-): Partial<Record<typeof APPSTATE_ALLOW_LIST[number], unknown>> => {
-  const out: Partial<Record<typeof APPSTATE_ALLOW_LIST[number], unknown>> = {};
-  for (const key of APPSTATE_ALLOW_LIST) {
-    const value = (appState as unknown as Record<string, unknown>)[key];
-    if (value !== undefined) {
-      out[key] = value;
-    }
-  }
-  return out;
-};
-
-/** An element decoded from a stored doc (carries at least `id`/`isDeleted`). */
-type MergeableElement = Record<string, unknown> & {
-  id: string;
-  isDeleted?: boolean;
-  updated?: number;
-};
-
-const isDeletedElement = (el: MergeableElement): boolean =>
-  el.isDeleted === true;
-
-/**
- * Merge the live element set with the already-stored (prior) one for a concurrent
- * save (findings #2). This is **NOT** a Yjs `applyUpdateV2` merge and deliberately
- * so: the stored doc is a SEPARATE replica built by an earlier `buildSnapshotDoc`
- * (its own random `clientID`), and the live save hands us a plain element ARRAY,
- * not the live `scene.doc`. The fresh save doc, the prior stored doc, and the live
- * `scene.doc` therefore occupy three DISJOINT `clientID` spaces with no common
- * ancestor item for any shared element id. `applyUpdateV2(freshDoc, priorBytes)`
- * across disjoint lineages is whole-element-`Y.Map` LWW by `clientID` tiebreak —
- * for any id in both docs Yjs keeps one nested map and tombstones the other,
- * dropping the loser's whole element (verified against yjs 13.6.31). That silently
- * drops a concurrent edit AND can RESURRECT a deletion (a stored `isDeleted:false`
- * winning the tiebreak over a live `isDeleted:true`). A plain element array also
- * carries no per-property delta (it is the element's whole last-known state, never
- * "just the keys I changed"), so a true per-property CRDT merge is not recoverable
- * here — that fidelity exists only inside the live `Y.Doc` and is lost on
- * serialization to the syncable array the socket/save speak.
- *
- * So we merge at the decoded VALUE level with two guarantees:
- *  - **Deletion-union (no resurrection, both directions):** if an id is deleted on
- *    EITHER side, the result is deleted. A live delete is never resurrected by a
- *    stale stored alive, and a stored delete (one this replica never saw) is not
- *    revived by the live alive. Deletions are monotone, so the store converges
- *    regardless of which replica saved last.
- *  - **Disjoint union + whole-element LWW:** an id only one side has is kept (a
- *    racing writer's new element survives). For an id BOTH sides hold and neither
- *    deleted, the LIVE record wins as a whole — last-writer-wins by element, the
- *    saving replica's current view. (Per-property merge is the live `Y.Doc`'s job;
- *    once flattened to an array only whole-element LWW is sound.)
- *
- * A stored tombstone older than {@link DELETED_ELEMENT_TIMEOUT} is dropped (its
- * deletion has fully propagated; keeping it would re-broadcast stale content);
- * in-window tombstones are retained so the deletion still reaches peers.
- */
-const mergeStoredElements = (
-  live: readonly MergeableElement[],
-  prior: readonly MergeableElement[],
-): MergeableElement[] => {
-  const now = Date.now();
-  const isExpiredTombstone = (el: MergeableElement): boolean =>
-    isDeletedElement(el) &&
-    typeof el.updated === "number" &&
-    el.updated <= now - DELETED_ELEMENT_TIMEOUT;
-
-  const byId = new Map<string, MergeableElement>();
-  for (const el of prior) {
-    if (isExpiredTombstone(el)) {
-      continue;
-    }
-    byId.set(el.id, el);
-  }
-  for (const el of live) {
-    const priorEl = byId.get(el.id);
-    if (!priorEl) {
-      byId.set(el.id, el);
-      continue;
-    }
-    if (isDeletedElement(el) || isDeletedElement(priorEl)) {
-      // deletion-union: the deleted record wins so its tombstone (and the
-      // `updated` that drives the timeout) survives. If both deleted, prefer live.
-      byId.set(el.id, isDeletedElement(el) ? el : priorEl);
-    } else {
-      byId.set(el.id, el); // both alive: whole-element LWW, saving replica wins
-    }
-  }
-  return [...byId.values()];
-};
-
 /**
  * Encrypt a whiteboard scene as Yjs **V2** doc bytes (native-Yjs core, M4).
  *
- * The stored scene document is the WHOLE doc — elements + files + persistable
- * appState in the one doc, `getMap("elements"/"files"/"appState")` — encoded via
- * `encodeStateAsUpdateV2`, NOT a `JSON.stringify(elements)` element snapshot. This
- * is byte-identical to the canonical persistence format, so a doc the editor
- * persists is exactly what a storage or collaboration backend holds. The encryption
- * envelope is unchanged; only the plaintext is now Yjs bytes instead of JSON.
+ * The stored document is the scene's own document — elements + asset references
+ * + persistable appState in one doc — so what is persisted is byte-compatible
+ * with what the editor and the collaboration wire speak.
  *
- * Two boundary guarantees the raw-doc encode lacked:
- *  - **File prune (privacy):** only files referenced by a LIVE element are stored;
- *    a pasted-then-deleted image's binary is dropped (`filterReferencedFiles`),
- *    evaluated against the MERGED element set so a concurrent writer's still-live
- *    image keeps its binary while a deleted-image binary stays out.
- *  - **Concurrent-save merge (no lost update / no resurrection):** when
- *    `priorDocBytes` is passed (the doc already stored under this scene, read
- *    inside the same transaction), it is DECODED and value-merged with the live
- *    element/file/appState set via {@link mergeStoredElements} before a single
- *    clean doc is built and encoded — it is NOT `applyUpdateV2`-folded into the
- *    live doc (that is whole-element LWW by `clientID` across the docs' disjoint
- *    lineages, which silently drops a concurrent edit and can resurrect a
- *    deletion — see {@link mergeStoredElements}). The value merge guarantees
- *    deletions union (a delete on either side wins) and that a racing writer's
- *    disjoint element survives; concurrent edits to the SAME live element resolve
- *    last-writer-wins by whole element (the saving replica), not per-property. The
- *    merge is order-independent + idempotent on the union, so the store converges
- *    regardless of write order.
+ * **Concurrent-save merge (T021).** When `priorDocBytes` is passed (the doc
+ * already stored under this scene, read inside the same transaction) it is
+ * FOLDED with the live update via `applyUpdateV2` into one scratch document, and
+ * that is what gets encoded.
+ *
+ * This used to be a decoded VALUE merge, for a reason that was true then and is
+ * false now. The stored doc used to be REBUILT from flat elements on every save,
+ * so it carried a fresh `clientID` and shared no lineage with the live doc; a
+ * Yjs fold across disjoint lineages is whole-element LWW by `clientID`, which
+ * silently drops a concurrent edit and can resurrect a deletion. Since the wire
+ * ships the live document (T032) and a cold load adopts the stored one (T020),
+ * the two share lineage — so the fold is now the CORRECT merge and the value
+ * merge is the lossy one: it could only do whole-element LWW, losing a
+ * concurrent writer's edit to a different property of the same element.
+ *
+ * **Deletions, stated precisely** — the easy claim here would be wrong.
+ * Excalidraw deletes SOFTLY: `isDeleted` is an ordinary element property, not a
+ * Yjs delete, so Yjs's delete-set union does NOT protect it. What protects it is
+ * that a deletion is normally an UNCONTESTED write to that property — the other
+ * replica edits geometry or colour and never touches `isDeleted` — and an
+ * uncontested per-property write always survives the fold. The old
+ * `mergeStoredElements` deletion-union rule was compensating for whole-element
+ * LWW, where any concurrent edit dragged the whole stale element along with it.
+ *
+ * The residual case is two replicas that genuinely BOTH write `isDeleted`
+ * (one deleting while the other undoes a deletion). That is a real conflict and
+ * the CRDT resolves it by `clientID`, not by save order — the same resolution
+ * the live socket would give those two writes, which is the point: persistence
+ * no longer has merge semantics of its own to disagree with.
+ *
+ * **Privacy / bounded growth** are likewise handled on the DOCUMENT rather than
+ * by filtering one encoding of it: the fold can reintroduce tombstones the live
+ * scene had already swept, so maintenance runs on the merged result — reclaiming
+ * aged tombstones and asset references no live element points at. Asset bytes
+ * cannot leak here at all: since T023 the document carries `fileId -> locator`
+ * and never bytes, and every encode revalidates that.
  */
 const encryptScene = async (
   key: string,
-  elements: readonly ExcalidrawElement[],
-  assets: Readonly<Record<string, string>>,
-  appState: AppState,
+  /** The LIVE scene document as V2 bytes — lineage-bearing, not a rebuild. */
+  docUpdate: Uint8Array,
   priorDocBytes?: Uint8Array,
-): Promise<{ ciphertext: ArrayBuffer; iv: Uint8Array }> => {
-  let mergedElements = elements as unknown as readonly MergeableElement[];
-  let mergedAssets = assets;
-  let mergedAppState = pickPersistableAppState(appState);
-
+): Promise<{
+  ciphertext: ArrayBuffer;
+  iv: Uint8Array;
+  elements: readonly ExcalidrawElement[];
+}> => {
+  const doc = new Y.Doc();
   if (priorDocBytes && priorDocBytes.byteLength > 0) {
-    const prior = decodeSnapshot(priorDocBytes);
-    mergedElements = mergeStoredElements(
-      mergedElements,
-      prior.elements as readonly MergeableElement[],
-    );
-    // Union the reference maps, then prune to those a LIVE merged element
-    // references below. Live wins on a fileId collision. These are locators, not
-    // bytes — dropping one drops a reference, never a stored asset.
-    mergedAssets = { ...prior.assets, ...mergedAssets };
-    // appState: live values win for the keys it carries; fall back to the stored
-    // value for any allow-listed key the live save omitted (never clobber a stored
-    // background/name with a partial update). Mirrors finding #4's carry-through.
-    mergedAppState = { ...prior.appState, ...mergedAppState };
+    Y.applyUpdateV2(doc, priorDocBytes);
   }
+  Y.applyUpdateV2(doc, docUpdate);
 
-  const doc = buildSnapshotDoc({
-    elements: mergedElements as unknown as readonly Record<string, unknown>[],
-    assets: filterReferencedFiles(
-      mergedAssets,
-      mergedElements as unknown as readonly OrderedExcalidrawElement[],
-    ),
-    appState: mergedAppState,
+  const merged = new Scene(null, { doc });
+  merged.collectGarbage({
+    deletedBefore: Date.now() - DELETED_ELEMENT_TIMEOUT,
   });
-  const bytes = Y.encodeStateAsUpdateV2(doc) as Uint8Array<ArrayBuffer>;
-  doc.destroy();
+  const bytes = merged.encodeStateAsUpdate("v2") as Uint8Array<ArrayBuffer>;
+  const elements =
+    merged.getElementsIncludingDeleted() as unknown as readonly ExcalidrawElement[];
+  merged.destroy();
+
   const { encryptedBuffer, iv } = await encryptData(key, bytes);
 
-  return { ciphertext: encryptedBuffer, iv };
+  return { ciphertext: encryptedBuffer, iv, elements };
 };
 
 /** A decrypted stored scene: the raw V2 doc bytes (so a save can MERGE against
@@ -377,29 +281,25 @@ export const saveFilesToFirebase = async ({
 };
 
 const createFirebaseSceneDocument = async (
-  elements: readonly SyncableExcalidrawElement[],
-  assets: Readonly<Record<string, string>>,
-  appState: AppState,
+  docUpdate: Uint8Array,
   roomKey: string,
   /** The already-stored doc's V2 bytes (read inside the save transaction); they
-   * are DECODED and value-merged with the live set (`mergeStoredElements`) so a
-   * concurrent writer's element is not lost and no deletion is resurrected. */
+   * are `applyUpdateV2`-FOLDED with the live update over shared lineage, so a
+   * concurrent writer's edit is not lost and no deletion is resurrected (T021). */
   priorDocBytes?: Uint8Array,
 ) => {
-  // Still written as a field of the stored document (part of its schema), but no
-  // longer the save-skip AUTHORITY — that is the scene's `contentRevision`
-  // (T026). A sum cannot decide "has anything changed": it collides, and the
-  // values compared had been renormalised by `restoreElements`.
-  const sceneVersion = getSceneVersion(elements);
-  const { ciphertext, iv } = await encryptScene(
+  const { ciphertext, iv, elements } = await encryptScene(
     roomKey,
-    elements,
-    assets,
-    appState,
+    docUpdate,
     priorDocBytes,
   );
   return {
-    sceneVersion,
+    // Still written as a field of the stored document (part of its schema), but
+    // no longer the save-skip AUTHORITY — that is the scene's `contentToken`
+    // (T026). A sum cannot decide "has anything changed": it collides, and the
+    // values compared had been renormalised by `restoreElements`. Taken from the
+    // MERGED result, so it describes what was actually stored.
+    sceneVersion: getSceneVersion(elements),
     ciphertext: Bytes.fromUint8Array(new Uint8Array(ciphertext)),
     iv: Bytes.fromUint8Array(iv),
   } as FirebaseStoredScene;
@@ -407,12 +307,18 @@ const createFirebaseSceneDocument = async (
 
 export const saveToFirebase = async (
   portal: Portal,
-  elements: readonly SyncableExcalidrawElement[],
-  appState: AppState,
-  assets: Readonly<Record<string, string>> = {},
   /**
-   * The scene's `contentToken` AT THE MOMENT `elements`/`assets`/`appState`
-   * were captured — see `Scene.contentToken`.
+   * The LIVE scene document as V2 bytes (T021).
+   *
+   * The whole document, not a decoded snapshot: elements, asset references and
+   * the persistable appState all live on it, so nothing else needs passing, and
+   * critically it carries LINEAGE — which is what lets the concurrent-save merge
+   * be a real per-property CRDT fold instead of whole-element last-writer-wins.
+   */
+  docUpdate: Uint8Array,
+  /**
+   * The scene's `contentToken` AT THE MOMENT `docUpdate` was captured — see
+   * `Scene.contentToken`.
    *
    * It is recorded as saved only on success, and only as this value: anything
    * that changed the document while the save was in flight — including a
@@ -437,29 +343,32 @@ export const saveToFirebase = async (
   const docRef = doc(firestore, "scenes", roomId);
 
   // Native-Yjs core (M4 — persistence cutover): the stored scene document is the
-  // scene's content encoded to Yjs V2 bytes (elements + files + persistable
-  // appState in the one doc, `getMap("elements"/"files"/"appState")`), NOT an
-  // element-JSON snapshot. The local live socket (M3 — Yjs CRDT merge) converges
-  // PEERS, but the FIREBASE store is a separate replica: two clients can each
-  // commit a save built from a view that had not yet seen the other's committed
-  // write. So we MERGE inside the transaction — read the stored doc bytes, DECODE
-  // them, and value-merge with the live element/file/appState set before encoding
-  // a single clean doc (`createFirebaseSceneDocument` → `encryptScene` →
-  // `mergeStoredElements`). This is a decoded VALUE merge, not a Yjs
-  // `applyUpdateV2` fold: the stored doc, the freshly-built save doc, and the live
-  // `scene.doc` are three replicas in DISJOINT `clientID` spaces, so a Yjs merge
-  // across them would be whole-element LWW by `clientID` — silently dropping a
-  // concurrent edit and able to resurrect a deletion (see `mergeStoredElements`).
-  // The value merge instead guarantees deletions union (no resurrection, either
-  // direction) and that a racing writer's disjoint element survives; it is
-  // order-independent + idempotent on the union, so the store converges.
+  // scene's document encoded to Yjs V2 bytes (elements + asset references +
+  // persistable appState, `getMap("elements"/"files"/"appState")`), NOT an
+  // element-JSON snapshot.
+  //
+  // The live socket converges PEERS, but the FIREBASE store is a separate
+  // replica: two clients can each commit a save built from a view that had not
+  // yet seen the other's committed write. So we MERGE inside the transaction —
+  // read the stored doc bytes and `applyUpdateV2`-FOLD them with the live update
+  // (T021).
+  //
+  // This was a decoded VALUE merge, for a reason that was true then and is false
+  // now: the stored doc used to be REBUILT from flat elements on every save, so
+  // it shared no lineage with the live doc, and a fold across disjoint lineages
+  // is whole-element LWW by `clientID`. Since the wire ships the live document
+  // (T032) and a cold load adopts the stored one (T020), the two share lineage —
+  // so the fold is the correct merge and the value merge is now the lossy one,
+  // able only to take one side's whole element when the two edited different
+  // properties of it. Yjs unions delete sets, so deletions still survive from
+  // either side and nothing is resurrected.
   const storedScene = await runTransaction(firestore, async (transaction) => {
     const snapshot = await transaction.get(docRef);
 
     let priorDocBytes: Uint8Array | undefined;
     if (snapshot.exists()) {
-      // Decrypt the already-stored doc to its raw V2 bytes so the live set can be
-      // value-merged against it (not blindly overwritten).
+      // Decrypt the already-stored doc to its raw V2 bytes so the live update can
+      // be folded against it (not blindly overwritten).
       const prior = await decryptScene(
         snapshot.data() as FirebaseStoredScene,
         roomKey,
@@ -468,9 +377,7 @@ export const saveToFirebase = async (
     }
 
     const storedScene = await createFirebaseSceneDocument(
-      elements,
-      assets,
-      appState,
+      docUpdate,
       roomKey,
       priorDocBytes,
     );
