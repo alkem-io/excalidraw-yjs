@@ -472,6 +472,18 @@ T030's precondition is now specifically collab-unification's clean-close correct
 
   **Closed by `Scene.originPolicyTable.test.ts`** (7): the closed set is enumerated from the module itself and each origin's publish/undo behaviour is asserted against a declared policy. Non-vacuous — adding a `SNEAKY_ORIGIN` export with no policy fails it twice; removing it is clean again. The undo case asserts on the reverted VALUE rather than `undoElements()`'s return, because an untracked write leaves undo free to revert an earlier step, which would prove nothing.
 
+  **FIRST PASS RUN (2026-08-20), on what a fresh review checks before anything else: are the gates actually running?**
+
+  - **Every test file on disk is collected** — 154 found, 154 reported by the runner. No file was added and silently excluded.
+  - **`it.fails` count reconciled**: 3 in `wireRecoveryPolicy.test.tsx` (the accepted-risk corruption cases) and 2 in `remoteUpdateRobustness.test.tsx`. A grep suggesting 5 in the first file counts two prose mentions in its docblock, not calls.
+  - **Every `.skip` in the suite is upstream**, none introduced by this spec — verified per site with `git log -S`.
+
+  **One dormant upstream test resolved rather than left mysterious.** `textWysiwyg.test.tsx` carried `it.skip("should bump the version of a labeled arrow when the label is updated")` with the comment _"FIXME too flaky. No one knows why."_ (upstream `432a46ef`). Measured here: it is **not flaky — it fails 8 of 8**, and instrumenting it says why. Editing the label changes the **text** element (version 8 → 10; `x`, `y`, `width`, `height`, `text`, `originalText` all differ) and changes **nothing** on the container arrow (version 5 → 5, zero properties differ).
+
+  So the arrow's version correctly does not move: this spec writes only keys whose value actually changed, so a bump means a real change. The old model's `redrawTextBoundingBox` touched the container and bumped it incidentally — which is precisely what made the test "flaky", since the assertion held only when an incidental mutation happened to fire. **Not a defect; the test asserts a behaviour this spec deliberately removed.**
+
+  Left skipped, with the measured reason replacing "no one knows why". Deliberately NOT rewritten to assert the inverse: one 300×0 arrow does not justify a general rule that editing a label never touches its container.
+
   **PAUSED 2026-08-20, and the reason matters.** The final review must run on a HEAD that includes the client transport / `AssetAdapter` migration and the `collaboration-service` ingress work. Running it before those land would review a tree the product does not yet run, and every finding would have to be re-checked afterwards anyway.
 
   **A third mutation round was proposed and DECLINED**, correctly. The natural next targets — render counts, transaction counts, transport-message counts — are implementation details unless a named product budget or a logical-atomicity contract makes them observable. Freezing them by mutation survival would pin the suite to how the code happens to work today. The one such quantity that IS a real contract, one transport update per logical creation, is already gated (`commitPlan` — "a creation emits exactly ONE transport delta"). Recorded so the idea is not re-proposed as if it were unexplored.

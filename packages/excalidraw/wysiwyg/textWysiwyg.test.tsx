@@ -381,7 +381,21 @@ describe("textWysiwyg", () => {
       expect(await getTextEditor({ waitForEditor: false })).toBe(null);
     });
 
-    // FIXME too flaky. No one knows why.
+    // Upstream skipped this as "FIXME too flaky. No one knows why." It is not
+    // flaky here — it fails 8 of 8 — and the reason is now measured rather than
+    // guessed: editing the label changes the TEXT element (version 8 -> 10;
+    // x, y, width, height, text, originalText all change) and changes NOTHING on
+    // the container arrow (version 5 -> 5, zero properties differ).
+    //
+    // So the arrow's version correctly does not move. This spec writes only keys
+    // whose value actually changed, so a version bump means a real change; the
+    // old model's `redrawTextBoundingBox` touched the container and bumped it
+    // incidentally, which is exactly what made this "flaky" — the assertion held
+    // only when an incidental mutation happened to fire.
+    //
+    // Left skipped rather than rewritten: the premise it asserts is one this
+    // spec deliberately removed, and the narrow measurement above (one 300x0
+    // arrow) does not justify asserting the inverse as a general rule.
     it.skip("should bump the version of a labeled arrow when the label is updated", async () => {
       const arrow = UI.createElement("arrow", {
         width: 300,
