@@ -244,6 +244,13 @@
 
   **No protocol/version gate is required.** The byte-carrying document shape was never shipped, so there is no mixed population, no stale client and no compatibility boundary to negotiate. No `documentSchemaVersion`, no join payload field, no rejection path.
 
+  **ON HOLD** — the consumer rollout is paused at Anton's instruction. Facts established by a read-only census of `client-web`, preserved so the work can resume without repeating it:
+
+  - **The pin has DIVERGED, not merely fallen behind.** `client-web` pins only **2** packages (`@excalidraw-yjs/element`, `@excalidraw-yjs/excalidraw`) at `2e7c2f00` via pkg.pr.new. That SHA is **not an ancestor of HEAD**: 31 commits are in the pin but not HEAD, 170 in HEAD but not the pin. Reconciling the branches is a prerequisite for any bump.
+  - **The locator needs no URL parsing.** `FileUploader.upload` reads only `uploadFileOnStorageBucket.url`, but the mutation returns `StorageBucketUploadFileResult { id, url }` — the server's document-row id is already available ATOMICALLY alongside the URL and is currently discarded. `store()` can return an opaque row id with no extra round-trip.
+  - **The exact behaviour to delete** is `useWhiteboardFilesManager`'s `getUploadedFiles`: when `convertLocalFileToRemote` fails it keeps `{...files[id]}` if a `dataURL` is present, so peers "receive the dataURL directly" — writing bytes into a document that rejects them.
+  - **Live transport**, reference only: a raw WebSocket per document, `/collab/<documentId>?type=memo|whiteboard`, server sending SyncStep1 after admission. No `join-room`.
+
 - [x] T025b **(DONE — landed with T032; see that entry)** The explicit maintenance call sits immediately before the real INIT/resync encode, and the encoder is PURE. No scheduler, no timer.
 
 - [x] T026 **(DONE — the task's stated design was wrong in two ways and was corrected before coding)** Replace the `getSceneVersion`-sum cache. `isSaved ⇔ nothing changed since the last successful save`. Green **INV-SAVE-SKIP**.
