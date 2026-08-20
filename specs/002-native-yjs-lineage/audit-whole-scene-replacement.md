@@ -37,6 +37,29 @@ A caller _can_ reach `scene.yAssets` (it is `public readonly`) and call `writeAs
 
 `writeAppState` skips `undefined` (`if (next === undefined) continue`), so a key present in the doc but absent from the desired appState is **left in place** — confirmed above, where `name: "old name"` survived a replacement that did not mention it. There is no prune path at any layer.
 
+## LANDED (2026-08-21)
+
+Both options built exactly as scoped — additive, opt-in, defaults unchanged. Gate: `Scene.exactReplacement.test.ts` (5 cases) plus a four-way sabotage.
+
+- `setAssetLocators(locators, { prune })` forwards the flag `writeAssetLocators` already implemented, under `LOCAL_ORIGIN` — so the write carries a declared origin instead of the `null` one a direct root write would produce.
+- `setAppState(appState, { prune })` reconciles the allow-list exactly. In prune mode `undefined` means "not present" rather than "no opinion"; without that an exact replacement silently keeps a key the desired state never mentioned.
+- **Atomicity was already correct** and is now pinned: `writeAssetLocators` validates the entire desired map _before_ the prune loop, so one bad locator cannot leave a half-pruned root, and a `data:` URL throws before the first deletion.
+
+**Non-vacuity — four sabotages, each run**: dropping the prune forward in `setAssetLocators` fails 2 of 5; removing prune from `writeAppState` fails 2 of 5; moving the asset prevalidation after the prune loop fails 1 of 5; removing the logical-mutation boundary turns one emitted update into three.
+
+Composition, public API only:
+
+```ts
+scene.beginLogicalMutation();
+try {
+  scene.replaceAllElements(desired.elements, { recordHistory: false });
+  scene.setAssetLocators(desired.assets, { prune: true });
+  scene.setAppState(desired.appState, { prune: true });
+} finally {
+  scene.endLogicalMutation();
+}
+```
+
 ## Smallest fork-owned change
 
 Two options on existing methods. No new primitive, no new concept.
@@ -54,7 +77,7 @@ Both are additive and default to today's merge behaviour.
 - a peer's concurrent property edit on a surviving element **merges per-property** — replacement does not win by virtue of being a replacement;
 - only what the replacing client could see is replaced.
 
-If the server needs exclusivity it must arrange quiescence itself (or accept the merge). That is a product decision, and it should be written into whatever API lands rather than discovered later.
+**DECIDED: causal / non-exclusive is the intended semantics.** What the operation replaces is _the generation the replacer observed after sync_, not the room. No lock and no quiescence mechanism is offered, deliberately — a genuinely concurrent addition or edit survives according to Yjs, and that is correct rather than a limitation to engineer around. Pinned by a test rather than left implied: a concurrent peer add survives the replacement, a concurrent property edit merges per-property, and both replicas converge.
 
 ## REDs the change would need
 
