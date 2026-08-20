@@ -29,16 +29,6 @@ export type ActionResult =
       files?: BinaryFiles | null;
       captureUpdate: CaptureUpdateActionType;
       replaceFiles?: boolean;
-      /**
-       * Ownership for keys this action BOTH derives and writes through a helper
-       * it invoked (spec 002 / T016b). Required only for genuinely ambiguous
-       * keys — where the result value differs from what the doc already holds —
-       * and rejected before any mutation if one is missing.
-       */
-      overlapResolution?: ReadonlyMap<
-        string,
-        ReadonlyMap<string, "result" | "applied">
-      >;
       /** A per-KEY conflict policy — see `Scene.applyElementChanges`. */
       overlapPolicy?: ReadonlyMap<string, "result" | "applied">;
       //

@@ -177,7 +177,7 @@ describe("Scene action mutation journal", () => {
     scene.endActionMutationJournal();
   });
 
-  it("an EXPLICIT action declaration overrides a journaled helper key", () => {
+  it("an EXPLICIT declaredIntent key IS ownership — it overrides a journaled key", () => {
     const scene = new Scene();
     scene.replaceAllElements([rect("a", { x: 0 })]);
     const base = scene.getElementsIncludingDeleted().map((e) => ({ ...e }));
@@ -198,9 +198,8 @@ describe("Scene action mutation journal", () => {
       declaredIntent: {
         addedIds: new Set(),
         removedIds: new Set(),
+        // Naming the key in `keysById` IS the ownership statement.
         keysById: new Map([["a", new Set(["x"])]]),
-        // keysById alone does NOT imply a winner: ownership is explicit.
-        overlapResolution: new Map([["a", new Map([["x", "result"]])]]),
       } as never,
       alreadyAppliedIntent: journal,
     });
@@ -225,7 +224,7 @@ describe("Scene action mutation journal", () => {
     const result = base.map((e) => ({ ...e, x: 99 }));
     scene.applyElementChanges(base as never, result as never, {
       alreadyAppliedIntent: scene.getActionMutationJournal(),
-      overlapResolution: new Map([["a", new Map([["x", "applied"]])]]),
+      overlapPolicy: new Map([["x", "applied"]]),
     });
     scene.endActionMutationJournal();
 
@@ -305,9 +304,7 @@ describe("Scene action mutation journal", () => {
     expect(() =>
       scene.applyElementChanges(base as never, result as never, {
         alreadyAppliedIntent: scene.getActionMutationJournal(),
-        overlapResolution: new Map([
-          ["a", new Map([["x", "whatever"]])],
-        ]) as never,
+        overlapPolicy: new Map([["x", "whatever"]]) as never,
       }),
     ).toThrow(/unknown overlap resolution/);
     scene.endActionMutationJournal();

@@ -207,14 +207,14 @@ Two independent findings (T014b's meta regression and T016's surviving revert cl
      journal, where a scoped write would actually change the document, is
      AMBIGUOUS — the action may be overriding the helper, or its value may be
      stale, and nothing may guess. Every such key must be covered exactly once:
-     - `declaredIntent.overlapResolution` — exact per-id/per-key `result` |
-       `applied`; `keysById` implies `result`;
-     - `overlapPolicy` — a per-KEY policy applied only to keys that are genuinely
-       ambiguous, for a caller that knows its rule but cannot know which ids will
-       conflict before the journal exists;
-     - anything else **throws before any mutation**, naming every unresolved
-       `id.key`. An unknown choice throws. Rejection leaves the state vector
-       unchanged.
+     Ambiguity applies to DERIVED intent only — an explicit `declaredIntent` IS
+     the ownership statement, so naming a key in `keysById` means the action owns
+     it. For derived intent there is exactly ONE channel: `overlapPolicy`, a
+     per-KEY policy applied only to keys that are genuinely ambiguous, for a
+     caller that knows its rule but cannot know which ids will conflict before
+     the journal exists. Anything uncovered **throws before any mutation**,
+     naming every unresolved `id.key`; an unknown choice throws; rejection leaves
+     the state vector unchanged.
 
   **One comparison authority.** `wouldWriteChange(ymap, element, key)` in
   `schema.ts` is the single mutation-free predicate for "would a scoped write of

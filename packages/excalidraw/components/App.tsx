@@ -2940,7 +2940,6 @@ class App extends React.Component<AppProps, AppState> {
             {
               recordHistory,
               alreadyAppliedIntent: this.scene.getActionMutationJournal(),
-              overlapResolution: actionResult.overlapResolution,
               overlapPolicy: actionResult.overlapPolicy,
             },
           );

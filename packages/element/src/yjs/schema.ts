@@ -315,28 +315,6 @@ export const yMapToElement = (ymap: Y.Map<unknown>): ElementRecord => {
 };
 
 /**
- * Write the changed per-property keys of `element` into an existing element
- * `Y.Map` (the diff write path, §8). Only keys whose value actually changed are
- * written:
- *
- * - scalars: strict `!==`.
- * - JSON-leaf: `!deepEqual`, value re-stored whole (per-key LWW for the blob).
- * - `boundElements`: diffed into the nested `Y.Map` via `set(id,type)` /
- *   `delete(id)` (§4.1) — add/remove set, never whole-array replace.
- *
- * A property going value → absent on the element (e.g. `link` cleared to
- * `undefined`, or the key dropped entirely) IS removed from the `Y.Map` so a
- * stale value cannot resurrect on the next round-trip (clear semantics). Element
- * *removal* is still a tombstone via `isDeleted`, never wholesale key removal
- * (FR-B-006) — this only clears individual properties of a surviving element.
- *
- * `version`/`versionNonce`/`updated` are never written here (per-peer
- * reconciliation metadata — `RECONCILE_META_KEYS`, OPEN-3).
- *
- * MUST be called inside a `ydoc.transact(fn, LOCAL_ORIGIN)`. Returns the number
- * of keys written (0 ⇒ nothing changed).
- */
-/**
  * Would a SCOPED write of `key` from `element` actually change `ymap`?
  *
  * The single authority for "is this key different from what the document
@@ -374,6 +352,29 @@ export const wouldWriteChange = (
   return prev !== next;
 };
 
+/**
+ * Write the changed per-property keys of `element` into an existing element
+ * `Y.Map` (the diff write path, §8). Only keys whose value actually changed are
+ * written:
+ *
+ * - scalars: strict `!==`.
+ * - JSON-leaf: `!deepEqual`, value re-stored whole (per-key LWW for the blob).
+ * - `boundElements`: diffed into the nested `Y.Map` via `set(id,type)` /
+ *   `delete(id)` (§4.1) — add/remove set, never whole-array replace.
+ *
+ * A property going value → absent on the element (e.g. `link` cleared to
+ * `undefined`, or the key dropped entirely) IS removed from the `Y.Map` so a
+ * stale value cannot resurrect on the next round-trip (clear semantics). Element
+ * *removal* is still a tombstone via `isDeleted`, never wholesale key removal
+ * (FR-B-006) — this only clears individual properties of a surviving element.
+ *
+ * `version`/`versionNonce`/`updated` are never written here (per-peer
+ * reconciliation metadata — `RECONCILE_META_KEYS`, OPEN-3).
+ *
+ * MUST be called inside a `ydoc.transact(fn, LOCAL_ORIGIN)`. Returns the number
+ * of keys written (0 ⇒ nothing changed).
+ */
+
 export const writeChangedKeys = (
   ymap: Y.Map<unknown>,
   element: ElementRecord,
@@ -395,26 +396,27 @@ export const writeChangedKeys = (
     if (RECONCILE_META_KEYS.has(key)) {
       continue;
     }
+    // THE predicate, consulted FIRST for every key — no branch below decides
+    // "did this change" for itself. What follows only performs the write.
+    if (!wouldWriteChange(ymap, element, key)) {
+      continue;
+    }
     const next = element[key];
-    if (next === undefined) {
-      // value → absent: clear it from the doc so it can't resurrect. boundElements
-      // is handled below via diffBoundElements (which empties the nested map).
-      if (key !== BOUND_ELEMENTS_KEY && ymap.has(key)) {
-        ymap.delete(key);
-        writes++;
-      } else if (key === BOUND_ELEMENTS_KEY) {
-        writes += diffBoundElements(ymap, null);
-      }
-      continue;
-    }
     if (key === BOUND_ELEMENTS_KEY) {
-      writes += diffBoundElements(ymap, next as readonly BoundElement[] | null);
+      writes += diffBoundElements(
+        ymap,
+        (next ?? null) as readonly BoundElement[] | null,
+      );
       continue;
     }
-    if (wouldWriteChange(ymap, element, key)) {
-      ymap.set(key, JSON_LEAF_KEYS.has(key) ? cloneJSON(next) : next);
+    if (next === undefined) {
+      // value → absent: clear it from the doc so it can't resurrect.
+      ymap.delete(key);
       writes++;
+      continue;
     }
+    ymap.set(key, JSON_LEAF_KEYS.has(key) ? cloneJSON(next) : next);
+    writes++;
   }
   // Keys present on the doc but entirely absent from the element object (the key
   // was dropped, not set to undefined) — clear them too (excluding meta + the

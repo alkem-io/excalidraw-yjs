@@ -937,15 +937,6 @@ export class Scene {
        */
       alreadyAppliedIntent?: ReadonlyMap<string, ReadonlySet<string>>;
       /**
-       * See `DeclaredElementIntent.overlapResolution`. Supplied by the caller
-       * when the DERIVED diff is in use; an explicit `declaredIntent` carries
-       * its own and takes precedence.
-       */
-      overlapResolution?: ReadonlyMap<
-        string,
-        ReadonlyMap<string, "result" | "applied">
-      >;
-      /**
        * A per-KEY conflict policy, applied ONLY to keys that are actually
        * ambiguous. Modelled as a key policy rather than a fabricated per-id
        * resolution map: a caller such as flip knows "for geometry keys the
@@ -973,8 +964,10 @@ export class Scene {
     //
     // A same-valued overlap is NOT ambiguous — both sides agree, so there is
     // nothing to choose and no resolution is required.
-    if (options.alreadyAppliedIntent?.size) {
-      const explicit = declared.overlapResolution ?? options.overlapResolution;
+    // Only DERIVED intent can be ambiguous. An explicit `declaredIntent` IS the
+    // ownership statement: naming a key in `keysById` means the action owns it
+    // and its canonical result value is written, journal or not.
+    if (!options.declaredIntent && options.alreadyAppliedIntent?.size) {
       const policy = options.overlapPolicy;
       const unresolved: string[] = [];
       const suppress = new Map<string, Set<string>>();
@@ -1001,7 +994,7 @@ export class Scene {
           if (!ymap || !wouldWriteChange(ymap, record, key)) {
             continue;
           }
-          const choice = explicit?.get(id)?.get(key) ?? policy?.get(key);
+          const choice = policy?.get(key);
           if (choice === undefined) {
             unresolved.push(`${id}.${key}`);
             continue;
@@ -1289,16 +1282,6 @@ export class Scene {
   }
 
   /**
-   * Open a logical mutation spanning several Scene writes, so they reach a peer
-   * as ONE message. Every call MUST be balanced by {@link endLogicalMutation} in
-   * a `finally`: on a throw, whatever Yjs already committed is published rather
-   * than dropped, because those writes are in the document and withholding them
-   * would diverge the peer permanently.
-   *
-   * Deliberately narrow — the editor's action layer is the only caller. This is
-   * not a general mode; see {@link openLogicalMutation} for the join rule.
-   */
-  /**
    * Start recording which keys each `mutateElement` call DECLARES, per element
    * id, for the duration of a synchronous action.
    *
@@ -1348,6 +1331,16 @@ export class Scene {
     return this.mutationJournal ?? new Map();
   }
 
+  /**
+   * Open a logical mutation spanning several Scene writes, so they reach a peer
+   * as ONE message. Every call MUST be balanced by {@link endLogicalMutation} in
+   * a `finally`: on a throw, whatever Yjs already committed is published rather
+   * than dropped, because those writes are in the document and withholding them
+   * would diverge the peer permanently.
+   *
+   * Deliberately narrow — the editor's action layer is the only caller. This is
+   * not a general mode; see {@link openLogicalMutation} for the join rule.
+   */
   beginLogicalMutation(): void {
     this.openLogicalMutation();
   }

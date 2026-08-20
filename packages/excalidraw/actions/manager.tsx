@@ -75,9 +75,35 @@ export class ActionManager {
       // through the promise is what lets the result later be applied as intent
       // against the CURRENT doc instead of overwriting it.
       if (isPromiseLike(actionResult)) {
-        actionResult.then((actionResult) => {
-          return updater(actionResult, invocationBase);
-        });
+        actionResult
+          .then((resolved) => {
+            // FAIL CLOSED (spec 002 / T016b). By the time an async result
+            // resolves, this action's logical-mutation boundary AND its mutation
+            // journal are already closed, so neither `invocationBase` nor the
+            // journal describes the document the result would land on: the derived
+            // path would apply a stale diff against an EMPTY journal, silently.
+            // No async `perform` returns `elements` today (audited: zero), so this
+            // rejects rather than guessing — and rejects BEFORE any store
+            // scheduling or Scene mutation.
+            if (resolved !== false && resolved.elements) {
+              throw new Error(
+                "ActionManager: an async action returned `elements`. The " +
+                  "synchronous derived-intent path cannot apply it — the action's " +
+                  "mutation journal and transport boundary are already closed. " +
+                  "Such an action must declare its own intent/ownership.",
+              );
+            }
+            // An appState-only async result is unaffected: it never reaches the
+            // element write path.
+            return updater(resolved, undefined);
+          })
+          // Surfaced, not swallowed and not left as an UNHANDLED rejection: this
+          // continuation is fire-and-forget, so a bare throw would escape the
+          // promise chain entirely — loud in a console nobody reads, and it
+          // would wedge the test runner rather than reach the author.
+          .catch((error) => {
+            console.error(error);
+          });
       } else {
         return updater(actionResult, invocationBase);
       }
@@ -185,8 +211,14 @@ export class ActionManager {
         invocationBase,
       );
     } finally {
-      this.app.scene.endActionMutationJournal();
-      this.app.scene.endLogicalMutation();
+      // NESTED, not sequential: `endActionMutationJournal` throws on imbalance,
+      // and a sequential pair would leave the transport boundary open forever —
+      // every later action would then buffer into a scope nothing closes.
+      try {
+        this.app.scene.endActionMutationJournal();
+      } finally {
+        this.app.scene.endLogicalMutation();
+      }
     }
   }
 
