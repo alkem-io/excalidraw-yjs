@@ -498,6 +498,12 @@ T030's precondition is now specifically collab-unification's clean-close correct
 
   Not gated on CodeRabbit, by agreement — this is the fork's own review gate. **UNPAUSED and RUN (2026-08-20)** once collab-unification's clean-close corrective landed. Scope of this pass, stated so the gate is not read as broader than it was: **the integration-facing surface** — every claim this repo makes about its consumers, and every contract it exposes to them, rechecked against the landed `client-web` and `server`. Not a line-by-line audit of all 306 changed source files; the mutation campaigns and the peer's incremental reviews covered the internals.
 
+  **WHAT THE CLOSURE CERTIFIES, and what landed after it.** The gates above were run on `98ce869c` / `e94679df`. That is the tree SC-003 was satisfied against, and saying so matters — a closure that reads as covering everything forever is the drift this file keeps correcting.
+
+  Product source changed **once** since: `Scene.ts` and `yjs/schema.ts`, adding the opt-in `{ prune }` options for exact asset/appState replacement (`13e9cee7`). That change carried its own gate (`Scene.exactReplacement.test.ts`, five cases, four sabotages) and had decorrelated review before landing. Everything else since is manifest, lockfile, test harness or docs.
+
+  So the SC-003 verdict is not being stretched over unreviewed code — but it is also not a standing certificate. **The next product change to this branch needs its own review, not an appeal to this one.**
+
   **THREE FINDINGS. T030 does NOT close on this pass.**
 
   **F1 — an unbounded await chain makes a whiteboard un-closeable on a hung upload.** Measured across both repos: `CrdWhiteboardDialog` does `await excalidrawAPI.flushAssetPublication()` on close with no bound; `flushAssetPublication` waits on `adapter.store` with no bound (by design); the client's `store` awaits an Apollo `uploadFile` mutation with **no timeout, no `AbortController`, no `Promise.race`** — grepped, zero occurrences. So a stalled upload hangs the close path with no way out for the user.
