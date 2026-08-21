@@ -17,7 +17,7 @@ T002 is closed by replacement, not repair — see its entry before reading its "
 
 T030's precondition is now specifically collab-unification's clean-close corrective; once that lands the full cross-repo state is ready for the final review.
 
-**One manifest cleanup is prepared, verified, and DEFERRED BY DECISION** (`audit-one-artifact-feasibility.md`): moving `sass` out of runtime `dependencies` and deleting the duplicate `cross-env` entry. Its original hold condition — the client slice landing — is met. It is deferred anyway, decided 2026-08-20: publishing solely for it would mint a build identifier **both** consumers must adopt, days after they standardised on `2af664c`, for a change with no functional effect. **Batch it into the next functional fork build that already requires a re-pin.** Not a blocker, not awaiting anyone, and not to be re-litigated — the verification is banked in the audit so it can go out as part of that build without re-checking.
+**The deferred manifest cleanup LANDED (2026-08-21, `16aafec9`).** `sass` moved to `devDependencies` and the duplicate runtime `cross-env` entry deleted, folded into the active re-pin window so consumers adopted it in the same move rather than paying for a second one. Verified: frozen install passes, `dist/prod/index.css` is byte-identical before and after (sha256 `d6e13d43…8e59`), and the saving is **25 packages / ~6 MB** off an umbrella install — larger than the "~5 MB, 2 packages" originally banked, because `sass` and `cross-env` bring transitive deps. Published as `@5b2e434`.
 
 **Revised order (2026-08-19): the write path comes BEFORE the wire.** The reordering was originally argued from the 34 re-enabled `multiplayer undo/redo` tests gating FR-009/010/011 rather than FR-001. **That premise is withdrawn (T002 — the block never exercised a second replica and is now deleted)**, but the order it produced is right for an independent reason that survives: the write path is where lineage is destroyed, so INV-CONVERGE cannot go green while every local write clobbers it. Fixing the write path first also deletes 32 bandaid sites, shrinking what every later phase must keep green.
 
@@ -310,9 +310,9 @@ T030's precondition is now specifically collab-unification's clean-close correct
 
   **CLOSED 2026-08-20 — consumer lane landed, and verified here rather than taken on report.** The collab-assists session inspected the migration; I checked the four things that would show it was incomplete, by reading the sibling repos directly:
 
-  - **`client-web` holds exactly ONE `@excalidraw-yjs/*` pin** — the umbrella at `2af664c` — and **zero** `@excalidraw-yjs/element` imports remain in `src`.
+  - **`client-web` holds exactly ONE `@excalidraw-yjs/*` pin** — the umbrella — `2af664c` when this was verified, `5b2e434` since the re-pin — and **zero** `@excalidraw-yjs/element` imports remain in `src`.
   - **`useWhiteboardFilesManager.ts` is gone**, and no `getUploadedFiles` reference survives anywhere in `src`. That was the `dataURL`-on-upload-failure fallback, the one live blocker this task named: bytes can no longer be smuggled into a document that rejects them.
-  - **`server` holds exactly ONE pin** — the slim `element` at `2af664c` — and imports `@excalidraw-yjs/element/headless`.
+  - **`server` holds exactly ONE pin** — the slim `element` — `2af664c` when this was verified, `5b2e434` since the re-pin — and imports `@excalidraw-yjs/element/headless`.
   - **Both consumers are on the SAME build identifier**, which was the whole point of Route A.
 
   Reported by that session and not re-verified here: the asset store → document-id locator, `resolve` → `lookup.document` → bytes, and flush gating on save / close / template merge (`efd44a2a1`, `72686d930`, `da58927e2`, `d939e32d9`).

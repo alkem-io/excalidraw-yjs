@@ -1,6 +1,6 @@
 # Audit — what one artifact would actually cost
 
-**Status: read-only. Nothing repackaged, nothing published, `@2af664c` untouched and still the pin for the client migration.**
+**Status: the measurements below are read-only and were taken against `@2af664c`. The one change they recommended has since LANDED — see "Prepared, verified" below; consumers are now on `@5b2e434`.**
 
 ## The measured cost of putting `server` on the umbrella
 
@@ -80,7 +80,7 @@ So the corrective is a swap back to a path that is measured working, not a hopef
 
 **`sass` and `cross-env` are declared as runtime `dependencies` of the umbrella** and are build-time tools. Every consumer installs them (~5 MB, 2 packages) for nothing.
 
-**Prepared, verified, reverted — and DEFERRED BY DECISION (2026-08-20).** The original reason not to land it was that it would churn the `@2af664c` pin the client migration was testing against. That migration has since landed, and the deferral stands for a stronger reason: publishing solely for this would mint a new identifier **both** consumers must adopt, for a change with no functional effect. **Batch it into the next functional build that already forces a re-pin.** What was already checked, so it need not be rechecked:
+**LANDED 2026-08-21 (`16aafec9`), published as `@5b2e434`.** It was prepared, verified and deliberately reverted on 2026-08-20 rather than churn the pin the client migration was testing; it went in during the next re-pin window instead, exactly as the deferral intended, so consumers adopted it in one move. **The saving was larger than banked: 25 packages and ~6 MB off an umbrella install (289 → 264), not the "2 packages" first estimated** — `sass` and `cross-env` carry transitive deps. What was checked:
 
 - `sass@1.51.0` moves `dependencies` → `devDependencies`. Its only consumer is `esbuild-sass-plugin`, which is _already_ a devDependency, and the published package ships compiled CSS (`dist/prod/index.css`, 180 KB) so no consumer ever compiles `.scss`.
 - `cross-env@7.0.3` is simply **declared twice** — once in `dependencies`, once in `devDependencies`, same version. Delete the runtime entry; nothing needs adding.
@@ -88,4 +88,4 @@ So the corrective is a swap back to a path that is measured working, not a hopef
 
 ## Not done here, deliberately
 
-No manifest change is committed, no build config touched, nothing republished. The one manifest edit that was tried is reverted and held, above. The measurements are reproducible from two scratch manifests at `2af664c`.
+No build config was touched by this audit. The one manifest change it recommended is now landed (above), not held. The measurements are reproducible from two scratch manifests at `2af664c`.
