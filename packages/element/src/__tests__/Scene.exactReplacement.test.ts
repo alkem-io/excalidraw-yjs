@@ -143,6 +143,40 @@ describe("exact replacement of the observed generation", () => {
     scene.destroy();
   });
 
+  it("replaces with an EMPTY desired snapshot — the blank-template case", () => {
+    // The boundary of the API: a desired snapshot with nothing in it. A server
+    // applying a blank template hits exactly this, and it is the one shape where
+    // "prune" has to do all the work — there is no desired value to overwrite
+    // anything with, so a merge-only path would leave the whole board behind.
+    const scene = liveRoom();
+    const updates: Uint8Array[] = [];
+    const detach = scene.onDocUpdate((u) => updates.push(u));
+
+    scene.beginLogicalMutation();
+    try {
+      scene.replaceAllElements([], { recordHistory: false });
+      scene.setAssetLocators({}, { prune: true });
+      scene.setAppState({} as never, { prune: true });
+    } finally {
+      scene.endLogicalMutation();
+    }
+    detach();
+
+    expect(ids(scene)).toEqual([]);
+    expect(scene.getAssetLocators()).toEqual({});
+    expect(scene.getPersistedAppState()).toEqual({});
+    expect(updates).toHaveLength(1);
+    expect(scene.canUndoElements()).toBe(false);
+
+    const peer = new Scene(undefined, { doc: new Y.Doc() });
+    peer.applyRemoteUpdate(scene.encodeStateAsUpdate("v1"));
+    expect(ids(peer)).toEqual([]);
+    expect(peer.getAssetLocators()).toEqual({});
+    expect(peer.getPersistedAppState()).toEqual({});
+    peer.destroy();
+    scene.destroy();
+  });
+
   it("NON-EXCLUSIVE: a concurrent peer add survives, a concurrent edit merges", () => {
     const scene = liveRoom();
     const peer = new Scene(undefined, { doc: new Y.Doc() });
