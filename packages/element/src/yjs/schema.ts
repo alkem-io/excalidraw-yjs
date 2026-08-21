@@ -22,6 +22,24 @@ import type { BoundElement } from "../types";
  * See data-model §1.
  */
 export const ELEMENTS = "elements" as const;
+/**
+ * The asset-reference root. **Named `files` for a reason that no longer applies,
+ * and it must NOT be renamed.**
+ *
+ * The name dates from when this root held whole `BinaryFileData` records. It now
+ * holds opaque locators and every API around it says *asset*: `Scene.yAssets`,
+ * `setAssetLocators`, `readAssetLocators`, and `WhiteboardSnapshot.assets` —
+ * which `encodeSnapshot` / `decodeSnapshot` translate to and from THIS physical
+ * root. So a reader who notices the mismatch has noticed a real one.
+ *
+ * It stays anyway: the root name is part of the stored document format, so
+ * renaming it silently orphans the assets of every board already persisted, and
+ * every peer on an older build. The inconsistency is cheaper than the migration.
+ *
+ * A consumer reaching into the doc directly should import this constant rather
+ * than hardcoding `"files"` — but should prefer `Scene.setAssetLocators` /
+ * `writeAssetLocators`, which carry the validation and a declared origin.
+ */
 export const FILES = "files" as const;
 export const APPSTATE = "appState" as const;
 /**

@@ -79,6 +79,23 @@ Both are additive and default to today's merge behaviour.
 
 **DECIDED: causal / non-exclusive is the intended semantics.** What the operation replaces is _the generation the replacer observed after sync_, not the room. No lock and no quiescence mechanism is offered, deliberately — a genuinely concurrent addition or edit survives according to Yjs, and that is correct rather than a limitation to engineer around. Pinned by a test rather than left implied: a concurrent peer add survives the replacement, a concurrent property edit merges per-property, and both replicas converge.
 
+## Physical root names, confirmed against the published build
+
+Asked by the server lane before replacing its legacy `rehomeSnapshotMedia`; measured by inspecting real docs from `@5b2e434`, not read off the source.
+
+| logical name            | physical Yjs root  | value                     |
+| ----------------------- | ------------------ | ------------------------- |
+| assets / asset locators | **`files`**        | `string` (opaque locator) |
+| elements                | `elements`         | per-element `Y.Map`       |
+| persisted appState      | `appState`         | allow-listed scalars      |
+| deletion sidecar        | `elementDeletions` | `number`                  |
+
+`Scene.yAssets` **is** `doc.getMap("files")`; there is no `assets` content root. `WhiteboardSnapshot.assets` is a TypeScript-level name that `encodeSnapshot`/`decodeSnapshot` **translate** to and from the physical `files` root — `decodeSnapshot(...)` returns `.assets`, and `.files` is `undefined`.
+
+`FILES`, `ELEMENTS`, `APPSTATE` and `ELEMENT_DELETIONS` are exported from `element/headless`; there is **no `ASSETS` export**. A consumer touching roots directly should use the constant — but should prefer `setAssetLocators` / `writeAssetLocators`, which carry the validation and a declared origin instead of the `null` one a bare root write produces.
+
+**The mismatch is a legacy scar, not intent, and must not be "fixed"**: the root name is part of the stored document format, so renaming it orphans the assets of every persisted board and every peer on an older build. Now stated on the constant itself, where a renamer would actually land.
+
 ## REDs the change would need
 
 - old elements / assets / appState keys **absent** after replacement;
