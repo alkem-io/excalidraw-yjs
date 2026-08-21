@@ -2036,6 +2036,19 @@ export class Scene {
        * snapshot. The entire desired map is validated BEFORE anything is
        * removed, so one bad locator cannot leave a half-pruned root — a `data:`
        * URL still throws, and throws before the first deletion.
+       *
+       * **It does NOT check element references, and will silently orphan one.**
+       * Measured: pruning to a set that omits a `fileId` a live image element
+       * still points at removes the locator, throws nothing at write OR at
+       * encode, and leaves the image unresolvable. That is deliberate — `prune`
+       * means "this IS the complete set", and the caller supplies elements and
+       * assets from ONE consistent snapshot (replace the elements first; see
+       * `Scene.exactReplacement.test.ts`). A reference check here would also be
+       * wrong: it would spuriously reject a caller that prunes before replacing.
+       *
+       * If you want reference-AWARE reclamation, that is {@link collectGarbage},
+       * which computes what surviving elements and tombstones still point at.
+       * Reach for `prune` only when you are replacing a whole scene.
        */
       prune?: boolean;
     },
