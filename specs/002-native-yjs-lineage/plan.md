@@ -2,6 +2,8 @@
 
 **Spec**: [spec.md](./spec.md) · **Created**: 2026-06-26 · **Status**: Plan (widened 2026-08-19 for the R2 write-path class)
 
+> **`file:line` citations below are dated.** They resolved when this document was written and the code has moved a long way since — spot-checked, several now land on unrelated lines. Treat the FILE and the named symbol as authoritative and the number as a hint; `git log -S'<symbol>'` finds the real site. This document is a point-in-time artifact and is deliberately not being renumbered.
+
 ## Summary
 
 The four review defects are one root cause: the scene is flattened to records and re-encoded through a **throwaway `Y.Doc`** (`buildSnapshotDoc` → fresh random `clientID`) on the wire, in persistence, and on cold-load — collapsing per-property CRDT merge to whole-element LWW. **Proven** (yjs 13.6.31, `/tmp/lineage-probe.cjs`): throwaway re-encode = per-property merge **0/2000**; live-doc-state encode = **2000/2000, zero loss**.

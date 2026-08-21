@@ -2,6 +2,8 @@
 
 Read-only evidence for the question "where do image bytes live relative to the collaborative document?". **No design decision is made here.** Every row was verified by reading the code, not inferred.
 
+> **`file:line` citations below are dated.** They resolved when this document was written and the code has moved a long way since — spot-checked, several now land on unrelated lines. Treat the FILE and the named symbol as authoritative and the number as a hint; `git log -S'<symbol>'` finds the real site. This document is a point-in-time artifact and is deliberately not being renumbered.
+
 ## The measurement that forces the question
 
 `yFiles` stores whole `BinaryFileData` records — `dataURL` included — in the same `Y.Doc` as the elements. A raw live-doc encode therefore carries live image bytes verbatim: a scene holding one 4096-byte payload encodes to 4189 bytes and the payload appears in the update. So switching the wire to a raw live encode (T032) would ship **every live binary on every INIT and every periodic resync**.

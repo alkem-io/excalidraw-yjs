@@ -2,6 +2,8 @@
 
 The gate before implementing T023 + T025b + T032. **No decision is recorded here**; the boundary design is still awaiting the repo owner's direct confirmation. This establishes what would have to change and whether any consumer is unresolved.
 
+> **`file:line` citations below are dated.** They resolved when this document was written and the code has moved a long way since — spot-checked, several now land on unrelated lines. Treat the FILE and the named symbol as authoritative and the number as a hint; `git log -S'<symbol>'` finds the real site. This document is a point-in-time artifact and is deliberately not being renumbered.
+
 Scope: verified in THIS repo. Cross-repo rows are marked unverified.
 
 ## Two questions the contract left open — both now answered here

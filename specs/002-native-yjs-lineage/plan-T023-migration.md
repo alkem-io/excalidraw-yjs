@@ -2,6 +2,8 @@
 
 Approved 2026-08-20. Written before any destructive change, per the agreed order.
 
+> **`file:line` citations below are dated.** They resolved when this document was written and the code has moved a long way since — spot-checked, several now land on unrelated lines. Treat the FILE and the named symbol as authoritative and the number as a hint; `git log -S'<symbol>'` finds the real site. This document is a point-in-time artifact and is deliberately not being renumbered.
+
 ## What "atomic" means here, concretely
 
 This package is an **unreleased hard fork on a feature branch**. Consumers pin it by SHA. So atomicity is _not_ "edit three repos in one commit" — it is:

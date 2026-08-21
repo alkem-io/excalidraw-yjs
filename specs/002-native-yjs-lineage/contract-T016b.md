@@ -2,6 +2,8 @@
 
 **Status**: IMPLEMENTED. **Spec**: FR-016, FR-017, T014b.
 
+> **`file:line` citations below are dated.** They resolved when this document was written and the code has moved a long way since — spot-checked, several now land on unrelated lines. Treat the FILE and the named symbol as authoritative and the number as a hint; `git log -S'<symbol>'` finds the real site. This document is a point-in-time artifact and is deliberately not being renumbered.
+
 An action's result is applied as a DIFF against the snapshot it was invoked on, onto whatever the document holds now. Where the action and a helper it invoked wrote the same key, ownership is explicit and unresolved conflicts are rejected before any mutation.
 
 ## 0. The API, literally
