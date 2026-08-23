@@ -5195,7 +5195,12 @@ class App extends React.Component<AppProps, AppState> {
     const missing = Object.entries(this.scene.getAssetLocators()).filter(
       ([fileId, locator]) =>
         !this.files[fileId as keyof BinaryFiles] &&
-        !this.assetResolvesInFlight.has(`${fileId}\u0000${locator}`),
+        !this.assetResolvesInFlight.has(`${fileId}\u0000${locator}`) &&
+        // A pair that already failed is NOT missing-and-fetchable. Without this
+        // the tail re-entry below recomputes an identical `missing` set and
+        // fires again immediately — an unbounded loop that, for a rejection
+        // which never reaches the network, is tight enough to freeze the tab.
+        !this.assetResolvesFailed.has(`${fileId}\u0000${locator}`),
     );
     if (!missing.length) {
       return;
@@ -5217,11 +5222,13 @@ class App extends React.Component<AppProps, AppState> {
               console.error(
                 `assetAdapter.resolve returned id "${file.id}" for "${fileId}"`,
               );
+              this.assetResolvesFailed.add(key);
               return;
             }
             resolved.push(file);
           } catch (error) {
             console.error(`assetAdapter.resolve failed for ${fileId}`, error);
+            this.assetResolvesFailed.add(key);
           } finally {
             this.assetResolvesInFlight.delete(key);
           }
@@ -5242,6 +5249,17 @@ class App extends React.Component<AppProps, AppState> {
 
   /** `fileId\u0000locator` pairs in flight, so a changed locator refetches. */
   private assetResolvesInFlight = new Set<string>();
+
+  /**
+   * `fileId\u0000locator` pairs whose resolve REJECTED or returned the wrong id.
+   *
+   * Keyed by the pair, not the file: a new locator for the same file is a new
+   * key and is therefore still fetched, which is what keeps a republished asset
+   * working. Deliberately not a retry/backoff subsystem — the bug is that the
+   * tail re-entry treated a permanent failure as still-missing, so the minimal
+   * correct behaviour is to stop calling it missing.
+   */
+  private assetResolvesFailed = new Set<string>();
 
   /**
    * Refresh the collaborative/persistable appState subset (background + name)
