@@ -11,14 +11,20 @@ import { act, fireEvent, render } from "./test-utils";
 const { h } = window;
 
 /**
- * FR-017 must hold on EVERY action entry point, not just `executeAction`.
+ * FR-017 on the KEYBOARD entry point.
+ *
+ * Scope note, because the fix is deliberately partial: these tests cover
+ * `handleKeyDown` only. `renderAction`'s `updateData` still lacks the boundary
+ * and is NOT asserted here — wrapping it regresses 10 `textWysiwyg` tests, so
+ * that gap is held open on purpose rather than closed with a regression
+ * attached.
  *
  * `ActionManager` has three ways to run an action:
  *
  *   executeAction   — API / context menu.  Opens the logical-mutation boundary
  *                     AND the mutation journal.
- *   handleKeyDown   — keyboard shortcuts.  Opened neither.
- *   renderAction    — panel `updateData`.  Opened neither.
+ *   handleKeyDown   — keyboard shortcuts.  Opened neither; FIXED, tested below.
+ *   renderAction    — panel `updateData`.  Opens neither. STILL OPEN.
  *
  * All three already captured `invocationBase`, so the derived-intent diff was
  * intact; what the latter two lacked was the transport boundary (so a peer saw
@@ -42,7 +48,7 @@ const flipHorizontallyByKeyboard = () => {
   });
 };
 
-describe("FR-017 holds on the keyboard entry point", () => {
+describe("FR-017 holds on the keyboard entry point (panel path still open)", () => {
   it("a keyboard-dispatched action is ONE transport message", async () => {
     await render(<Excalidraw handleKeyboardGlobally />);
 

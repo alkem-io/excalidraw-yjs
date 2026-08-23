@@ -195,7 +195,11 @@ export class ActionManager {
 
   /**
    * Run one action's `perform` AND the application of its result as a single
-   * logical mutation. Every entry point must go through here.
+   * logical mutation.
+   *
+   * CURRENT SCOPE: `executeAction` (API / context menu) and `handleKeyDown`
+   * (shortcuts). `renderAction`'s `updateData` does NOT go through here — see
+   * the note at the bottom of this block. That is a known gap, not the design.
    *
    * ONE transport message per action. `perform` and the application of its
    * result are several Scene writes — a side-effect helper's mutation, the

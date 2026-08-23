@@ -278,14 +278,18 @@ describe("collaboration", () => {
     });
   });
 
-  // FIX 1 (native-Yjs core M3): the periodic full-scene safety net that
-  // `onDocUpdate` schedules on every local edit (the resync tick) must
-  // funnel through `Portal.broadcastSceneResync` (→ WS_SUBTYPES.UPDATE), which
-  // already-joined peers apply — NEVER `broadcastSceneInit` (→ INIT), which joined
-  // peers drop, so an INIT-routed resync silently never reconverges a replica that
-  // missed an incremental update. `portalResync.test.tsx` pins the Portal wire
-  // boundary (resync→UPDATE / init→INIT); this pins the Collab-side routing so a
-  // regression of the throttle target to `broadcastSceneInit` fails a test.
+  // FIX 1 (native-Yjs core M3): the periodic full-scene safety net.
+  //
+  // It runs on its OWN interval and is deliberately NOT scheduled from
+  // `onDocUpdate` — driving it from the edit path fired a full O(scene) re-send
+  // on the first edit of every burst, on top of the incremental update.
+  //
+  // It must funnel through `Portal.broadcastSceneResync` (→ WS_SUBTYPES.UPDATE),
+  // which already-joined peers apply — NEVER `broadcastSceneInit` (→ INIT),
+  // which joined peers drop, so an INIT-routed resync silently never reconverges
+  // a replica that missed an incremental update. `portalResync.test.tsx` pins the
+  // Portal wire boundary (resync→UPDATE / init→INIT); this pins the Collab-side
+  // routing, so retargeting the tick at `broadcastSceneInit` fails a test.
   it("runSceneResyncTick routes via broadcastSceneResync (UPDATE), not broadcastSceneInit (INIT) — FIX 1", async () => {
     await render(<ExcalidrawApp />);
 

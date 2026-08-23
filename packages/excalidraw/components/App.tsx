@@ -5195,18 +5195,14 @@ class App extends React.Component<AppProps, AppState> {
     const missing = Object.entries(this.scene.getAssetLocators()).filter(
       ([fileId, locator]) =>
         !this.files[fileId as keyof BinaryFiles] &&
-        !this.assetResolvesInFlight.has(`${fileId}\u0000${locator}`) &&
-        // A pair that already failed is NOT missing-and-fetchable. Without this
-        // the tail re-entry below recomputes an identical `missing` set and
-        // fires again immediately — an unbounded loop that, for a rejection
-        // which never reaches the network, is tight enough to freeze the tab.
-        !this.assetResolvesFailed.has(`${fileId}\u0000${locator}`),
+        !this.assetResolvesInFlight.has(`${fileId}\u0000${locator}`),
     );
     if (!missing.length) {
       return;
     }
     void (async () => {
       const resolved: BinaryFileData[] = [];
+      let locatorChangedMidFlight = false;
       await Promise.all(
         missing.map(async ([fileId, locator]) => {
           const key = `${fileId}\u0000${locator}`;
@@ -5214,21 +5210,22 @@ class App extends React.Component<AppProps, AppState> {
           try {
             const file = await adapter.resolve(fileId as FileId, locator);
             // The locator can change while a resolve is in flight. Dropping a
-            // stale result is what stops old bytes overwriting newer ones.
+            // stale result is what stops old bytes overwriting newer ones — and
+            // it is the ONE case that needs an immediate re-entry, because the
+            // new locator was never fetched and nothing else will trigger it.
             if (this.scene.getAssetLocators()[fileId] !== locator) {
+              locatorChangedMidFlight = true;
               return;
             }
             if (file.id !== fileId) {
               console.error(
                 `assetAdapter.resolve returned id "${file.id}" for "${fileId}"`,
               );
-              this.assetResolvesFailed.add(key);
               return;
             }
             resolved.push(file);
           } catch (error) {
             console.error(`assetAdapter.resolve failed for ${fileId}`, error);
-            this.assetResolvesFailed.add(key);
           } finally {
             this.assetResolvesInFlight.delete(key);
           }
@@ -5239,9 +5236,23 @@ class App extends React.Component<AppProps, AppState> {
         // to the host and re-publish a locator for something we just fetched.
         this.cacheResolvedFiles(resolved);
       }
-      // Reconcile again: a locator that changed mid-flight had its result
-      // discarded above, and nothing else would re-trigger a fetch for it.
-      if (!this.unmounted) {
+      // Reconcile again ONLY for a locator that changed mid-flight: its result
+      // was discarded above and nothing else would re-trigger a fetch for it.
+      //
+      // Re-entering UNCONDITIONALLY was an unbounded loop. A rejected or
+      // wrong-id resolve leaves the entry still "missing", so the re-entry
+      // recomputed an identical set and fired again immediately — for a
+      // rejection that never reaches the network, tight enough to freeze the
+      // tab (measured: it timed the test runner out).
+      //
+      // A failure is deliberately NOT remembered. The host adapter throws on
+      // ordinary transient trouble — a GraphQL lookup miss, an expired URL, a
+      // transport error — and its contract says nothing about rejection being
+      // permanent, so treating one as final would turn a blip into an image
+      // that never loads again for the life of the editor. Dropping the
+      // immediate re-entry is enough to stop the loop; any later scene update
+      // re-runs this through `scene.onUpdate` and retries the fetch once.
+      if (!this.unmounted && locatorChangedMidFlight) {
         this.refreshFilesFromScene();
       }
     })();
@@ -5249,17 +5260,6 @@ class App extends React.Component<AppProps, AppState> {
 
   /** `fileId\u0000locator` pairs in flight, so a changed locator refetches. */
   private assetResolvesInFlight = new Set<string>();
-
-  /**
-   * `fileId\u0000locator` pairs whose resolve REJECTED or returned the wrong id.
-   *
-   * Keyed by the pair, not the file: a new locator for the same file is a new
-   * key and is therefore still fetched, which is what keeps a republished asset
-   * working. Deliberately not a retry/backoff subsystem — the bug is that the
-   * tail re-entry treated a permanent failure as still-missing, so the minimal
-   * correct behaviour is to stop calling it missing.
-   */
-  private assetResolvesFailed = new Set<string>();
 
   /**
    * Refresh the collaborative/persistable appState subset (background + name)
