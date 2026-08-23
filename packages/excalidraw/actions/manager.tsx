@@ -166,9 +166,8 @@ export class ActionManager {
     // — `Scene.mutateElement` mutates its argument — and the "invocation base"
     // would equal the result, making the derived intent diff empty.
     const invocationBase = captureElementBase(elements);
-    this.updater(
+    this.runWithinActionBoundary(invocationBase, () =>
       data[0].perform(elements, appState, value, this.app),
-      invocationBase,
     );
     return true;
   }
@@ -189,27 +188,52 @@ export class ActionManager {
     // — `Scene.mutateElement` mutates its argument — and the "invocation base"
     // would equal the result, making the derived intent diff empty.
     const invocationBase = captureElementBase(elements);
-    // ONE transport message per action. `perform` and the application of its
-    // result are several Scene writes — a side-effect helper's mutation, the
-    // structural prelude for a created element, the result application — and a
-    // peer that sees them separately observes intermediate states, including
-    // elements referencing a container that does not exist yet.
-    //
-    // Only the SYNCHRONOUS span is wrapped. For an async action the updater
-    // registers a promise continuation and returns, so this `finally` closes the
-    // boundary before the result lands — the buffer is never held across an
-    // `await`. The `finally` also guarantees that a throw mid-action still
-    // publishes whatever Yjs already committed.
+    this.runWithinActionBoundary(invocationBase, () =>
+      action.perform(elements, appState, value, this.app),
+    );
+  }
+
+  /**
+   * Run one action's `perform` AND the application of its result as a single
+   * logical mutation. Every entry point must go through here.
+   *
+   * ONE transport message per action. `perform` and the application of its
+   * result are several Scene writes — a side-effect helper's mutation, the
+   * structural prelude for a created element, the result application — and a
+   * peer that sees them separately observes intermediate states, including
+   * elements referencing a container that does not exist yet.
+   *
+   * Only the SYNCHRONOUS span is wrapped. For an async action the updater
+   * registers a promise continuation and returns, so the `finally` closes the
+   * boundary before the result lands — the buffer is never held across an
+   * `await`. The `finally` also guarantees that a throw mid-action still
+   * publishes whatever Yjs already committed.
+   *
+   * Extracted so `handleKeyDown` shares it with `executeAction`. Both previously
+   * captured `invocationBase` but `handleKeyDown` opened NEITHER scope, so on
+   * that path a peer saw one message per internal write (FR-017 violated,
+   * measured: a keyboard flip emitted 2), and — worse, because it fails open —
+   * `applyElementChanges` skipped its entire ambiguity block, which is guarded
+   * on `alreadyAppliedIntent?.size`. An unopened journal is size 0, so every
+   * `overlapPolicy` an action declared was silently discarded and a key that
+   * throws "unresolved ownership" via the context menu was written via the
+   * shortcut.
+   *
+   * `renderAction`'s `updateData` is deliberately NOT routed through here yet:
+   * the same wrap regresses 10 `textWysiwyg` tests, so that entry point needs
+   * its own remedy rather than this one applied blind.
+   */
+  private runWithinActionBoundary(
+    invocationBase: ReturnType<typeof captureElementBase>,
+    perform: () => ReturnType<Action["perform"]>,
+  ) {
     this.app.scene.beginLogicalMutation();
     // Separate, orthogonal scope: records which keys each `mutateElement` call
     // DECLARES during this action, so the result application can tell an
     // already-applied helper write from a stale action-derived one.
     this.app.scene.beginActionMutationJournal();
     try {
-      this.updater(
-        action.perform(elements, appState, value, this.app),
-        invocationBase,
-      );
+      this.updater(perform(), invocationBase);
     } finally {
       // NESTED, not sequential: `endActionMutationJournal` throws on imbalance,
       // and a sequential pair would leave the transport boundary open forever —
@@ -250,6 +274,12 @@ export class ActionManager {
         // — `Scene.mutateElement` mutates its argument — and the "invocation base"
         // would equal the result, making the derived intent diff empty.
         const invocationBase = captureElementBase(invocationElements);
+        // NOT routed through `runWithinActionBoundary` — see its docblock. Wrapping
+        // this path regresses 10 `textWysiwyg` tests (9 snapshots): a panel
+        // `updateData` can fire while a wysiwyg editor is open, and buffering the
+        // doc writes across it changes what that flow observes. The FR-017 gap on
+        // this entry point is real but its remedy is not a straight wrap, so it is
+        // left measured rather than "fixed" with a regression attached.
         this.updater(
           action.perform(
             invocationElements,
