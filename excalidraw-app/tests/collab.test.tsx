@@ -279,20 +279,20 @@ describe("collaboration", () => {
   });
 
   // FIX 1 (native-Yjs core M3): the periodic full-scene safety net that
-  // `onDocUpdate` schedules on every local edit (`queueBroadcastSceneResync`) must
+  // `onDocUpdate` schedules on every local edit (the resync tick) must
   // funnel through `Portal.broadcastSceneResync` (→ WS_SUBTYPES.UPDATE), which
   // already-joined peers apply — NEVER `broadcastSceneInit` (→ INIT), which joined
   // peers drop, so an INIT-routed resync silently never reconverges a replica that
   // missed an incremental update. `portalResync.test.tsx` pins the Portal wire
   // boundary (resync→UPDATE / init→INIT); this pins the Collab-side routing so a
   // regression of the throttle target to `broadcastSceneInit` fails a test.
-  it("queueBroadcastSceneResync routes via broadcastSceneResync (UPDATE), not broadcastSceneInit (INIT) — FIX 1", async () => {
+  it("runSceneResyncTick routes via broadcastSceneResync (UPDATE), not broadcastSceneInit (INIT) — FIX 1", async () => {
     await render(<ExcalidrawApp />);
 
     const collab = window.collab;
     const { portal } = collab;
 
-    // Force the portal "open" so the throttled body actually runs.
+    // Force the portal "open" so the tick body actually runs.
     portal.isOpen = vi.fn(() => true);
     const resyncSpy = vi
       .spyOn(portal, "broadcastSceneResync")
@@ -301,17 +301,40 @@ describe("collaboration", () => {
       .spyOn(portal, "broadcastSceneInit")
       .mockResolvedValue(undefined);
 
-    // lodash `throttle` fires on the leading edge, so the first call runs the body
-    // synchronously.
-    collab.queueBroadcastSceneResync();
+    await collab.runSceneResyncTick();
 
     expect(resyncSpy).toHaveBeenCalledTimes(1);
     expect(initSpy).not.toHaveBeenCalled();
   });
 
+  // The resync encode THROWS on a peer-poisoned asset root (`encodeSceneAsUpdate`
+  // → `assertAssetRootValid`, and `applyRemoteUpdate` does not validate, so a peer
+  // can land one). This ran as a bare `void portal.broadcastSceneResync()` inside
+  // the interval, so the throw became an unhandled rejection: the resync safety
+  // net was silently dead and the user saw nothing.
+  it("a throwing resync encode surfaces on the error indicator instead of rejecting", async () => {
+    await render(<ExcalidrawApp />);
+
+    const collab = window.collab;
+    const { portal } = collab;
+
+    portal.isOpen = vi.fn(() => true);
+    vi.spyOn(portal, "broadcastSceneResync").mockRejectedValue(
+      new Error("Scene: asset root holds a non-string value"),
+    );
+    const indicatorSpy = vi.spyOn(collab, "setErrorIndicator");
+
+    // MUST NOT reject — an unhandled rejection here is the defect itself.
+    await expect(collab.runSceneResyncTick()).resolves.toBeUndefined();
+
+    expect(indicatorSpy).toHaveBeenCalledWith(
+      "Scene: asset root holds a non-string value",
+    );
+  });
+
   // FIX 1 + FIX 2 (native-Yjs core M3): exercise the `doc.on("update")` →
   // `onDocUpdate` CALL SITE itself (the FIX-1 test above calls
-  // `queueBroadcastSceneResync()` directly and never touches `onDocUpdate`). This
+  // `runSceneResyncTick()` directly and never touches `onDocUpdate`). This
   // pins the live wire routing of local doc updates:
   //   FIX 2 (origin filter): local edits broadcast via
   //     `broadcastSceneUpdate(WS_SUBTYPES.UPDATE, …)` — including a

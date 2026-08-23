@@ -26,13 +26,16 @@ import type { TCollabClass } from "../collab/Collab";
  * sanitize the root or soften the assertion), and a healthy encode neither
  * rejects nor raises the indicator.
  *
- * COVERAGE LIMIT, stated rather than faked: `Collab.runSceneResyncTick` and the
- * `new-user` handler's catch are NOT exercised here. This repo has no harness
- * that constructs a `Collab` (both are class properties assigned in its
- * constructor, so they cannot be reached off the prototype either), and a test
- * that re-implemented the tick inline would only assert my own copy of the
- * logic — it would pass whether or not the shipped code caught anything. Those
- * two call sites rest on typecheck plus the rejection contract pinned below.
+ * `Collab.runSceneResyncTick` IS covered, in `collab.test.tsx` — which renders
+ * `<ExcalidrawApp />` and reaches the real instance via `window.collab`. I first
+ * wrote here that no such harness existed and that the tick rested on typecheck
+ * alone; that was wrong, and I found the harness only when deleting a dead
+ * throttle broke a test using it. What is still NOT covered is the `new-user`
+ * handler's catch in `Portal`, which needs a socket to reach.
+ *
+ * I also wrote and then DELETED a test that re-implemented the tick inline: it
+ * would have asserted my own copy of the logic and passed whether or not the
+ * shipped code caught anything.
  */
 
 const POISON = "Scene: asset root holds a non-string value";

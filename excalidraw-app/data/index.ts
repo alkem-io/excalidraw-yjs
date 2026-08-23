@@ -63,51 +63,6 @@ export const getSyncableElements = (
     isSyncableElement(element),
   ) as SyncableExcalidrawElement[];
 
-/**
- * The fileIds still referenced by a LIVE (non-deleted, initialized) image element
- * in `elements`. This is the privacy gate for export: only an asset some
- * surviving element actually points at may be shipped. Mirrors
- * `exportToBackend`'s "files-from-live-elements" set so a pasted-then-deleted
- * image is not carried along.
- *
- * NOTE: this is no longer the gate for the collaboration wire or for persistence.
- * Since T023 the document holds `fileId -> locator` and never bytes, and orphan
- * references are reclaimed from the document itself by `Scene.collectGarbage`
- * (run as maintenance before the seed is encoded) rather than filtered out of one
- * encoding of it.
- */
-export const getReferencedFileIds = (
-  elements: readonly OrderedExcalidrawElement[],
-): Set<FileId> => {
-  const referenced = new Set<FileId>();
-  for (const element of elements) {
-    if (isInitializedImageElement(element) && !element.isDeleted) {
-      referenced.add(element.fileId);
-    }
-  }
-  return referenced;
-};
-
-/**
- * Filter a files map down to only those referenced by a live element in
- * `elements` (see {@link getReferencedFileIds}). A `BinaryFiles` value keyed by a
- * fileId no live element references — e.g. an image that was pasted then deleted,
- * or whose element was pruned — is dropped, so it is never broadcast or persisted.
- */
-export const filterReferencedFiles = <T>(
-  files: Readonly<Record<string, T>>,
-  elements: readonly OrderedExcalidrawElement[],
-): Record<string, T> => {
-  const referenced = getReferencedFileIds(elements);
-  const out: Record<string, T> = {};
-  for (const [id, file] of Object.entries(files)) {
-    if (referenced.has(id as FileId)) {
-      out[id] = file;
-    }
-  }
-  return out;
-};
-
 const BACKEND_V2_GET = import.meta.env.VITE_APP_BACKEND_V2_GET_URL;
 const BACKEND_V2_POST = import.meta.env.VITE_APP_BACKEND_V2_POST_URL;
 

@@ -3,13 +3,9 @@ import * as Y from "yjs";
 import { Scene } from "@excalidraw-yjs/element";
 import { API } from "@excalidraw-yjs/excalidraw/tests/helpers/api";
 
-import type {
-  FileId,
-  OrderedExcalidrawElement,
-} from "@excalidraw-yjs/element/types";
+import type { OrderedExcalidrawElement } from "@excalidraw-yjs/element/types";
 
 import { DELETED_ELEMENT_TIMEOUT } from "../app_constants";
-import { filterReferencedFiles, getReferencedFileIds } from "../data";
 
 /**
  * The native-Yjs collaboration WIRE SEED (INIT / periodic resync).
@@ -49,8 +45,6 @@ const encodeWireSeed = (
   scene.collectGarbage({ deletedBefore });
   return scene.encodeStateAsUpdate("v1");
 };
-
-const fileId = (s: string) => s as FileId;
 
 const imageEl = (
   id: string,
@@ -96,30 +90,6 @@ const applyToFreshScene = (update: Uint8Array) => {
 };
 
 describe("collaboration wire seed: deleted-content + orphaned-file filtering", () => {
-  it("getReferencedFileIds returns only files referenced by a LIVE image element", () => {
-    const live = imageEl("live", "f-live");
-    const deleted = imageEl("deleted", "f-deleted", { isDeleted: true });
-    const referenced = getReferencedFileIds([live, deleted]);
-
-    expect(referenced.has(fileId("f-live"))).toBe(true);
-    // a DELETED image's file is NOT referenced — its bytes must not leak.
-    expect(referenced.has(fileId("f-deleted"))).toBe(false);
-  });
-
-  it("filterReferencedFiles drops a pasted-then-deleted image's reference", () => {
-    const live = imageEl("live", "f-live");
-    const deleted = imageEl("deleted", "f-deleted", { isDeleted: true });
-    const refs = {
-      "f-live": "asset://f-live",
-      "f-deleted": "asset://f-deleted",
-    };
-
-    const filtered = filterReferencedFiles(refs, [live, deleted]);
-
-    expect(Object.keys(filtered)).toEqual(["f-live"]);
-    expect(filtered["f-deleted"]).toBeUndefined();
-  });
-
   it("FINDING #1: the wire seed excludes a deleted image's asset reference", () => {
     const live = imageEl("live", "f-live");
     // freshly deleted (within timeout) so the tombstone itself still syncs…

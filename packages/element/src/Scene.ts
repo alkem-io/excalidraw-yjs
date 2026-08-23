@@ -978,13 +978,14 @@ export class Scene {
           continue;
         }
         const record = resultById.get(id);
-        const current = this.getElement(id as never) as Record<
-          string,
-          unknown
-        > | null;
-        if (!record || !current) {
+        if (!record) {
           continue;
         }
+        // NOTE deliberately no `this.getElement(id)` guard here. It used to read
+        // the DERIVED snapshot cache and discard it, which made a doc-level
+        // ownership decision depend on a projection the class header is explicit
+        // is not the source of truth. The `!ymap` check below consults the doc
+        // itself and is both correct and sufficient.
         for (const key of keys) {
           if (!applied.has(key)) {
             continue;

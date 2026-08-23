@@ -425,7 +425,6 @@ class Collab extends PureComponent<CollabProps, CollabState> {
   };
 
   stopCollaboration = (keepRemoteState = true) => {
-    this.queueBroadcastSceneResync.cancel();
     this.queueSaveToFirebase.cancel();
     this.loadImageFiles.cancel();
     this.resetErrorIndicator(true);
@@ -1098,22 +1097,6 @@ class Collab extends PureComponent<CollabProps, CollabState> {
     return this.excalidrawAPI.encodeSceneStateAsUpdate("v1");
   };
 
-  /**
-   * Periodic full-scene resync safety net (native-Yjs core, M3). Throttled
-   * re-broadcast of the FULL doc state as a {@link WS_SUBTYPES.UPDATE}
-   * (`broadcastSceneResync`) so a peer that dropped an incremental update still
-   * converges. It MUST go via UPDATE, not INIT: an already-initialized peer drops
-   * INIT (honored only as its one-time first-in-room seed) but always applies
-   * UPDATE, so an INIT-based resync is silently dropped by every joined peer. A
-   * full-state update is an idempotent `REMOTE_ORIGIN` merge. Replaces the old
-   * `queueBroadcastAllElements` full-scene JSON re-broadcast.
-   */
-  queueBroadcastSceneResync = throttle(() => {
-    if (this.portal.isOpen()) {
-      void this.portal.broadcastSceneResync();
-    }
-  }, SYNC_FULL_SCENE_INTERVAL_MS);
-
   queueSaveToFirebase = throttle(
     () => {
       if (this.portal.socketInitialized) {
@@ -1140,6 +1123,18 @@ class Collab extends PureComponent<CollabProps, CollabState> {
 
   /**
    * One periodic full-scene resync, with its failure SURFACED.
+   *
+   * The safety net itself (native-Yjs core, M3): a re-broadcast of the FULL doc
+   * state so a peer that dropped an incremental update still converges. It MUST
+   * go via {@link WS_SUBTYPES.UPDATE}, not INIT — an already-initialized peer
+   * DROPS INIT (honored only as its one-time first-in-room seed) but always
+   * applies UPDATE, so an INIT-based resync is silently discarded by every joined
+   * peer. A full-state update is an idempotent `REMOTE_ORIGIN` merge. Replaces
+   * the old `queueBroadcastAllElements` full-scene JSON re-broadcast. (This
+   * contract was documented on a `queueBroadcastSceneResync` throttle that
+   * nothing ever invoked — only its `.cancel()` was called — so the throttle is
+   * gone and its one piece of real documentation lives here, on the interval
+   * that actually runs.)
    *
    * `encodeSceneAsUpdate` validates the asset root on every encode and THROWS on
    * a bad value — which a remote peer can cause, since `applyRemoteUpdate` does

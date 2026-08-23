@@ -27,19 +27,21 @@ const { h } = window;
  * state the receiver observes.
  */
 describe("one action, one logical mutation", () => {
-  // RED against current HEAD, deliberately. Measured on the real action:
+  // HISTORICAL, before the logical-mutation boundary existed. Measured then:
   //   senderUpdates: 4          (contract says at most 1)
   //   peerObservableStates: 4   (contract says at most 1)
   //   danglingContainerRefs: [ 'state#0: text-1 -> missing id2',
   //                            'state#1: text-1 -> missing id2' ]
   //
-  // The peer twice observes a text element pointing at a container that does not
-  // exist. `wrapTextInContainer` writes to the doc DURING `perform`
-  // (scene.mutateElement, redrawTextBoundingBox) — those are already committed,
-  // broadcast LOCAL transactions by the time `syncActionResult` runs, so
-  // `commitPlan` cannot retroactively make them atomic. See spec 002 T016k.
-  // Asserts the CURRENT BROKEN numbers on purpose, so it passes today and FAILS
-  // the moment the defect is fixed — flip them to the contract values (1, 1, 0)
+  // The peer twice OBSERVED a text element pointing at a container that did not
+  // exist yet. `wrapTextInContainer` writes to the doc DURING `perform`
+  // (scene.mutateElement, redrawTextBoundingBox), and those were already
+  // committed, broadcast LOCAL transactions by the time `syncActionResult` ran,
+  // so `commitPlan` could not retroactively make them atomic. See spec 002 T016k.
+  //
+  // FIXED by the Scene-level boundary, which buffers delivery across the whole
+  // action. This asserts the CONTRACT values (1, 1, 0); the assertions below are
+  // the source of truth, not this comment.
   it("wrapTextInContainer is ONE logical mutation for the peer", async () => {
     await render(<Excalidraw handleKeyboardGlobally />);
 

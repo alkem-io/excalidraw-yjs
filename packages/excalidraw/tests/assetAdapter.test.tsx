@@ -232,10 +232,18 @@ describe("assetAdapter", () => {
   // discards them and the fresh Scene generation never receives them, so the
   // mirror has nothing to resolve and a persisted image never reappears.
   //
-  // The fix is T020 — adopting the stored bytes INTO the doc via applyUpdateV2,
-  // which puts the references in the document as a side effect of restoring the
-  // scene rather than requiring a separate seeding call. Seeding them by hand
-  // here would paper over that and publish a load as if it were an edit.
+  // RATIONALE CORRECTED: this used to say "the fix is T020". T020 (adopting the
+  // stored bytes into the doc via `applyUpdateV2`) has LANDED — App.tsx calls
+  // `scene.applyRemoteUpdate(encodedScene.update, ...)` and `firebase.ts` carries
+  // `docBytes` — and un-skipping this still fails with
+  // `expected {} to deeply equal { f1: 'asset://f1' }` (measured).
+  //
+  // It fails because this fixture is the RECORD branch of `initialData`
+  // (`{ elements: [...] }`), which T020's encoded-document adoption never
+  // touches: a record-shaped initialData carries no locators to adopt in the
+  // first place. Closing this needs the record branch to seed locators, or the
+  // fixture rewritten around `encodedScene`. Seeding them by hand here would
+  // still paper over it and publish a load as if it were an edit.
   it.skip("a cold load restores references so persisted images resolve", async () => {
     const { adapter, calls } = makeAdapter();
     await render(
