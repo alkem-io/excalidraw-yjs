@@ -10,19 +10,21 @@ import { render } from "./test-utils";
 const { h } = window;
 
 /**
- * T016m — the paste/import commit site must be ONE logical mutation for a peer.
+ * The paste/import commit site must be ONE logical mutation for a peer.
  *
  * `App.addElementsFromPasteOrLibrary` calls `scene.replaceAllElements(...)`, the
- * authoritative whole-scene path T016 replaces. Measured today: an import that
- * adds ids emits 2 transport updates, and the already-known structural/reveal
- * split for new ids (FR-017) is the leading cause.
+ * authoritative whole-scene path. It ORIGINALLY measured 2 transport updates for
+ * an import that adds ids — the structural/reveal split for new ids was the
+ * leading cause — and the logical-mutation boundary has since collapsed it to one.
+ *
+ * Contract: specs/002-native-yjs-lineage/spec.md FR-017.
  */
-describe("T016m — paste/import is one logical mutation for a peer", () => {
+describe("paste/import is one logical mutation for a peer", () => {
   // Was SKIPPED as the desired contract; it now PASSES, satisfied by the
   // logical-mutation boundary (FR-017) rather than by migrating the commit site.
   // Non-vacuity re-proven when un-skipping: disabling the boundary's buffering
   // in `Scene.ensureInternalDocHandler` returns this to `expected 2 to be 1` —
-  // exactly the count T016m originally measured.
+  // exactly the count this test originally measured.
   it("a multi-element import reaches the peer as ONE update", async () => {
     await render(<Excalidraw handleKeyboardGlobally />);
     API.setElements([API.createElement({ type: "rectangle", id: "pre" })]);
@@ -54,7 +56,7 @@ describe("T016m — paste/import is one logical mutation for a peer", () => {
 
     // EXACTLY one receiver state, asserted by equality rather than by
     // `.every(...)` — which passes on an EMPTY array and would prove nothing
-    // about the receiver at all (the sender-count-only hole recorded in T016g).
+    // about the receiver at all (the sender-count-only hole this file closes).
     expect(peerStates).toEqual([4]);
 
     // ...and the peer converges on the sender's exact content.

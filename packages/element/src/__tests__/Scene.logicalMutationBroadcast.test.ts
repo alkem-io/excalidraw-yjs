@@ -48,11 +48,12 @@ describe("INV-ONE-BROADCAST — one logical mutation, one transport message", ()
     scene.destroy();
   });
 
-  // SKIPPED — confirmed live defect, see FR-017 / T016g. Currently emits 2: the
-  // STRUCTURAL tombstone prelude and the LOCAL reveal each broadcast on commit.
-  // The fix is a Scene-level logical-mutation boundary: capture the pre-action
-  // state vector, suppress delivery across both transactions, emit ONE delta from
-  // that vector after the reveal.
+  // WAS a confirmed defect, and this test was SKIPPED while it stood: a creation
+  // emitted 2 — the STRUCTURAL tombstone prelude and the LOCAL reveal each
+  // broadcast on commit. The Scene-level logical-mutation boundary fixed it by
+  // capturing the pre-action state vector, suppressing delivery across both
+  // transactions, and emitting ONE delta from that vector after the reveal.
+  // Contract: specs/002-native-yjs-lineage/spec.md FR-017.
   it("an element creation emits exactly one", () => {
     const scene = new Scene();
     const updates: Uint8Array[] = [];

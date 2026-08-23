@@ -25,13 +25,15 @@ vi.mock("../clipboard", async () => {
 });
 
 /**
- * T016d — an async action that returns its INVOCATION-time element array can
- * revert work that landed while it was awaiting.
+ * An async action that returns its INVOCATION-time element array can revert
+ * work that landed while it was awaiting.
  *
  * `actionCopyElementLink.perform` is async and awaits the clipboard write. Its
  * catch path then returns `elements` — the array captured at invocation — so
  * anything that reached the doc during the await is overwritten when
  * `syncActionResult` applies that array.
+ *
+ * Contract: specs/002-native-yjs-lineage/spec.md FR-016.
  */
 describe("async actions must not return their invocation-time array", () => {
   it("a remote change landing during the await survives the catch path", async () => {
