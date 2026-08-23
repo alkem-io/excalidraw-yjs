@@ -224,7 +224,7 @@ export class ActionManager {
    * its own remedy rather than this one applied blind.
    */
   private runWithinActionBoundary(
-    invocationBase: ReturnType<typeof captureElementBase>,
+    invocationBase: readonly OrderedExcalidrawElement[] | undefined,
     perform: () => ReturnType<Action["perform"]>,
   ) {
     this.app.scene.beginLogicalMutation();

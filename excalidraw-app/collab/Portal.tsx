@@ -42,7 +42,19 @@ class Portal {
     this.socket.on("new-user", async (_socketId: string) => {
       // Native-Yjs core (M3): seed a newly-joined peer with the FULL scene-doc
       // state (`encodeStateAsUpdate`), not an element-JSON snapshot.
-      this.broadcastSceneInit();
+      //
+      // Awaited and caught: `encodeSceneAsUpdate` throws on a peer-poisoned asset
+      // root, and un-awaited this became an unhandled rejection — the new joiner
+      // was never seeded and nothing surfaced. Routed to the same indicator the
+      // periodic resync uses; the schema assertion itself stays fail-loud.
+      try {
+        await this.broadcastSceneInit();
+      } catch (error: any) {
+        console.error(error);
+        this.collab.setErrorIndicator(
+          error?.message ?? "Could not seed a new collaborator.",
+        );
+      }
     });
     this.socket.on("room-user-change", (clients: SocketId[]) => {
       this.collab.setCollaborators(clients);

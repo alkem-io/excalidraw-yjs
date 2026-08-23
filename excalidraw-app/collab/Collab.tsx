@@ -670,9 +670,7 @@ class Collab extends PureComponent<CollabProps, CollabState> {
       window.clearInterval(this.sceneResyncIntervalId);
     }
     this.sceneResyncIntervalId = window.setInterval(() => {
-      if (this.portal.isOpen()) {
-        void this.portal.broadcastSceneResync();
-      }
+      void this.runSceneResyncTick();
     }, SYNC_FULL_SCENE_INTERVAL_MS);
 
     // fallback in case you're not alone in the room but still don't receive
@@ -1139,6 +1137,35 @@ class Collab extends PureComponent<CollabProps, CollabState> {
   };
 
   getActiveRoomLink = () => this.state.activeRoomLink;
+
+  /**
+   * One periodic full-scene resync, with its failure SURFACED.
+   *
+   * `encodeSceneAsUpdate` validates the asset root on every encode and THROWS on
+   * a bad value — which a remote peer can cause, since `applyRemoteUpdate` does
+   * not validate (only encode does) and `assertAssetRootValid`'s own docblock
+   * records that "a remote peer can put an arbitrary value in the asset root".
+   *
+   * This ran as a bare `void this.portal.broadcastSceneResync()` inside the
+   * interval, so the throw became an unhandled rejection: every tick threw into
+   * the console, the resync safety net was silently dead, and the user saw
+   * nothing at all. The assertion is deliberately NOT softened and the root is
+   * NOT sanitized — fail loud is correct here; what was missing was routing that
+   * failure to the indicator the app already has.
+   */
+  runSceneResyncTick = async () => {
+    if (!this.portal.isOpen()) {
+      return;
+    }
+    try {
+      await this.portal.broadcastSceneResync();
+    } catch (error: any) {
+      console.error(error);
+      this.setErrorIndicator(
+        error?.message ?? "Could not sync the scene to other collaborators.",
+      );
+    }
+  };
 
   setErrorIndicator = (errorMessage: string | null) => {
     appJotaiStore.set(collabErrorIndicatorAtom, {

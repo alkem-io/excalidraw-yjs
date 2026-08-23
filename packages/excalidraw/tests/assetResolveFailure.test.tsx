@@ -7,7 +7,7 @@ import { Excalidraw } from "../index";
 
 import { act, render } from "./test-utils";
 
-import type { AssetAdapter, BinaryFileData, FileId } from "../types";
+import type { AssetAdapter, BinaryFileData } from "../types";
 
 const { h } = window;
 
@@ -109,7 +109,7 @@ describe("a failing assetAdapter.resolve is not retried forever", () => {
     let failing = true;
     const adapter: AssetAdapter = {
       store: async (f) => `asset://${f.id}`,
-      resolve: async (fileId: FileId) => {
+      resolve: async (fileId) => {
         calls.push(fileId);
         if (failing) {
           throw new Error("gone");
