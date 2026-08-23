@@ -2520,6 +2520,20 @@ export class Scene {
           if (writes === 0) {
             return;
           }
+          // Keep the deletion sidecar in step with the `isDeleted` this write may
+          // have just flipped — in the SAME transaction, exactly as `commitPlan`
+          // and `replaceAllElements` do. Without it a tombstone written through
+          // this path carries no timestamp, and `decodeSnapshot` throws on the
+          // cold-load AND post-save re-decode paths (making the board unloadable
+          // and every save fail) while `collectGarbage`, which iterates the
+          // sidecar, can never reclaim it. The producer is not hypothetical:
+          // `server`'s MCP whiteboard writer tombstones through this path (its
+          // `remove` op) and never calls one that syncs the marker.
+          //
+          // Unconditional by design: `syncDeletionMarker` is a no-op unless the
+          // marker and the doc's current `isDeleted` disagree, and it deliberately
+          // does not re-stamp an element that is already marked.
+          this.syncDeletionMarker(element as unknown as ElementRecord);
           // Refresh the locally-maintained reconciliation metadata + own-Symbol
           // props from the just-normalized scratch object (the doc does not store
           // them); the recompute re-attaches them to the fresh snapshot.
