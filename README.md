@@ -166,7 +166,7 @@ Publishing is coordinated because the packages depend on one another through `wo
 
 - Qualifying package/build pull requests and manual workflow runs publish immutable `pkg.pr.new` preview artifacts. Consume the exact identifier emitted by the workflow; do not construct a preview URL from a branch name or commit yourself.
 - A `v*` tag publishes the coordinated package set to npm through the `Release Excalidraw Yjs packages` workflow with npm trusted publishing and provenance. A rerun safely skips versions already present in the registry, then waits for each dependency to become visible before publishing its consumers.
-- `@excalidraw-yjs/excalidraw` follows this hard fork's own SemVer, beginning at `0.5.0`. `packages/excalidraw/package.json` separately records the full upstream Excalidraw commit used as the synchronization baseline. Compare that SHA with current upstream to audit functionality added since the last synchronization; bump the package version for releases of this fork even when the upstream baseline has not changed. Neither value is derived from the Git tag.
+- The coordinated `@excalidraw-yjs/*` package set follows this hard fork's own SemVer, beginning at `0.5.0` for all five published packages. Each package records the full upstream Excalidraw commit used as the synchronization baseline. Compare that SHA with current upstream to audit functionality added since the last synchronization; bump the package-set version for releases of this fork even when the upstream baseline has not changed. Version and upstream provenance are independent.
 
 The historical soft-fork workflow—merging an Alkemio branch into an upstream release commit, using Yarn, and publishing a single manually packed package—does not apply to this repository.
 

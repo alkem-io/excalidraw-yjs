@@ -11,10 +11,10 @@ name: Release Excalidraw Yjs packages
 # those workspace specifiers to the matching published / preview versions when the
 # whole set is published together.
 #
-# Versioning: @excalidraw-yjs/excalidraw follows its own SemVer, maintained in
-# packages/excalidraw/package.json. The same file records the exact upstream
-# Excalidraw commit used as the synchronization baseline. Neither value is derived
-# from the git tag; update and commit them deliberately before tagging.
+# Versioning: the coordinated @excalidraw-yjs/* release set follows this hard
+# fork's own SemVer. Every published package records the exact upstream Excalidraw
+# commit used as the synchronization baseline. Package versions and upstream
+# provenance are independent; update and commit them deliberately before tagging.
 
 on:
   push:
