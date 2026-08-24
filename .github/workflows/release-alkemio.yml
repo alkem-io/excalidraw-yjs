@@ -144,7 +144,7 @@ jobs:
           STATUS=$?
           set -e
           echo "$OUTPUT"
-          URLS=$(echo "$OUTPUT" | grep -oE 'https://pkg\.pr\.new/[^ ]+')
+          URLS=$(echo "$OUTPUT" | grep -oE 'https://pkg\.pr\.new/[^ ]+' || true)
 
           if [ "$STATUS" -eq 0 ] && [ -n "$URLS" ]; then
             {
