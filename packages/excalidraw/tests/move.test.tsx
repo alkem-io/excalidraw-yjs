@@ -1,13 +1,13 @@
 import React from "react";
 import { vi } from "vitest";
-import { KEYS, reseed } from "@excalidraw/common";
-import { bindBindingElement } from "@excalidraw/element";
-import "@excalidraw/utils/test-utils";
+import { KEYS, reseed } from "@excalidraw-yjs/common";
+import { bindBindingElement } from "@excalidraw-yjs/element";
+import "@excalidraw-yjs/utils/test-utils";
 
 import type {
   ExcalidrawArrowElement,
   NonDeleted,
-} from "@excalidraw/element/types";
+} from "@excalidraw-yjs/element/types";
 
 import { Excalidraw } from "../index";
 import * as InteractiveCanvas from "../renderer/interactiveScene";
@@ -47,7 +47,7 @@ describe("move element", () => {
       fireEvent.pointerUp(canvas);
 
       expect(renderInteractiveScene.mock.calls.length).toMatchInlineSnapshot(
-        `5`,
+        `6`,
       );
       expect(renderStaticScene.mock.calls.length).toMatchInlineSnapshot(`5`);
       expect(h.state.selectionElement).toBeNull();
@@ -102,7 +102,7 @@ describe("move element", () => {
     new Pointer("mouse").clickOn(rectB);
 
     expect(renderInteractiveScene.mock.calls.length).toMatchInlineSnapshot(
-      `16`,
+      `18`,
     );
     expect(renderStaticScene.mock.calls.length).toMatchInlineSnapshot(`15`);
     expect(h.state.selectionElement).toBeNull();
@@ -156,7 +156,7 @@ describe("duplicate element on move when ALT is clicked", () => {
       fireEvent.pointerUp(canvas);
 
       expect(renderInteractiveScene.mock.calls.length).toMatchInlineSnapshot(
-        `5`,
+        `6`,
       );
       expect(renderStaticScene.mock.calls.length).toMatchInlineSnapshot(`5`);
       expect(h.state.selectionElement).toBeNull();

@@ -1,7 +1,14 @@
-import { pointDistance, pointFrom, type GlobalPoint } from "@excalidraw/math";
-import { invariant } from "@excalidraw/common";
+import {
+  pointDistance,
+  pointFrom,
+  type GlobalPoint,
+} from "@excalidraw-yjs/math";
+import { invariant } from "@excalidraw-yjs/common";
 
-import type { AppState, NullableGridSize } from "@excalidraw/excalidraw/types";
+import type {
+  AppState,
+  NullableGridSize,
+} from "@excalidraw-yjs/excalidraw/types";
 
 import {
   bindBindingElement,

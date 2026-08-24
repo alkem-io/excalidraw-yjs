@@ -1,19 +1,19 @@
-import { clamp, round } from "@excalidraw/math";
+import { clamp, round } from "@excalidraw-yjs/math";
 
-import { MIN_WIDTH_OR_HEIGHT } from "@excalidraw/common";
+import { MIN_WIDTH_OR_HEIGHT } from "@excalidraw-yjs/common";
 import {
   MINIMAL_CROP_SIZE,
   getUncroppedWidthAndHeight,
-} from "@excalidraw/element";
-import { resizeSingleElement } from "@excalidraw/element";
-import { isImageElement } from "@excalidraw/element";
-import { isFrameLikeElement } from "@excalidraw/element";
-import { getElementsInResizingFrame } from "@excalidraw/element";
-import { replaceAllElementsInFrame } from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
+import { resizeSingleElement } from "@excalidraw-yjs/element";
+import { isImageElement } from "@excalidraw-yjs/element";
+import { isFrameLikeElement } from "@excalidraw-yjs/element";
+import { getElementsInResizingFrame } from "@excalidraw-yjs/element";
+import { replaceAllElementsInFrame } from "@excalidraw-yjs/element";
 
-import type { ExcalidrawElement } from "@excalidraw/element/types";
+import type { ExcalidrawElement } from "@excalidraw-yjs/element/types";
 
-import type { Scene } from "@excalidraw/element";
+import type { Scene } from "@excalidraw-yjs/element";
 
 import DragInput from "./DragInput";
 import { getStepSizedValue, isPropertyEditable } from "./utils";
@@ -193,11 +193,14 @@ const handleDimensionChange: DragInputCallbackType<
         },
       );
 
-      // Handle frame membership update for resized frames
-      if (isFrameLikeElement(latestElement)) {
+      // Handle frame membership update for resized frames.
+      // fresh-snapshot: re-read post-mutation (resizeSingleElement wrote the
+      // frame's new geometry to the doc; the passed ref is stale scratch).
+      const latestFrame = scene.getElement(latestElement.id);
+      if (latestFrame && isFrameLikeElement(latestFrame)) {
         const nextElementsInFrame = getElementsInResizingFrame(
           scene.getElementsIncludingDeleted(),
-          latestElement,
+          latestFrame,
           originalAppState,
           scene.getNonDeletedElementsMap(),
         );
@@ -205,7 +208,7 @@ const handleDimensionChange: DragInputCallbackType<
         const updatedElements = replaceAllElementsInFrame(
           scene.getElementsIncludingDeleted(),
           nextElementsInFrame,
-          latestElement,
+          latestFrame,
         );
 
         scene.replaceAllElements(updatedElements);
@@ -261,11 +264,13 @@ const handleDimensionChange: DragInputCallbackType<
         },
       );
 
-      // Handle highlighting frame element candidates
-      if (isFrameLikeElement(latestElement)) {
+      // Handle highlighting frame element candidates.
+      // fresh-snapshot: re-read post-mutation (the passed ref is stale scratch).
+      const latestFrame = scene.getElement(latestElement.id);
+      if (latestFrame && isFrameLikeElement(latestFrame)) {
         const nextElementsInFrame = getElementsInResizingFrame(
           scene.getElementsIncludingDeleted(),
-          latestElement,
+          latestFrame,
           originalAppState,
           scene.getNonDeletedElementsMap(),
         );

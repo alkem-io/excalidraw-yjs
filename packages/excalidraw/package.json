@@ -1,11 +1,17 @@
 {
-  "name": "@alkemio/excalidraw",
+  "name": "@excalidraw-yjs/excalidraw",
   "version": "0.18.0-864353b-alkemio-16",
   "type": "module",
   "types": "./dist/types/excalidraw/index.d.ts",
   "main": "./dist/prod/index.js",
   "module": "./dist/prod/index.js",
   "exports": {
+    "./headless": {
+      "types": "./dist/types/excalidraw/headless.d.ts",
+      "development": "./dist/dev/headless.js",
+      "production": "./dist/prod/headless.js",
+      "default": "./dist/prod/headless.js"
+    },
     "./common/*": {
       "types": "./dist/types/common/src/*.d.ts"
     },
@@ -66,12 +72,12 @@
       "last 1 safari version"
     ]
   },
-  "repository": "https://github.com/excalidraw/excalidraw",
-  "bugs": "https://github.com/excalidraw/excalidraw/issues",
-  "homepage": "https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw",
+  "repository": "https://github.com/alkem-io/excalidraw-yjs",
+  "bugs": "https://github.com/alkem-io/excalidraw-yjs/issues",
+  "homepage": "https://github.com/alkem-io/excalidraw-yjs/tree/main/packages/excalidraw",
   "scripts": {
     "gen:types": "rimraf types && tsc",
-    "build:esm": "rimraf dist && node ../../scripts/buildPackage.js && yarn gen:types"
+    "build:esm": "rimraf dist && node ../../scripts/buildPackage.js && pnpm run gen:types"
   },
   "peerDependencies": {
     "react": "^17.0.2 || ^18.2.0 || ^19.0.0",
@@ -84,16 +90,15 @@
     "@codemirror/state": "^6.0.0",
     "@codemirror/view": "^6.0.0",
     "@lezer/highlight": "^1.0.0",
-    "@excalidraw/common": "0.18.0",
-    "@excalidraw/element": "0.18.0",
+    "@excalidraw-yjs/common": "workspace:*",
+    "@excalidraw-yjs/element": "workspace:*",
     "@excalidraw/laser-pointer": "1.3.1",
-    "@excalidraw/math": "0.18.0",
+    "@excalidraw-yjs/math": "workspace:*",
     "@excalidraw/mermaid-to-excalidraw": "2.2.2",
     "@excalidraw/random-username": "1.1.0",
     "browser-fs-access": "0.38.0",
     "canvas-roundrect-polyfill": "0.0.1",
     "clsx": "1.1.1",
-    "cross-env": "7.0.3",
     "es6-promise-pool": "2.5.0",
     "fuzzy": "0.1.3",
     "image-blob-reduce": "3.0.1",
@@ -112,7 +117,6 @@
     "pwacompat": "2.0.17",
     "radix-ui": "1.4.3",
     "roughjs": "4.6.4",
-    "sass": "1.51.0",
     "tunnel-rat": "0.1.2"
   },
   "devDependencies": {
@@ -135,13 +139,7 @@
     "fonteditor-core": "2.4.1",
     "harfbuzzjs": "0.3.6",
     "jest-diff": "29.7.0",
+    "sass": "1.51.0",
     "typescript": "5.9.3"
-  },
-  "repository": "https://github.com/alkem-io/excalidraw-fork",
-  "bugs": "https://github.com/alkem-io/excalidraw-fork/issues",
-  "homepage": "https://github.com/alkem-io/excalidraw-fork/tree/master/packages/excalidraw",
-  "scripts": {
-    "gen:types": "rimraf types && tsc",
-    "build:esm": "rimraf dist && node ../../scripts/buildPackage.js && yarn gen:types"
   }
 }

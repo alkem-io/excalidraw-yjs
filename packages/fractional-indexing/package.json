@@ -1,5 +1,5 @@
 {
-  "name": "@excalidraw/fractional-indexing",
+  "name": "@excalidraw-yjs/fractional-indexing",
   "version": "3.3.0",
   "description": "Provides functions for generating ordering strings",
   "type": "module",
@@ -11,7 +11,7 @@
   },
   "scripts": {
     "gen:types": "rimraf types && tsc",
-    "build:esm": "rimraf dist && node ../../scripts/buildBase.js && yarn gen:types"
+    "build:esm": "rimraf dist && node ../../scripts/buildBase.js && pnpm run gen:types"
   },
   "keywords": [
     "fractional",
@@ -20,8 +20,8 @@
     "order"
   ],
   "homepage": "https://github.com/rocicorp/fractional-indexing#readme",
-  "bugs": "https://github.com/excalidraw/excalidraw/issues",
-  "repository": "https://github.com/excalidraw/excalidraw",
+  "bugs": "https://github.com/alkem-io/excalidraw-yjs/issues",
+  "repository": "https://github.com/alkem-io/excalidraw-yjs",
   "author": "arv@rocicorp.dev",
   "license": "CC0-1.0",
   "devDependencies": {

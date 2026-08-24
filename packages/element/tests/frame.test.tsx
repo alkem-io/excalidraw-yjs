@@ -1,18 +1,22 @@
 import {
   convertToExcalidrawElements,
   Excalidraw,
-} from "@excalidraw/excalidraw";
-import { arrayToMap } from "@excalidraw/common";
+} from "@excalidraw-yjs/excalidraw";
+import { arrayToMap } from "@excalidraw-yjs/common";
 
-import { API } from "@excalidraw/excalidraw/tests/helpers/api";
-import { Keyboard, Pointer, UI } from "@excalidraw/excalidraw/tests/helpers/ui";
-import { getTextEditor } from "@excalidraw/excalidraw/tests/queries/dom";
+import { API } from "@excalidraw-yjs/excalidraw/tests/helpers/api";
+import {
+  Keyboard,
+  Pointer,
+  UI,
+} from "@excalidraw-yjs/excalidraw/tests/helpers/ui";
+import { getTextEditor } from "@excalidraw-yjs/excalidraw/tests/queries/dom";
 import {
   getCloneByOrigId,
   render,
-} from "@excalidraw/excalidraw/tests/test-utils";
+} from "@excalidraw-yjs/excalidraw/tests/test-utils";
 
-import { getSelectedElements } from "@excalidraw/excalidraw/scene";
+import { getSelectedElements } from "@excalidraw-yjs/excalidraw/scene";
 
 import { elementOverlapsWithFrame } from "../src/frame";
 
@@ -614,8 +618,8 @@ describe("adding elements to frames", () => {
 
       resizeFrameOverElement(frame, arrow);
 
-      expect(arrow.frameId).toBe(frame.id);
-      expect(text.frameId).toBe(frame.id);
+      expect(API.getElement(arrow).frameId).toBe(frame.id);
+      expect(API.getElement(text).frameId).toBe(frame.id);
       expectEqualIds([arrow, text, frame]);
     });
 
@@ -689,7 +693,7 @@ describe("adding elements to frames", () => {
 
       dragElementIntoFrame(frame, rect2);
 
-      expect(rect2.frameId).toBe(frame.id);
+      expect(API.getElement(rect2).frameId).toBe(frame.id);
     });
 
     it("should move an element dragged from one frame into another", () => {
@@ -717,7 +721,7 @@ describe("adding elements to frames", () => {
 
       dragElementIntoFrame(otherFrame, frameChild);
 
-      expect(frameChild.frameId).toBe(otherFrame.id);
+      expect(API.getElement(frameChild).frameId).toBe(otherFrame.id);
     });
 
     it("should layer a dragged element above the highest frame child", () => {
@@ -735,14 +739,17 @@ describe("adding elements to frames", () => {
 
       dragElementIntoFrame(frame, rect2);
 
-      expect(rect2.frameId).toBe(frame.id);
+      const liveRect2 = API.getElement(rect2);
+      const liveFrameChild = API.getElement(frameChild);
+      const liveFrame = API.getElement(frame);
+      expect(liveRect2.frameId).toBe(frame.id);
       expect(h.elements.map((element) => element.id)).toEqual([
         frame.id,
         frameChild.id,
         rect2.id,
       ]);
-      expect(rect2.index! > frameChild.index!).toBe(true);
-      expect(rect2.index! > frame.index!).toBe(true);
+      expect(liveRect2.index! > liveFrameChild.index!).toBe(true);
+      expect(liveRect2.index! > liveFrame.index!).toBe(true);
     });
 
     it("should preview a dragged element above the highest frame child before pointerup", () => {
@@ -909,9 +916,9 @@ describe("adding elements to frames", () => {
       mouse.moveTo(frame.x + frame.width - 5, nonFrameElement.y + 10);
       mouse.up();
 
-      expect(frameChild.frameId).toBe(frame.id);
-      expect(boundText.frameId).toBe(frame.id);
-      expect(nonFrameElement.frameId).toBe(frame.id);
+      expect(API.getElement(frameChild).frameId).toBe(frame.id);
+      expect(API.getElement(boundText).frameId).toBe(frame.id);
+      expect(API.getElement(nonFrameElement).frameId).toBe(frame.id);
       expect(h.elements.map((element) => element.id)).toEqual([
         frame.id,
         otherFrameChild.id,
@@ -996,7 +1003,7 @@ describe("adding elements to frames", () => {
       mouse.moveTo(20, 20);
       mouse.upAt(20, 20);
 
-      expect(rect2.frameId).toBe(frame.id);
+      expect(API.getElement(rect2).frameId).toBe(frame.id);
     });
 
     it("should keep dragging a frame child over a non-frame element above its frame", () => {

@@ -1,20 +1,20 @@
-import { exportToCanvas, exportToSvg } from "@excalidraw/utils";
+import { exportToCanvas, exportToSvg } from "@excalidraw-yjs/utils";
 
 import {
   applyDarkModeFilter,
   FONT_FAMILY,
   FRAME_STYLE,
-} from "@excalidraw/common";
+} from "@excalidraw-yjs/common";
 
-import { pointFrom } from "@excalidraw/math";
+import { pointFrom } from "@excalidraw-yjs/math";
 
 import type {
   ExcalidrawTextElement,
   FractionalIndex,
   NonDeletedExcalidrawElement,
-} from "@excalidraw/element/types";
+} from "@excalidraw-yjs/element/types";
 
-import type { LocalPoint } from "@excalidraw/math";
+import type { LocalPoint } from "@excalidraw-yjs/math";
 
 import { prepareElementsForExport } from "../../data";
 import * as exportUtils from "../../scene/export";

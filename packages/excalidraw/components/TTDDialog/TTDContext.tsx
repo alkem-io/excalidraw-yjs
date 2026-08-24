@@ -1,4 +1,4 @@
-import { randomId } from "@excalidraw/common";
+import { randomId } from "@excalidraw-yjs/common";
 
 import { atom } from "../../editor-jotai";
 

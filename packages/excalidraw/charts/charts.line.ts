@@ -1,10 +1,10 @@
-import { pointFrom } from "@excalidraw/math";
+import { pointFrom } from "@excalidraw-yjs/math";
 
-import { isDevEnv } from "@excalidraw/common";
+import { isDevEnv } from "@excalidraw-yjs/common";
 
-import { newElement, newLinearElement } from "@excalidraw/element";
+import { newElement, newLinearElement } from "@excalidraw-yjs/element";
 
-import type { LocalPoint } from "@excalidraw/math";
+import type { LocalPoint } from "@excalidraw-yjs/math";
 
 import { GRID_OPACITY, commonProps } from "./charts.constants";
 import {

@@ -72,13 +72,13 @@ const getConfig = (outdir) => ({
   assetNames: "[dir]/[name]",
   chunkNames: "[dir]/[name]-[hash]",
   alias: {
-    "@excalidraw/utils": path.resolve(__dirname, "../packages/utils/src"),
+    "@excalidraw-yjs/utils": path.resolve(__dirname, "../packages/utils/src"),
   },
   external: [
-    "@excalidraw/common",
-    "@excalidraw/element",
-    "@excalidraw/math",
-    "@excalidraw/fractional-indexing",
+    "@excalidraw-yjs/common",
+    "@excalidraw-yjs/element",
+    "@excalidraw-yjs/math",
+    "@excalidraw-yjs/fractional-indexing",
   ],
   loader: {
     ".woff2": "file",
@@ -107,7 +107,12 @@ function buildProd(config) {
 
 const createESMRawBuild = async () => {
   const chunksConfig = {
-    entryPoints: ["index.tsx", "**/*.chunk.ts"],
+    // `headless.ts` is a SECOND entry so `@excalidraw-yjs/excalidraw/headless`
+    // resolves to its own file. Bundling it into `index.tsx` would make a Node
+    // consumer load this package's React barrel — the exact thing the entry
+    // exists to avoid. Mirrors `scripts/buildBase.js`, which does this for
+    // `@excalidraw-yjs/element/headless`.
+    entryPoints: ["index.tsx", "headless.ts", "**/*.chunk.ts"],
     entryNames: "[name]",
   };
 

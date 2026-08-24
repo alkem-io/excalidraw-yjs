@@ -1,18 +1,18 @@
 import {
   getBoundTextElement,
   redrawTextBoundingBox,
-} from "@excalidraw/element";
-import { hasBoundTextElement, isTextElement } from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
+import { hasBoundTextElement, isTextElement } from "@excalidraw-yjs/element";
 
-import { isInGroup } from "@excalidraw/element";
+import { isInGroup } from "@excalidraw-yjs/element";
 
 import type {
   ExcalidrawElement,
   ExcalidrawTextElement,
   NonDeletedSceneElementsMap,
-} from "@excalidraw/element/types";
+} from "@excalidraw-yjs/element/types";
 
-import type { Scene } from "@excalidraw/element";
+import type { Scene } from "@excalidraw-yjs/element";
 
 import { fontSizeIcon } from "../icons";
 
@@ -81,13 +81,14 @@ const handleFontSizeChange: DragInputCallbackType<
     nextFontSize = Math.max(Math.round(nextValue), MIN_FONT_SIZE);
 
     for (const textElement of latestTextElements) {
-      scene.mutateElement(textElement, {
+      // fresh-snapshot: re-read post-mutation
+      const nextTextElement = scene.mutateElement(textElement, {
         fontSize: nextFontSize,
       });
 
       redrawTextBoundingBox(
-        textElement,
-        scene.getContainerElement(textElement),
+        nextTextElement,
+        scene.getContainerElement(nextTextElement),
         scene,
       );
     }
@@ -109,13 +110,14 @@ const handleFontSizeChange: DragInputCallbackType<
       if (shouldChangeByStepSize) {
         nextFontSize = getStepSizedValue(nextFontSize, STEP_SIZE);
       }
-      scene.mutateElement(latestElement, {
+      // fresh-snapshot: re-read post-mutation
+      const nextElement = scene.mutateElement(latestElement, {
         fontSize: nextFontSize,
       });
 
       redrawTextBoundingBox(
-        latestElement,
-        scene.getContainerElement(latestElement),
+        nextElement,
+        scene.getContainerElement(nextElement),
         scene,
       );
     }

@@ -1,13 +1,13 @@
-import { FONT_FAMILY } from "@excalidraw/common";
+import { FONT_FAMILY } from "@excalidraw-yjs/common";
 import {
   DEFAULT_CHART_COLOR_INDEX,
   getAllColorsSpecificShade,
-} from "@excalidraw/common";
+} from "@excalidraw-yjs/common";
 
 import type {
   ExcalidrawLineElement,
   ExcalidrawTextElement,
-} from "@excalidraw/element/types";
+} from "@excalidraw-yjs/element/types";
 
 import {
   isSpreadsheetValidForChartType,

@@ -1,6 +1,6 @@
-import { CODES, KEYS } from "@excalidraw/common";
+import { CODES, KEYS } from "@excalidraw-yjs/common";
 
-import { CaptureUpdateAction } from "@excalidraw/element";
+import { CaptureUpdateAction } from "@excalidraw-yjs/element";
 
 import { gridIcon } from "../components/icons";
 

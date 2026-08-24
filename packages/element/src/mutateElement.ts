@@ -2,11 +2,11 @@ import {
   getSizeFromPoints,
   randomInteger,
   getUpdatedTimestamp,
-} from "@excalidraw/common";
+} from "@excalidraw-yjs/common";
 
-import type { Radians } from "@excalidraw/math";
+import type { Radians } from "@excalidraw-yjs/math";
 
-import type { Mutable } from "@excalidraw/common/utility-types";
+import type { Mutable } from "@excalidraw-yjs/common/utility-types";
 
 import { ShapeCache } from "./shape";
 
@@ -43,6 +43,22 @@ export const mutateElement = <TElement extends Mutable<ExcalidrawElement>>(
     isBindingEnabled?: boolean;
     isMidpointSnappingEnabled?: boolean;
   },
+  /**
+   * Out-param: when supplied, receives the exact set of keys this call assigned
+   * to `element` — the caller's INTENT SET (spec 002 / FR-009).
+   *
+   * It is deliberately collected HERE rather than derived from the caller's
+   * `updates`, because `updates` is augmented in-flight: elbow arrows gain
+   * `angle` + recomputed points, and a `points` update gains the derived
+   * `width`/`height`. Those augmentations are genuine parts of the intent and
+   * must reach the doc; a set built from the caller's original `updates` would
+   * silently drop them.
+   *
+   * Keys whose value was unchanged are NOT added — an unchanged key is not part
+   * of the intent, and writing it would reintroduce the clobber this exists to
+   * prevent.
+   */
+  changedKeys?: Set<string>,
 ) => {
   let didChange = false;
 
@@ -77,6 +93,16 @@ export const mutateElement = <TElement extends Mutable<ExcalidrawElement>>(
   for (const key in updates) {
     const value = (updates as any)[key];
     if (typeof value !== "undefined") {
+      // INTENT is recorded HERE — before the unchanged-value checks below.
+      //
+      // Those checks compare against `element`, which may be a snapshot held
+      // across frames and therefore BEHIND the doc. A caller setting a property
+      // back to the value its stale copy already shows (held `x:0`, doc moved to
+      // `x:10` by a peer, caller asks for `x:0`) is making a real, declared
+      // change to the document — but the comparison sees `0 === 0`, skips, and
+      // the intent would be lost. Whether a write is a genuine no-op can only be
+      // decided against the DOC, which `writeChangedKeys` does.
+      changedKeys?.add(key);
       if (
         (element as any)[key] === value &&
         // if object, always update because its attrs could have changed

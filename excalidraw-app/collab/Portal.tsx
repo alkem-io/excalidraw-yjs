@@ -1,24 +1,18 @@
-import { CaptureUpdateAction } from "@excalidraw/excalidraw";
-import { trackEvent } from "@excalidraw/excalidraw/analytics";
-import { encryptData } from "@excalidraw/excalidraw/data/encryption";
-import { newElementWith } from "@excalidraw/element";
+import { CaptureUpdateAction } from "@excalidraw-yjs/excalidraw";
+import { trackEvent } from "@excalidraw-yjs/excalidraw/analytics";
+import { encryptData } from "@excalidraw-yjs/excalidraw/data/encryption";
+import { newElementWith } from "@excalidraw-yjs/element";
 import throttle from "lodash.throttle";
 
-import type { UserIdleState } from "@excalidraw/common";
-import type { OrderedExcalidrawElement } from "@excalidraw/element/types";
+import type { UserIdleState } from "@excalidraw-yjs/common";
 import type {
   OnUserFollowedPayload,
   SocketId,
-} from "@excalidraw/excalidraw/types";
+} from "@excalidraw-yjs/excalidraw/types";
 
 import { WS_EVENTS, FILE_UPLOAD_TIMEOUT, WS_SUBTYPES } from "../app_constants";
-import { isSyncableElement } from "../data";
 
-import type {
-  SocketUpdateData,
-  SocketUpdateDataSource,
-  SyncableExcalidrawElement,
-} from "../data";
+import type { SocketUpdateData, SocketUpdateDataSource } from "../data";
 import type { TCollabClass } from "./Collab";
 import type { Socket } from "socket.io-client";
 
@@ -28,7 +22,6 @@ class Portal {
   socketInitialized: boolean = false; // we don't want the socket to emit any updates until it is fully initialized
   roomId: string | null = null;
   roomKey: string | null = null;
-  broadcastedElementVersions: Map<string, number> = new Map();
 
   constructor(collab: TCollabClass) {
     this.collab = collab;
@@ -47,11 +40,21 @@ class Portal {
       }
     });
     this.socket.on("new-user", async (_socketId: string) => {
-      this.broadcastScene(
-        WS_SUBTYPES.INIT,
-        this.collab.getSceneElementsIncludingDeleted(),
-        /* syncAll */ true,
-      );
+      // Native-Yjs core (M3): seed a newly-joined peer with the FULL scene-doc
+      // state (`encodeStateAsUpdate`), not an element-JSON snapshot.
+      //
+      // Awaited and caught: `encodeSceneAsUpdate` throws on a peer-poisoned asset
+      // root, and un-awaited this became an unhandled rejection — the new joiner
+      // was never seeded and nothing surfaced. Routed to the same indicator the
+      // periodic resync uses; the schema assertion itself stays fail-loud.
+      try {
+        await this.broadcastSceneInit();
+      } catch (error: any) {
+        console.error(error);
+        this.collab.setErrorIndicator(
+          error?.message ?? "Could not seed a new collaborator.",
+        );
+      }
     });
     this.socket.on("room-user-change", (clients: SocketId[]) => {
       this.collab.setCollaborators(clients);
@@ -70,7 +73,6 @@ class Portal {
     this.roomId = null;
     this.roomKey = null;
     this.socketInitialized = false;
-    this.broadcastedElementVersions = new Map();
   }
 
   isOpen() {
@@ -139,47 +141,62 @@ class Portal {
     }
   }, FILE_UPLOAD_TIMEOUT);
 
-  broadcastScene = async (
+  /**
+   * Broadcast a Yjs update on the scene's `Y.Doc` to the room (native-Yjs core,
+   * M3). `updateType` is INIT (full state for a new peer) or UPDATE (incremental
+   * update this replica originated). The bytes are serialized as a number[] so
+   * they survive the JSON-encoded encrypted socket payload. Yjs dedups/merges on
+   * the receiving side, so there is no per-element version gating any more.
+   */
+  broadcastSceneUpdate = async (
     updateType: WS_SUBTYPES.INIT | WS_SUBTYPES.UPDATE,
-    elements: readonly OrderedExcalidrawElement[],
-    syncAll: boolean,
+    update: Uint8Array,
   ) => {
-    if (updateType === WS_SUBTYPES.INIT && !syncAll) {
-      throw new Error("syncAll must be true when sending SCENE.INIT");
-    }
-
-    // sync out only the elements we think we need to to save bandwidth.
-    // periodically we'll resync the whole thing to make sure no one diverges
-    // due to a dropped message (server goes down etc).
-    const syncableElements = elements.reduce((acc, element) => {
-      if (
-        (syncAll ||
-          !this.broadcastedElementVersions.has(element.id) ||
-          element.version > this.broadcastedElementVersions.get(element.id)!) &&
-        isSyncableElement(element)
-      ) {
-        acc.push(element);
-      }
-      return acc;
-    }, [] as SyncableExcalidrawElement[]);
-
     const data: SocketUpdateDataSource[typeof updateType] = {
       type: updateType,
       payload: {
-        elements: syncableElements,
+        update: Array.from(update),
       },
     };
-
-    for (const syncableElement of syncableElements) {
-      this.broadcastedElementVersions.set(
-        syncableElement.id,
-        syncableElement.version,
-      );
-    }
 
     this.queueFileUpload();
 
     await this._broadcastSocketData(data as SocketUpdateData);
+  };
+
+  /** Send the FULL current scene-doc state to seed a genuinely NEW peer — used on
+   * `new-user`. Sent as {@link WS_SUBTYPES.INIT}, which the receiver applies ONLY
+   * while it is still uninitialized (its first-in-room seed). A peer that has
+   * already initialized DROPS INIT, so this must not be used for the periodic
+   * resync of already-joined peers — that goes via {@link broadcastSceneResync}. */
+  broadcastSceneInit = async () => {
+    await this.broadcastSceneUpdate(
+      WS_SUBTYPES.INIT,
+      this.collab.encodeSceneAsUpdate(),
+    );
+  };
+
+  /**
+   * Periodic full-scene resync safety net (native-Yjs core, M3). Re-broadcast the
+   * FULL doc state as a {@link WS_SUBTYPES.UPDATE} — NOT INIT — so EVERY peer
+   * applies it: an already-initialized peer drops INIT (it is only honored as the
+   * one-time first-in-room seed) but always applies UPDATE. A full-state Yjs
+   * update is a valid, idempotent `REMOTE_ORIGIN` merge (Yjs dedups what the peer
+   * already holds), so this converges a peer that dropped an incremental update
+   * without disturbing one that is already up to date. Wire stays V1-consistent,
+   * matching the incremental UPDATE bytes already on the wire.
+   *
+   * `collab.encodeSceneAsUpdate()` encodes the LIVE scene doc (T032), so the
+   * resync payload carries real CRDT lineage and the idempotent-merge claim above
+   * holds for history, not merely for the bytes: an already-current peer learns
+   * nothing from a resync. It previously rebuilt through a throwaway doc with a
+   * fresh `clientID`, which is what made that claim false.
+   */
+  broadcastSceneResync = async () => {
+    await this.broadcastSceneUpdate(
+      WS_SUBTYPES.UPDATE,
+      this.collab.encodeSceneAsUpdate(),
+    );
   };
 
   broadcastIdleChange = (userState: UserIdleState) => {

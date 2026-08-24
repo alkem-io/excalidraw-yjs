@@ -1,59 +1,59 @@
 import path from "path";
 
-import { defineConfig } from "vitest/config";
+import { coverageConfigDefaults, defineConfig } from "vitest/config";
 
 export default defineConfig({
   resolve: {
     alias: [
       {
-        find: /^@excalidraw\/common$/,
+        find: /^@excalidraw-yjs\/common$/,
         replacement: path.resolve(__dirname, "./packages/common/src/index.ts"),
       },
       {
-        find: /^@excalidraw\/common\/(.*?)/,
+        find: /^@excalidraw-yjs\/common\/(.*?)/,
         replacement: path.resolve(__dirname, "./packages/common/src/$1"),
       },
       {
-        find: /^@excalidraw\/element$/,
+        find: /^@excalidraw-yjs\/element$/,
         replacement: path.resolve(__dirname, "./packages/element/src/index.ts"),
       },
       {
-        find: /^@excalidraw\/element\/(.*?)/,
+        find: /^@excalidraw-yjs\/element\/(.*?)/,
         replacement: path.resolve(__dirname, "./packages/element/src/$1"),
       },
       {
-        find: /^@excalidraw\/excalidraw$/,
+        find: /^@excalidraw-yjs\/excalidraw$/,
         replacement: path.resolve(__dirname, "./packages/excalidraw/index.tsx"),
       },
       {
-        find: /^@excalidraw\/excalidraw\/(.*?)/,
+        find: /^@excalidraw-yjs\/excalidraw\/(.*?)/,
         replacement: path.resolve(__dirname, "./packages/excalidraw/$1"),
       },
       {
-        find: /^@excalidraw\/math$/,
+        find: /^@excalidraw-yjs\/math$/,
         replacement: path.resolve(__dirname, "./packages/math/src/index.ts"),
       },
       {
-        find: /^@excalidraw\/math\/(.*?)/,
+        find: /^@excalidraw-yjs\/math\/(.*?)/,
         replacement: path.resolve(__dirname, "./packages/math/src/$1"),
       },
       {
-        find: /^@excalidraw\/utils$/,
+        find: /^@excalidraw-yjs\/utils$/,
         replacement: path.resolve(__dirname, "./packages/utils/src/index.ts"),
       },
       {
-        find: /^@excalidraw\/utils\/(.*?)/,
+        find: /^@excalidraw-yjs\/utils\/(.*?)/,
         replacement: path.resolve(__dirname, "./packages/utils/src/$1"),
       },
       {
-        find: /^@excalidraw\/fractional-indexing$/,
+        find: /^@excalidraw-yjs\/fractional-indexing$/,
         replacement: path.resolve(
           __dirname,
           "./packages/fractional-indexing/src/index.ts",
         ),
       },
       {
-        find: /^@excalidraw\/fractional-indexing\/(.*?)/,
+        find: /^@excalidraw-yjs\/fractional-indexing\/(.*?)/,
         replacement: path.resolve(
           __dirname,
           "./packages/fractional-indexing/src/$1",
@@ -78,6 +78,15 @@ export default defineConfig({
       // Since v2, it ignores empty lines by default and we need to disable it as it affects the coverage
       // Additionally the thresholds also needs to be updated slightly as a result of this change
       ignoreEmptyLines: false,
+      // Never count BUILT OUTPUT as source coverage. `pnpm run test:headless`
+      // builds `packages/*/dist`, and with those present the same suite reports
+      // 45.3% lines instead of 67.4% and fails the 60% threshold — a number that
+      // depends on whether you happened to build, and one CI never sees because
+      // it does not build before running coverage. Excluding the artifacts makes
+      // a local run mean what the CI run means. The thresholds themselves are
+      // untouched; this removes double-counted compiled copies of the same
+      // source, not a single line of real code.
+      exclude: [...coverageConfigDefaults.exclude, "**/dist/**"],
       thresholds: {
         lines: 60,
         branches: 70,

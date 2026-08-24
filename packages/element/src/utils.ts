@@ -4,7 +4,7 @@ import {
   invariant,
   LINE_CONFIRM_THRESHOLD,
   ROUNDNESS,
-} from "@excalidraw/common";
+} from "@excalidraw-yjs/common";
 
 import {
   bezierEquation,
@@ -24,15 +24,15 @@ import {
   vectorNormalize,
   vectorScale,
   type GlobalPoint,
-} from "@excalidraw/math";
+} from "@excalidraw-yjs/math";
 
-import type { Curve, LineSegment, LocalPoint } from "@excalidraw/math";
+import type { Curve, LineSegment, LocalPoint } from "@excalidraw-yjs/math";
 
 import type {
   AppState,
   NormalizedZoomValue,
   Zoom,
-} from "@excalidraw/excalidraw/types";
+} from "@excalidraw-yjs/excalidraw/types";
 
 import { elementCenterPoint, getDiamondPoints } from "./bounds";
 

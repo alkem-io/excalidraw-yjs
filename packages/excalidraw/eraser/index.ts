@@ -1,4 +1,4 @@
-import { arrayToMap, easeOut, THEME } from "@excalidraw/common";
+import { arrayToMap, easeOut, THEME } from "@excalidraw-yjs/common";
 
 import {
   computeBoundTextPosition,
@@ -13,25 +13,31 @@ import {
   isFreeDrawElement,
   isLineElement,
   isPointInElement,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 import {
   lineSegment,
   lineSegmentsDistance,
   pointFrom,
   polygon,
   polygonIncludesPointNonZero,
-} from "@excalidraw/math";
+} from "@excalidraw-yjs/math";
 
-import { getElementsInGroup } from "@excalidraw/element";
+import { getElementsInGroup } from "@excalidraw-yjs/element";
 
-import { shouldTestInside } from "@excalidraw/element";
-import { hasBoundTextElement, isBoundToContainer } from "@excalidraw/element";
-import { getBoundTextElementId } from "@excalidraw/element";
+import { shouldTestInside } from "@excalidraw-yjs/element";
+import {
+  hasBoundTextElement,
+  isBoundToContainer,
+} from "@excalidraw-yjs/element";
+import { getBoundTextElementId } from "@excalidraw-yjs/element";
 
-import type { Bounds } from "@excalidraw/common";
+import type { Bounds } from "@excalidraw-yjs/common";
 
-import type { GlobalPoint, LineSegment } from "@excalidraw/math/types";
-import type { ElementsMap, ExcalidrawElement } from "@excalidraw/element/types";
+import type { GlobalPoint, LineSegment } from "@excalidraw-yjs/math/types";
+import type {
+  ElementsMap,
+  ExcalidrawElement,
+} from "@excalidraw-yjs/element/types";
 
 import { AnimatedTrail } from "../animatedTrail";
 

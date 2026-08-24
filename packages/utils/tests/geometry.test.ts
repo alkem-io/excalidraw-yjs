@@ -6,14 +6,14 @@ import {
   pointOnPolygon,
   polygonIncludesPoint,
   segmentsIntersectAt,
-} from "@excalidraw/math";
+} from "@excalidraw-yjs/math";
 
 import type {
   GlobalPoint,
   LineSegment,
   Polygon,
   Radians,
-} from "@excalidraw/math";
+} from "@excalidraw-yjs/math";
 
 import { pointInEllipse, pointOnEllipse, type Ellipse } from "../src/shape";
 

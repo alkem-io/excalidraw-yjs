@@ -1,5 +1,5 @@
 import React from "react";
-import { isColorDark } from "@excalidraw/common";
+import { isColorDark } from "@excalidraw-yjs/common";
 
 interface HotkeyLabelProps {
   color: string;

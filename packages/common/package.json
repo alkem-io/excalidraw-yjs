@@ -1,5 +1,5 @@
 {
-  "name": "@excalidraw/common",
+  "name": "@excalidraw-yjs/common",
   "version": "0.18.0",
   "type": "module",
   "types": "./dist/types/common/src/index.d.ts",
@@ -50,13 +50,14 @@
       "last 1 safari version"
     ]
   },
-  "bugs": "https://github.com/excalidraw/excalidraw/issues",
-  "repository": "https://github.com/excalidraw/excalidraw",
+  "bugs": "https://github.com/alkem-io/excalidraw-yjs/issues",
+  "repository": "https://github.com/alkem-io/excalidraw-yjs",
   "scripts": {
     "gen:types": "rimraf types && tsc",
-    "build:esm": "rimraf dist && node ../../scripts/buildBase.js && yarn gen:types"
+    "build:esm": "rimraf dist && node ../../scripts/buildBase.js && pnpm run gen:types"
   },
   "dependencies": {
+    "@excalidraw-yjs/math": "workspace:*",
     "tinycolor2": "1.6.0"
   },
   "devDependencies": {

@@ -15,7 +15,7 @@ import {
   vectorSubtract,
   vectorDot,
   vectorNormalize,
-} from "@excalidraw/math";
+} from "@excalidraw-yjs/math";
 
 import {
   COLOR_PALETTE,
@@ -109,7 +109,7 @@ import {
   setDesktopUIMode,
   isSelectionLikeTool,
   oneOf,
-} from "@excalidraw/common";
+} from "@excalidraw-yjs/common";
 
 import {
   getObservedAppState,
@@ -261,9 +261,9 @@ import {
   getActiveTextElement,
   isEligibleFrameChildType,
   getBindingStrategyForDraggingBindingElementEndpoints,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
-import type { GlobalPoint, LocalPoint, Radians } from "@excalidraw/math";
+import type { GlobalPoint, LocalPoint, Radians } from "@excalidraw-yjs/math";
 
 import type {
   ExcalidrawElement,
@@ -289,9 +289,9 @@ import type {
   ExcalidrawElbowArrowElement,
   SceneElementsMap,
   ExcalidrawBindableElement,
-} from "@excalidraw/element/types";
+} from "@excalidraw-yjs/element/types";
 
-import type { Mutable, ValueOf } from "@excalidraw/common/utility-types";
+import type { Mutable, ValueOf } from "@excalidraw-yjs/common/utility-types";
 
 import {
   actionAddToLibrary,
@@ -496,6 +496,9 @@ import type {
   GenerateDiagramToCode,
   NullableGridSize,
   Offsets,
+  AssetPublishOutcome,
+  AssetPublishReport,
+  ExcalidrawProps,
 } from "../types";
 import type { RoughCanvas } from "roughjs/bin/canvas";
 import type { Action, ActionResult } from "../actions/types";
@@ -771,12 +774,26 @@ class App extends React.Component<AppProps, AppState> {
       getSceneElementsIncludingDeleted: this.getSceneElementsIncludingDeleted,
       getSceneElementsMapIncludingDeleted:
         this.getSceneElementsMapIncludingDeleted,
+      onLocalSceneUpdate: this.onLocalSceneUpdate,
+      applyRemoteSceneUpdate: this.applyRemoteSceneUpdate,
+      encodeSceneAsUpdate: this.encodeSceneAsUpdate,
+      encodeSceneStateVector: this.encodeSceneStateVector,
       history: {
         clear: this.resetHistory,
       },
       scrollToContent: this.scrollToContent,
       getSceneElements: this.getSceneElements,
+      getSceneAssetLocators: this.getSceneAssetLocators,
+      flushAssetPublication: this.flushAssetPublication,
+      encodeSceneStateAsUpdate: this.encodeSceneStateAsUpdate,
+      collectSceneGarbage: this.collectSceneGarbage,
+      getSceneContentToken: this.getSceneContentToken,
       getAppState: () => this.state,
+      // Doc-backed (M4): the doc holds `fileId -> locator` (T023), and the BYTES
+      // live in this local cache, resolved through the asset adapter. Reading
+      // here reflects the doc's current references — a host calling `getFiles()`
+      // sees files added by a remote peer or restored on load, even between
+      // renders — but what it gets back is the cached bytes. Read-only.
       getFiles: () => this.files,
       getName: this.getName,
       registerAction: (action: Action) => {
@@ -854,7 +871,11 @@ class App extends React.Component<AppProps, AppState> {
     this.visibleElements = [];
 
     this.store = new Store(this);
-    this.history = new History(this.store);
+    // Element history lives on the doc's `Y.UndoManager` (`scene.undoManager`).
+    // Pass a live scene accessor rather than a captured reference: the editor may
+    // swap the `Scene` (e.g. on reset), and `History` must always resolve the
+    // current one.
+    this.history = new History(this.store, () => this.scene);
 
     this.excalidrawContainerValue = {
       container: this.excalidrawContainerRef.current,
@@ -862,7 +883,6 @@ class App extends React.Component<AppProps, AppState> {
     };
 
     this.fonts = new Fonts(this.scene);
-    this.history = new History(this.store);
 
     this.actionManager.registerAll(actions);
     this.actionManager.registerAction(createUndoAction(this.history));
@@ -2475,6 +2495,101 @@ class App extends React.Component<AppProps, AppState> {
     return this.scene.getElementsMapIncludingDeleted();
   };
 
+  /**
+   * Subscribe to LOCAL logical updates, for a collaboration transport.
+   *
+   * The supported way to attach a provider. It carries the editor's ONE origin
+   * policy: a remote apply is never echoed back, and a create's structural pass
+   * and its reveal arrive as a single message rather than as a content-bearing
+   * tombstone. Every other change to the shared document is delivered, including
+   * writes that produce no undo step — a shared-document write cannot be hidden
+   * from peers, since the next full-state encode carries it regardless.
+   *
+   * A local reset is not delivered here because it does not touch this document
+   * at all: it replaces the Scene generation, and this subscription is rebound to
+   * the new one.
+   *
+   * Subscribing to the raw `Y.Doc` bypasses all of it.
+   */
+  public onLocalSceneUpdate = (
+    cb: (update: Uint8Array) => void,
+    format: "v1" | "v2" = "v1",
+  ) => {
+    // Registered with App, not with the Scene, so the subscription SURVIVES a
+    // reset — see {@link sceneTransportSubscribers}.
+    const entry = { cb, format, detach: this.scene.onDocUpdate(cb, format) };
+    this.sceneTransportSubscribers.add(entry);
+    return () => {
+      entry.detach();
+      this.sceneTransportSubscribers.delete(entry);
+    };
+  };
+
+  /** Integrate a peer's update: neither re-broadcast nor captured into local undo. */
+  public applyRemoteSceneUpdate = (
+    update: Uint8Array,
+    format: "v1" | "v2" = "v1",
+  ) => this.scene.applyRemoteUpdate(update, format);
+
+  /**
+   * Encode scene state, for an initial sync or a save. Pass a peer's state
+   * vector to get only the delta they are missing — the reply half of a
+   * y-protocol sync exchange.
+   */
+  public encodeSceneAsUpdate = (
+    format: "v1" | "v2" = "v1",
+    targetStateVector?: Uint8Array,
+  ) => this.scene.encodeStateAsUpdate(format, targetStateVector);
+
+  /**
+   * This replica's state vector — what it already has. A provider sends this so
+   * the other side can reply with just the missing delta.
+   *
+   * With {@link onLocalSceneUpdate}, {@link applyRemoteSceneUpdate} and
+   * {@link encodeSceneAsUpdate} this completes the four operations a y-protocol
+   * sync needs, so a provider never needs the raw `Y.Doc`.
+   */
+  public encodeSceneStateVector = () => this.scene.encodeStateVector();
+
+  /**
+   * The document's `fileId -> locator` asset references. The companion to
+   * {@link getSceneElements} for anything that persists or seeds shared state —
+   * it is references, never bytes; bytes come from {@link files} or the host
+   * adapter.
+   */
+  public getSceneAssetLocators = () => this.scene.getAssetLocators();
+
+  /**
+   * Encode the LIVE scene document as a self-contained update.
+   *
+   * PURE — it does not mutate the document. Anything the host wants pruned
+   * before a full-state broadcast must be pruned by calling
+   * {@link collectSceneGarbage} first, as an explicit separate step. An encoder
+   * that quietly mutated on encode would make "just read the state" a
+   * destructive operation, and a resync timer would silently drive data loss.
+   */
+  public encodeSceneStateAsUpdate = (
+    format: "v1" | "v2" = "v1",
+    targetStateVector?: Uint8Array,
+  ) => this.scene.encodeStateAsUpdate(format, targetStateVector);
+
+  /**
+   * Reclaim elements soft-deleted before `deletedBefore`, and asset references
+   * no live element points at. Returns how many of each were reclaimed.
+   *
+   * Separate from the encoder on purpose — see {@link encodeSceneStateAsUpdate}.
+   */
+  public collectSceneGarbage = (options: { deletedBefore: number }) =>
+    this.scene.collectGarbage(options);
+
+  /**
+   * The scene document's opaque content token — see `Scene.contentToken`. A host
+   * captures it before persisting and compares it (with `===`) afterwards to
+   * decide whether anything changed in the meantime. It is deliberately not a
+   * number: a counter would collide across Scene generations.
+   */
+  public getSceneContentToken = () => this.scene.contentToken;
+
   public getSceneElements = () => {
     return this.scene.getNonDeletedElements();
   };
@@ -2792,88 +2907,126 @@ class App extends React.Component<AppProps, AppState> {
     });
   };
 
-  public syncActionResult = withBatchedUpdates((actionResult: ActionResult) => {
-    if (this.unmounted || actionResult === false) {
-      return;
-    }
+  public syncActionResult = (
+    actionResult: ActionResult,
+    invocationBase?: readonly ExcalidrawElement[],
+  ) => this.syncActionResultBatched({ actionResult, invocationBase });
 
-    this.store.scheduleAction(actionResult.captureUpdate);
-
-    let didUpdate = false;
-
-    let editingTextElement: AppState["editingTextElement"] | null = null;
-    if (actionResult.elements) {
-      this.scene.replaceAllElements(actionResult.elements);
-      didUpdate = true;
-    }
-
-    if (actionResult.files) {
-      this.addMissingFiles(actionResult.files, actionResult.replaceFiles);
-      this.addNewImagesToImageCache();
-    }
-
-    if (actionResult.appState || editingTextElement || this.state.contextMenu) {
-      let viewModeEnabled = actionResult?.appState?.viewModeEnabled || false;
-      let zenModeEnabled = actionResult?.appState?.zenModeEnabled || false;
-      const theme =
-        actionResult?.appState?.theme || this.props.theme || THEME.LIGHT;
-      const name = actionResult?.appState?.name ?? this.state.name;
-      const errorMessage =
-        actionResult?.appState?.errorMessage ?? this.state.errorMessage;
-      if (typeof this.props.viewModeEnabled !== "undefined") {
-        viewModeEnabled = this.props.viewModeEnabled;
+  private syncActionResultBatched = withBatchedUpdates(
+    ({
+      actionResult,
+      invocationBase,
+    }: {
+      actionResult: ActionResult;
+      invocationBase?: readonly ExcalidrawElement[];
+    }) => {
+      if (this.unmounted || actionResult === false) {
+        return;
       }
 
-      if (typeof this.props.zenModeEnabled !== "undefined") {
-        zenModeEnabled = this.props.zenModeEnabled;
+      this.store.scheduleAction(actionResult.captureUpdate);
+
+      let didUpdate = false;
+
+      let editingTextElement: AppState["editingTextElement"] | null = null;
+      if (actionResult.elements) {
+        // Native element history (M2): a `CaptureUpdateAction.NEVER` update must
+        // never become an undo step — drive the Scene write under the non-tracked
+        // origin so the doc updates but the UndoManager does not capture it (scene
+        // load, programmatic non-capturing updates, and the re-application of an
+        // undo/redo all funnel through here with NEVER).
+        const recordHistory =
+          actionResult.captureUpdate !== CaptureUpdateAction.NEVER;
+        if (invocationBase) {
+          this.scene.applyElementChanges(
+            invocationBase as never,
+            actionResult.elements as never,
+            {
+              recordHistory,
+              alreadyAppliedIntent: this.scene.getActionMutationJournal(),
+              overlapPolicy: actionResult.overlapPolicy,
+            },
+          );
+        } else {
+          this.scene.replaceAllElements(actionResult.elements, {
+            recordHistory,
+          });
+        }
+        didUpdate = true;
       }
 
-      editingTextElement = actionResult.appState?.editingTextElement || null;
+      if (actionResult.files) {
+        this.addMissingFiles(actionResult.files, actionResult.replaceFiles);
+        this.addNewImagesToImageCache();
+      }
 
-      // make sure editingTextElement points to latest element reference
-      if (actionResult.elements && editingTextElement) {
-        actionResult.elements.forEach((element) => {
-          if (
-            editingTextElement?.id === element.id &&
-            editingTextElement !== element &&
-            isNonDeletedElement(element) &&
-            isTextElement(element)
-          ) {
-            editingTextElement = element;
-          }
+      if (
+        actionResult.appState ||
+        editingTextElement ||
+        this.state.contextMenu
+      ) {
+        let viewModeEnabled = actionResult?.appState?.viewModeEnabled || false;
+        let zenModeEnabled = actionResult?.appState?.zenModeEnabled || false;
+        const theme =
+          actionResult?.appState?.theme || this.props.theme || THEME.LIGHT;
+        const name = actionResult?.appState?.name ?? this.state.name;
+        const errorMessage =
+          actionResult?.appState?.errorMessage ?? this.state.errorMessage;
+        if (typeof this.props.viewModeEnabled !== "undefined") {
+          viewModeEnabled = this.props.viewModeEnabled;
+        }
+
+        if (typeof this.props.zenModeEnabled !== "undefined") {
+          zenModeEnabled = this.props.zenModeEnabled;
+        }
+
+        editingTextElement = actionResult.appState?.editingTextElement || null;
+
+        // make sure editingTextElement points to latest element reference
+        if (actionResult.elements && editingTextElement) {
+          actionResult.elements.forEach((element) => {
+            if (
+              editingTextElement?.id === element.id &&
+              editingTextElement !== element &&
+              isNonDeletedElement(element) &&
+              isTextElement(element)
+            ) {
+              editingTextElement = element;
+            }
+          });
+        }
+
+        if (editingTextElement?.isDeleted) {
+          editingTextElement = null;
+        }
+
+        this.setState((prevAppState) => {
+          const actionAppState = actionResult.appState || {};
+
+          return {
+            ...prevAppState,
+            ...actionAppState,
+            // NOTE this will prevent opening context menu using an action
+            // or programmatically from the host, so it will need to be
+            // rewritten later
+            contextMenu: null,
+            editingTextElement,
+            viewModeEnabled,
+            zenModeEnabled,
+            theme,
+            name,
+            errorMessage,
+          };
         });
+
+        didUpdate = true;
       }
 
-      if (editingTextElement?.isDeleted) {
-        editingTextElement = null;
+      if (!didUpdate) {
+        this.scene.triggerUpdate();
       }
-
-      this.setState((prevAppState) => {
-        const actionAppState = actionResult.appState || {};
-
-        return {
-          ...prevAppState,
-          ...actionAppState,
-          // NOTE this will prevent opening context menu using an action
-          // or programmatically from the host, so it will need to be
-          // rewritten later
-          contextMenu: null,
-          editingTextElement,
-          viewModeEnabled,
-          zenModeEnabled,
-          theme,
-          name,
-          errorMessage,
-        };
-      });
-
-      didUpdate = true;
-    }
-
-    if (!didUpdate) {
-      this.scene.triggerUpdate();
-    }
-  });
+    },
+  );
 
   // Lifecycle
 
@@ -2901,12 +3054,96 @@ class App extends React.Component<AppProps, AppState> {
   };
 
   /**
+   * Wire the editor's read-only mirrors of the scene doc. Called for the initial
+   * Scene and again for every replacement generation, so a swap never leaves the
+   * editor observing a destroyed doc.
+   *
+   * `scene.doc` is the source of truth for WHICH files the scene has — it holds
+   * `fileId -> locator` and never bytes (T023). The bytes live in `this.files`,
+   * populated from the asset adapter. On every scene update — a local locator
+   * write, a remote apply, a load, undo/redo — reconcile `this.files` against the
+   * doc's references, then render. Both mirrors are strictly READ-ONLY
+   * (`getFiles()` / `getPersistedAppState()`): neither may write back to the
+   * scene, or the write -> observe -> refresh cycle would loop. Both are ordered
+   * before `triggerRender` so the render sees the freshest values.
+   */
+  private registerSceneCallbacks() {
+    this.scene.onUpdate(this.refreshFilesFromScene);
+    this.scene.onUpdate(this.refreshAppStateFromScene);
+    this.scene.onUpdate(this.triggerRender);
+  }
+
+  /**
+   * Transport subscriptions handed out by {@link onLocalSceneUpdate}.
+   *
+   * Owned by App rather than by the Scene because the Scene is REPLACEABLE: a
+   * reset swaps in a new generation, and a subscriber bound directly to the old
+   * doc would silently stop receiving updates. That is not hypothetical — the
+   * fallback `initializeRoom` path can reset the scene AFTER a transport has
+   * already subscribed, which would leave collaboration permanently deaf.
+   */
+  private sceneTransportSubscribers = new Set<{
+    cb: (update: Uint8Array) => void;
+    format: "v1" | "v2";
+    detach: () => void;
+  }>();
+
+  private rebindSceneTransportSubscribers() {
+    for (const entry of this.sceneTransportSubscribers) {
+      // the previous generation is destroyed, so its detach is already moot
+      entry.detach = this.scene.onDocUpdate(entry.cb, entry.format);
+    }
+  }
+
+  /** Discard the current Scene and everything bound to it. */
+  private teardownSceneGeneration() {
+    this.renderer.destroy();
+    this.scene.destroy();
+    this.files = {};
+    this.imageCache.clear();
+  }
+
+  /** Assign a fresh Scene and the objects bound to it. Registers nothing. */
+  private constructSceneGeneration() {
+    this.scene = new Scene();
+    this.fonts = new Fonts(this.scene);
+    this.renderer = new Renderer(this.scene);
+  }
+
+  /**
+   * Swap in a fresh Scene generation, discarding the current one entirely.
+   *
+   * This is how a genuinely LOCAL reset happens. Clearing the shared doc instead
+   * cannot work: withholding the clear from the incremental wire does not remove
+   * it — its structs and delete-set stay in the doc, so the next full-state encode
+   * (INIT seed, periodic resync, persistence) republishes the clear and destroys
+   * every peer's copy of the scene. A new doc has no such history to leak.
+   *
+   * Renderer and Fonts are bound to a specific Scene, so they are rebuilt too,
+   * and the editor's mirrors plus any live transport subscriptions are rebound to
+   * the new generation.
+   */
+  private replaceSceneGeneration() {
+    this.teardownSceneGeneration();
+    this.constructSceneGeneration();
+    this.registerSceneCallbacks();
+    this.rebindSceneTransportSubscribers();
+  }
+
+  /**
    * Resets scene & history.
    * ! Do not use to clear scene user action !
    */
   private resetScene = withBatchedUpdates(
     (opts?: { resetLoadingState: boolean }) => {
-      this.scene.replaceAllElements([]);
+      // A local reset must not touch the shared doc at all — see
+      // {@link replaceSceneGeneration}. Clearing it in place would be
+      // republished by the next full-state encode and would delete every peer's
+      // elements and asset references. Swapping generations also makes the
+      // reference prune unnecessary: the new doc simply has no locators to
+      // orphan. No image BYTES are affected either way — those live in the local
+      // cache and the host's asset store, not in the doc.
+      this.replaceSceneGeneration();
       this.setState((state) => ({
         ...getDefaultAppState(),
         isLoading: opts?.resetLoadingState ? false : state.isLoading,
@@ -2947,6 +3184,27 @@ class App extends React.Component<AppProps, AppState> {
       } else {
         initialData = (await this.props.initialData) || null;
       }
+      // T020 — the two initial-data forms are MUTUALLY EXCLUSIVE. The public
+      // type already forbids mixing them; this is the runtime half, for untyped
+      // JS callers. Silently honouring one and dropping the other would either
+      // double-apply the scene or discard the stored lineage with no trace.
+      //
+      // Deliberately INSIDE the try: the catch below turns this into a surfaced
+      // `errorMessage` and replaces `initialData`, so neither form is applied.
+      // Thrown after the try it would escape as an unhandled rejection — loud in
+      // a console nobody is reading, invisible in the editor.
+      if (
+        initialData?.encodedScene &&
+        (initialData?.elements || initialData?.files)
+      ) {
+        throw new Error(
+          "initialData carries both `encodedScene` and record data (`elements`/`files`). " +
+            "They are mutually exclusive: `encodedScene` is ADOPTED into the editor's " +
+            "document (preserving its lineage) and everything collaborative — elements, " +
+            "the persisted appState subset, and asset references — is derived from it.",
+        );
+      }
+
       if (initialData?.libraryItems) {
         this.library
           .updateLibrary({
@@ -2967,6 +3225,8 @@ class App extends React.Component<AppProps, AppState> {
         },
       };
     }
+    const encodedScene = initialData?.encodedScene ?? null;
+
     const restoredElements = restoreElements(initialData?.elements, null, {
       repairBindings: true,
       deleteInvisibleElements: true,
@@ -3003,7 +3263,9 @@ class App extends React.Component<AppProps, AppState> {
       toast: this.state.toast,
     };
 
-    if (initialData?.scrollToContent) {
+    // Native form scrolls AFTER adoption, against the doc's elements — there are
+    // no `restoredElements` to centre on here.
+    if (initialData?.scrollToContent && !encodedScene) {
       restoredAppState = {
         ...restoredAppState,
         ...calculateScrollCenter(restoredElements, {
@@ -3018,12 +3280,54 @@ class App extends React.Component<AppProps, AppState> {
 
     this.resetStore();
     this.resetHistory();
-    this.syncActionResult({
-      elements: restoredElements,
-      appState: restoredAppState,
-      files: initialData?.files,
-      captureUpdate: CaptureUpdateAction.NEVER,
-    });
+
+    if (encodedScene) {
+      // ADOPT into the CURRENT scene generation — never replace it. A remote
+      // update can arrive into this generation while the durable snapshot is
+      // still being fetched; replacing the Scene afterwards would discard it.
+      // Applying the stored update into the same doc merges both, and because
+      // it lands under REMOTE_ORIGIN it is neither undoable nor rebroadcast.
+      this.scene.applyRemoteUpdate(encodedScene.update, encodedScene.format);
+
+      // Collaborative appState lives on the DOC and wins over the caller. A
+      // caller override may only touch local UI keys (theme, zoom, …); changing
+      // `name` / `viewBackgroundColor` requires a document mutation, not an
+      // initial-data override that no peer would ever see.
+      let adoptedAppState = {
+        ...restoredAppState,
+        ...this.scene.getPersistedAppState(),
+      } as AppState;
+
+      if (initialData?.scrollToContent) {
+        adoptedAppState = {
+          ...adoptedAppState,
+          ...calculateScrollCenter(this.scene.getNonDeletedElements(), {
+            ...adoptedAppState,
+            width: this.state.width,
+            height: this.state.height,
+            offsetTop: this.state.offsetTop,
+            offsetLeft: this.state.offsetLeft,
+          }),
+        };
+      }
+
+      // NO element array here: passing one would rebuild the scene from records
+      // and undo the adoption. Elements already flowed from the doc through
+      // `applyRemoteUpdate` → `recomputeFromDoc` → `triggerUpdate()`. Likewise no
+      // `files`: the doc carries `fileId -> locator`, and the bytes resolve
+      // through the asset adapter into the cache.
+      this.syncActionResult({
+        appState: adoptedAppState,
+        captureUpdate: CaptureUpdateAction.NEVER,
+      });
+    } else {
+      this.syncActionResult({
+        elements: restoredElements,
+        appState: restoredAppState,
+        files: initialData?.files,
+        captureUpdate: CaptureUpdateAction.NEVER,
+      });
+    }
 
     // clear the shape and image cache so that any images in initialData
     // can be loaded fresh
@@ -3166,7 +3470,7 @@ class App extends React.Component<AppProps, AppState> {
       });
     }
 
-    this.scene.onUpdate(this.triggerRender);
+    this.registerSceneCallbacks();
     this.addEventListeners();
 
     if (this.props.autoFocus && this.excalidrawContainerRef.current) {
@@ -3208,24 +3512,40 @@ class App extends React.Component<AppProps, AppState> {
   }
 
   public componentWillUnmount() {
-    // we're recreating the api object reference so that the
-    // <ExcalidrawAPIContext.Provider/> picks up on it
-    this.api = { ...this.api, isDestroyed: true };
-
-    for (const key of Object.keys(this.api) as (keyof typeof this.api)[]) {
-      if (
-        (key.startsWith("get") ||
-          key === "onStateChange" ||
-          key === "onEvent") &&
-        typeof this.api[key] === "function"
-      ) {
-        (this.api as any)[key] = () => {
-          throw new Error(
-            "ExcalidrawAPI is no longer usable after the editor has been unmounted and will return invalid/empty data. You should check for `ExcalidrawAPI.isDestroyed` before calling get* methods on subscribing to state/event changes.",
-          );
-        };
+    // Invalidate the object consumers hold, IN PLACE, so a retained reference
+    // reports `isDestroyed` and cannot call through into a torn-down editor.
+    //
+    // EVERY callable member is replaced, including callables nested one level
+    // down (`history.clear`), rather than a list of method names: a name list
+    // silently stops covering whatever is added next, which is exactly how a
+    // retained API keeps a working back door. `id` and `isDestroyed` stay as
+    // data so a consumer can still check before calling.
+    const dead = (): never => {
+      throw new Error(
+        "ExcalidrawAPI is no longer usable after the editor has been unmounted. Every method throws; check `ExcalidrawAPI.isDestroyed` before calling one or subscribing to state/event changes.",
+      );
+    };
+    const invalidate = (target: Record<string, unknown>, depth: number) => {
+      for (const key of Object.keys(target)) {
+        const value = target[key];
+        if (typeof value === "function") {
+          target[key] = dead;
+        } else if (
+          depth > 0 &&
+          value &&
+          typeof value === "object" &&
+          !Array.isArray(value)
+        ) {
+          invalidate(value as Record<string, unknown>, depth - 1);
+        }
       }
-    }
+    };
+    invalidate(this.api as unknown as Record<string, unknown>, 1);
+    (this.api as { isDestroyed: boolean }).isDestroyed = true;
+
+    // ...then create a new reference so <ExcalidrawAPIContext.Provider/>
+    // re-renders. It spreads the invalidated members, so both objects are dead.
+    this.api = { ...this.api };
 
     this.editorLifecycleEvents.emit("editor:unmount");
     this.props.onUnmount?.();
@@ -3233,13 +3553,21 @@ class App extends React.Component<AppProps, AppState> {
 
     (window as any).launchQueue?.setConsumer(() => {});
 
-    this.renderer.destroy();
-    this.scene.destroy();
-    this.scene = new Scene();
-    this.fonts = new Fonts(this.scene);
-    this.renderer = new Renderer(this.scene);
-    this.files = {};
-    this.imageCache.clear();
+    // Nothing may hold a transport subscription past unmount, so detach and drop
+    // them all. Teardown below constructs a replacement generation but registers
+    // nothing against it.
+    for (const entry of this.sceneTransportSubscribers) {
+      entry.detach();
+    }
+    this.sceneTransportSubscribers.clear();
+    // Leave the component's fields valid: `componentDidMount` recreates the API
+    // and re-registers the Scene callbacks when the same instance is remounted
+    // (StrictMode), so it must find a usable Scene/Fonts/Renderer. Construct
+    // WITHOUT registering — registration is `componentDidMount`'s job, and doing
+    // it here too would leave a remounted editor with duplicate mirrors and a
+    // duplicate render callback.
+    this.teardownSceneGeneration();
+    this.constructSceneGeneration();
     this.resizeObserver?.disconnect();
     this.unmounted = true;
     this.removeEventListeners();
@@ -4552,6 +4880,169 @@ class App extends React.Component<AppProps, AppState> {
     },
   );
 
+  /**
+   * Ids whose `store` is in flight, mapped to the promise that settles when the
+   * locator is COMMITTED (or explicitly not). A `Set` was enough to stop double
+   * uploads; the promise is what lets {@link flushAssetPublication} await a pass
+   * that another caller started.
+   */
+  private assetStoresInFlight = new Map<string, Promise<AssetPublishOutcome>>();
+
+  /**
+   * Publish a reference for every cached file that does not have one yet.
+   *
+   * Reconciling cache against references — rather than publishing whatever was
+   * just added — is what makes a failed upload retryable: the file simply still
+   * has no locator, so the next publish picks it up again. A failure leaves the
+   * image local and pending and is never downgraded to sharing bytes.
+   */
+  private publishUnreferencedAssets = async (): Promise<
+    AssetPublishOutcome[]
+  > => {
+    const adapter = this.props.assetAdapter;
+    if (!adapter) {
+      return [];
+    }
+    const pending = Object.values(this.files).filter(
+      (file) =>
+        !this.scene.getAssetLocators()[file.id] &&
+        !this.assetStoresInFlight.has(file.id),
+    );
+    if (!pending.length) {
+      return [];
+    }
+
+    return Promise.all(
+      pending.map((file) => {
+        const settled = this.publishOneAsset(adapter, file);
+        this.assetStoresInFlight.set(file.id, settled);
+        return settled;
+      }),
+    );
+  };
+
+  /**
+   * Store one file's bytes and commit its locator. Never rejects — the outcome
+   * is the return value, so a caller cannot turn a bad adapter into an unhandled
+   * rejection, and {@link flushAssetPublication} can report per file.
+   */
+  private publishOneAsset = async (
+    adapter: NonNullable<ExcalidrawProps["assetAdapter"]>,
+    file: BinaryFileData,
+  ): Promise<AssetPublishOutcome> => {
+    try {
+      const locator = await adapter.store(file);
+
+      // Re-check at COMMIT, not from the snapshot taken before the await.
+      // During an upload a peer's locator can arrive, or the cached file can
+      // be replaced; publishing the stale result would clobber newer state.
+      if (this.unmounted) {
+        return { fileId: file.id, status: "skipped", reason: "unmounted" };
+      }
+      if (this.scene.getAssetLocators()[file.id]) {
+        return { fileId: file.id, status: "skipped", reason: "remote-won" };
+      }
+      if (this.files[file.id] !== file) {
+        return { fileId: file.id, status: "skipped", reason: "file-replaced" };
+      }
+      // Validate here so a bad adapter cannot reject inside an unawaited
+      // write. `setAssetLocators` throws, and this is the only caller that
+      // could turn that into an unhandled rejection.
+      this.scene.setAssetLocators({ [file.id]: locator });
+      return { fileId: file.id, status: "published" };
+    } catch (error) {
+      // Retained locally, retried on a later publish pass. There is no
+      // autonomous retry — see `assetAdapter` docs.
+      console.error(`assetAdapter.store failed for ${file.id}`, error);
+      return { fileId: file.id, status: "failed", error };
+    } finally {
+      this.assetStoresInFlight.delete(file.id);
+    }
+  };
+
+  /**
+   * Await asset publication, so a host can save without racing it.
+   *
+   * Background publishing stays fire-and-forget: `addMissingFiles` kicks a pass
+   * and does not wait. That is fine while editing and wrong at a commit point —
+   * `adapter.store` resolving is NOT the same as the locator being in the doc,
+   * so an immediate save or a close/unmount could encode an image element with
+   * no locator. This is the awaitable boundary for those moments.
+   *
+   * Resolves only once every pending file has either committed a locator or
+   * explicitly not, INCLUDING files whose upload a background pass already
+   * started — that is why the in-flight map holds promises.
+   *
+   * **Check `failed` before reporting a successful save.** A failure leaves the
+   * bytes local and unreferenced, never downgraded to inline data, so the file
+   * is picked up again by the next pass or by calling this again. `skipped` is
+   * not an error: a peer's locator won, the cached file was replaced, or the
+   * editor unmounted — in the last case nothing was written, by design.
+   *
+   * Deliberately NOT a queue: no backoff, no autonomous retry, no ordering
+   * guarantees. Retry is the host calling this again.
+   *
+   * **And deliberately NOT bounded.** This waits for `adapter.store` as long as
+   * it takes. A timeout here would either abandon bytes the host still holds or
+   * report success for a locator that never committed, and this method exists
+   * precisely so a host can trust its own save. The corollary is the host's:
+   * `store` must settle (see {@link AssetAdapter.store}) — an unbounded `store`
+   * makes an awaited flush unbounded too, so a save or close path awaiting it
+   * hangs with no way out.
+   */
+  public flushAssetPublication = async (): Promise<AssetPublishReport> => {
+    // Snapshot the promises a BACKGROUND pass already started, before kicking
+    // ours — `publishUnreferencedAssets` clears each entry as it settles, so
+    // reading the map afterwards would miss them.
+    const alreadyRunning = [...this.assetStoresInFlight.values()];
+    // Exactly ONE pass. Looping until the map drains would re-pick a file whose
+    // store just failed and upload it again — an autonomous retry, which this
+    // API deliberately does not do. Retry is the host calling this again.
+    const [started, background] = await Promise.all([
+      this.publishUnreferencedAssets(),
+      Promise.all(alreadyRunning),
+    ]);
+    const collected: AssetPublishOutcome[] = [...started, ...background];
+    const seen = new Set<string>();
+    const report: AssetPublishReport = {
+      published: [],
+      skipped: [],
+      failed: [],
+    };
+    for (const outcome of collected) {
+      const key = `${outcome.fileId}:${outcome.status}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      if (outcome.status === "published") {
+        report.published.push(outcome.fileId);
+      } else if (outcome.status === "failed") {
+        report.failed.push({ fileId: outcome.fileId, error: outcome.error });
+      } else {
+        report.skipped.push({ fileId: outcome.fileId, reason: outcome.reason });
+      }
+    }
+    return report;
+  };
+
+  /** Insert bytes into the local cache WITHOUT publishing a reference. */
+  private cacheResolvedFiles = (files: BinaryFileData[]) => {
+    const next = { ...this.files };
+    let changed = false;
+    for (const file of files) {
+      if (!next[file.id]) {
+        next[file.id] = file;
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.files = next;
+      this.clearImageShapeCache();
+      this.triggerRender();
+    }
+  };
+
   private addMissingFiles = (
     files: BinaryFiles | BinaryFileData[],
     replace = false,
@@ -4587,6 +5078,11 @@ class App extends React.Component<AppProps, AppState> {
     }
 
     this.files = nextFiles;
+
+    // Publish a REFERENCE for anything not yet referenced. Bytes stay local and
+    // go to the host store through the adapter; only the opaque locator it
+    // returns reaches the document.
+    void this.publishUnreferencedAssets();
 
     return { addedFiles };
   };
@@ -4632,7 +5128,14 @@ class App extends React.Component<AppProps, AppState> {
       }
 
       if (elements) {
-        this.scene.replaceAllElements(elements);
+        // Native element history (M2): only let the UndoManager capture this
+        // write when the caller did not request `CaptureUpdateAction.NEVER`
+        // (scene init / load / remote updates pass NEVER and must not be
+        // undoable). `EVENTUALLY` (the default) stays tracked — it coalesces
+        // into the next durable step, as before.
+        this.scene.replaceAllElements(elements, {
+          recordHistory: captureUpdate !== CaptureUpdateAction.NEVER,
+        });
       }
 
       if (collaborators) {
@@ -4672,6 +5175,131 @@ class App extends React.Component<AppProps, AppState> {
       informMutation,
       isDragging: false,
     });
+  };
+
+  /**
+   * Reconcile the local byte cache with the document's asset REFERENCES.
+   *
+   * The document holds `fileId -> locator` only, so this cannot copy bytes out
+   * of it. For any reference whose bytes are not cached — a peer's image, or a
+   * reload — it asks the host adapter to resolve them and adds them locally.
+   *
+   * Strictly one-way with respect to the document: it never writes references
+   * back, so it cannot loop with the observer that triggers it.
+   */
+  private refreshFilesFromScene = () => {
+    const adapter = this.props.assetAdapter;
+    if (!adapter) {
+      return;
+    }
+    const missing = Object.entries(this.scene.getAssetLocators()).filter(
+      ([fileId, locator]) =>
+        !this.files[fileId as keyof BinaryFiles] &&
+        !this.assetResolvesInFlight.has(`${fileId}\u0000${locator}`),
+    );
+    if (!missing.length) {
+      return;
+    }
+    void (async () => {
+      const resolved: BinaryFileData[] = [];
+      let locatorChangedMidFlight = false;
+      await Promise.all(
+        missing.map(async ([fileId, locator]) => {
+          const key = `${fileId}\u0000${locator}`;
+          this.assetResolvesInFlight.add(key);
+          try {
+            const file = await adapter.resolve(fileId as FileId, locator);
+            // The locator can change while a resolve is in flight. Dropping a
+            // stale result is what stops old bytes overwriting newer ones — and
+            // it is the ONE case that needs an immediate re-entry, because the
+            // new locator was never fetched and nothing else will trigger it.
+            if (this.scene.getAssetLocators()[fileId] !== locator) {
+              locatorChangedMidFlight = true;
+              return;
+            }
+            if (file.id !== fileId) {
+              console.error(
+                `assetAdapter.resolve returned id "${file.id}" for "${fileId}"`,
+              );
+              return;
+            }
+            resolved.push(file);
+          } catch (error) {
+            console.error(`assetAdapter.resolve failed for ${fileId}`, error);
+          } finally {
+            this.assetResolvesInFlight.delete(key);
+          }
+        }),
+      );
+      if (resolved.length && !this.unmounted) {
+        // Cache ONLY. Going through the publisher would store these bytes back
+        // to the host and re-publish a locator for something we just fetched.
+        this.cacheResolvedFiles(resolved);
+      }
+      // Reconcile again ONLY for a locator that changed mid-flight: its result
+      // was discarded above and nothing else would re-trigger a fetch for it.
+      //
+      // Re-entering UNCONDITIONALLY was an unbounded loop. A rejected or
+      // wrong-id resolve leaves the entry still "missing", so the re-entry
+      // recomputed an identical set and fired again immediately — for a
+      // rejection that never reaches the network, tight enough to freeze the
+      // tab (measured: it timed the test runner out).
+      //
+      // A failure is deliberately NOT remembered. The host adapter throws on
+      // ordinary transient trouble — a GraphQL lookup miss, an expired URL, a
+      // transport error — and its contract says nothing about rejection being
+      // permanent, so treating one as final would turn a blip into an image
+      // that never loads again for the life of the editor. Dropping the
+      // immediate re-entry is enough to stop the loop; any later scene update
+      // re-runs this through `scene.onUpdate` and retries the fetch once.
+      if (!this.unmounted && locatorChangedMidFlight) {
+        this.refreshFilesFromScene();
+      }
+    })();
+  };
+
+  /** `fileId\u0000locator` pairs in flight, so a changed locator refetches. */
+  private assetResolvesInFlight = new Set<string>();
+
+  /**
+   * Refresh the collaborative/persistable appState subset (background + name)
+   * from the scene doc (M4). Those fields live on `scene.doc` (`yAppState`) and
+   * collaborate/persist there, but the renderer reads them from React state
+   * (`this.state.viewBackgroundColor` / `this.state.name`), so a remote peer's
+   * change — or a restore on load — must be mirrored into React state for the UI
+   * to reflect it. Subscribed to `scene.onUpdate` (fires on every doc change),
+   * mirroring `refreshFilesFromScene`.
+   *
+   * STRICTLY read-only and ECHO-SAFE: it pulls from `scene.getPersistedAppState()`
+   * and `setState`s ONLY the keys whose doc value DIFFERS from current React
+   * state. It never writes back to the doc (the producers are the bg-color / name
+   * actions, which `setAppState` under LOCAL_ORIGIN). A remote-applied change
+   * reaches here via the doc observer, updates React state, and stops — there is
+   * no path from this `setState` back into `yAppState`, so it cannot loop or
+   * re-broadcast.
+   */
+  private refreshAppStateFromScene = () => {
+    const persisted = this.scene.getPersistedAppState();
+    const next: {
+      viewBackgroundColor?: AppState["viewBackgroundColor"];
+      name?: AppState["name"];
+    } = {};
+    if (
+      persisted.viewBackgroundColor !== undefined &&
+      persisted.viewBackgroundColor !== this.state.viewBackgroundColor
+    ) {
+      next.viewBackgroundColor =
+        persisted.viewBackgroundColor as AppState["viewBackgroundColor"];
+    }
+    if (persisted.name !== undefined && persisted.name !== this.state.name) {
+      next.name = persisted.name as AppState["name"];
+    }
+    // Only `setState` when the doc actually diverges from React state — so a
+    // local edit (React state already holds the value the producer just wrote to
+    // the doc) is a no-op here, and only a genuine remote/load change re-renders.
+    if (next.viewBackgroundColor !== undefined || next.name !== undefined) {
+      this.setState(next as Pick<AppState, "viewBackgroundColor" | "name">);
+    }
   };
 
   private triggerRender = (
@@ -7126,7 +7754,16 @@ class App extends React.Component<AppProps, AppState> {
     }
 
     if (this.state.multiElement && this.state.selectedLinearElement) {
-      const { multiElement, selectedLinearElement } = this.state;
+      const { selectedLinearElement } = this.state;
+      // Fresh-snapshot (native-Yjs core): `state.multiElement` is a held reference
+      // that stops tracking the doc once we mutate it with `informMutation:false`
+      // below. Re-read the live element so `points`/`x`/`y` reflect the committed
+      // points (otherwise an appended point is built from a stale array).
+      const multiElement =
+        (this.scene.getElement(
+          this.state.multiElement.id,
+        ) as NonDeleted<ExcalidrawLinearElement> | null) ??
+        this.state.multiElement;
       const { x: rx, y: ry, points } = multiElement;
       const lastPoint = points[points.length - 1];
 
@@ -9209,7 +9846,15 @@ class App extends React.Component<AppProps, AppState> {
     }
 
     if (this.state.multiElement) {
-      const { multiElement, selectedLinearElement } = this.state;
+      const { selectedLinearElement } = this.state;
+      // Fresh-snapshot: re-read the live multi-point element so its committed
+      // `points` are seen here (the move handler appended points with
+      // informMutation:false, leaving `state.multiElement` stale).
+      const multiElement =
+        (this.scene.getElement(
+          this.state.multiElement.id,
+        ) as NonDeleted<ExcalidrawLinearElement> | null) ??
+        this.state.multiElement;
 
       invariant(
         selectedLinearElement,
@@ -10810,7 +11455,12 @@ class App extends React.Component<AppProps, AppState> {
           isLinearElement(this.state.newElement) &&
           this.state.selectedLinearElement
         ) {
-          const { multiElement } = this.state;
+          // Fresh-snapshot: re-read so the committed last point is read from the doc.
+          const multiElement =
+            (this.scene.getElement(
+              this.state.multiElement.id,
+            ) as NonDeleted<ExcalidrawLinearElement> | null) ??
+            this.state.multiElement;
 
           this.setState({
             selectedLinearElement: {

@@ -1,14 +1,14 @@
-import { getNonDeletedElements } from "@excalidraw/element";
-import { bindOrUnbindBindingElements } from "@excalidraw/element";
-import { getCommonBoundingBox } from "@excalidraw/element";
-import { newElementWith } from "@excalidraw/element";
-import { deepCopyElement } from "@excalidraw/element";
-import { resizeMultipleElements } from "@excalidraw/element";
-import { isArrowElement, isElbowArrow } from "@excalidraw/element";
-import { updateFrameMembershipOfSelectedElements } from "@excalidraw/element";
-import { CODES, KEYS, arrayToMap } from "@excalidraw/common";
+import { getNonDeletedElements } from "@excalidraw-yjs/element";
+import { bindOrUnbindBindingElements } from "@excalidraw-yjs/element";
+import { getCommonBoundingBox } from "@excalidraw-yjs/element";
+import { newElementWith } from "@excalidraw-yjs/element";
+import { deepCopyElement } from "@excalidraw-yjs/element";
+import { resizeMultipleElements } from "@excalidraw-yjs/element";
+import { isArrowElement, isElbowArrow } from "@excalidraw-yjs/element";
+import { updateFrameMembershipOfSelectedElements } from "@excalidraw-yjs/element";
+import { CODES, KEYS, arrayToMap } from "@excalidraw-yjs/common";
 
-import { CaptureUpdateAction } from "@excalidraw/element";
+import { CaptureUpdateAction } from "@excalidraw-yjs/element";
 
 import type {
   ExcalidrawArrowElement,
@@ -16,7 +16,7 @@ import type {
   ExcalidrawElement,
   NonDeleted,
   NonDeletedSceneElementsMap,
-} from "@excalidraw/element/types";
+} from "@excalidraw-yjs/element/types";
 
 import { getSelectedElements } from "../scene";
 
@@ -26,24 +26,51 @@ import { register } from "./register";
 
 import type { AppClassProperties, AppState } from "../types";
 
+/**
+ * Flip's conflict POLICY: for geometry keys, the helper's already-applied doc
+ * value wins.
+ *
+ * `flipSelectedElements` repositions elements — and their bound texts and
+ * arrows — THROUGH THE DOC via `mutateElement`, then returns the pre-flip
+ * `selectedElements`. Those carry positions computed from the pre-flip base, so
+ * wherever the two genuinely disagree the doc is right and the action's derived
+ * value is stale.
+ *
+ * Declared as a KEY policy, deliberately: the action cannot know which ids will
+ * actually conflict before the journal exists, and fabricating an entry for
+ * every record in the returned scene array would be neither "ids actually
+ * touched" nor exact coverage. The boundary applies this only to keys that are
+ * genuinely ambiguous; any ambiguous key outside it still throws.
+ */
+const FLIP_OVERLAP_POLICY: ReadonlyMap<string, "result" | "applied"> = new Map([
+  ["x", "applied"],
+  ["y", "applied"],
+  ["width", "applied"],
+  ["height", "applied"],
+  ["angle", "applied"],
+  ["points", "applied"],
+]);
+
 export const actionFlipHorizontal = register({
   name: "flipHorizontal",
   label: "labels.flipHorizontal",
   icon: flipHorizontal,
   trackEvent: { category: "element" },
   perform: (elements, appState, _, app) => {
-    return {
-      elements: updateFrameMembershipOfSelectedElements(
-        flipSelectedElements(
-          elements,
-          app.scene.getNonDeletedElementsMap(),
-          appState,
-          "horizontal",
-          app,
-        ),
+    const next = updateFrameMembershipOfSelectedElements(
+      flipSelectedElements(
+        elements,
+        app.scene.getNonDeletedElementsMap(),
         appState,
+        "horizontal",
         app,
       ),
+      appState,
+      app,
+    );
+    return {
+      elements: next,
+      overlapPolicy: FLIP_OVERLAP_POLICY,
       appState,
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     };
@@ -57,18 +84,20 @@ export const actionFlipVertical = register({
   icon: flipVertical,
   trackEvent: { category: "element" },
   perform: (elements, appState, _, app) => {
-    return {
-      elements: updateFrameMembershipOfSelectedElements(
-        flipSelectedElements(
-          elements,
-          app.scene.getNonDeletedElementsMap(),
-          appState,
-          "vertical",
-          app,
-        ),
+    const next = updateFrameMembershipOfSelectedElements(
+      flipSelectedElements(
+        elements,
+        app.scene.getNonDeletedElementsMap(),
         appState,
+        "vertical",
         app,
       ),
+      appState,
+      app,
+    );
+    return {
+      elements: next,
+      overlapPolicy: FLIP_OVERLAP_POLICY,
       appState,
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     };
@@ -149,8 +178,22 @@ const flipElements = (
     },
   );
 
+  // Fresh-snapshot (native-Yjs core): `resizeMultipleElements` mutates each
+  // container's object in place but repositions BOUND TEXTS (and re-routes arrows)
+  // through the doc, so the arrow objects inside `selectedElements` are stale
+  // (pre-flip). Re-read every selected element live BEFORE binding reconciliation
+  // so `bindOrUnbindBindingElements` operates on the flipped arrow geometry/
+  // bindings, not the pre-flip snapshot. The same fresh array also feeds the
+  // post-flip bounding box and re-centering below — a stale bound-text position
+  // would skew the box and produce a spurious offset that drags the
+  // correctly-positioned text out of place.
+  const freshMap = app.scene.getNonDeletedElementsMap();
+  const flippedElements = selectedElements.map(
+    (element) => freshMap.get(element.id) ?? element,
+  );
+
   bindOrUnbindBindingElements(
-    selectedElements.filter(isArrowElement),
+    flippedElements.filter(isArrowElement),
     app.scene,
     app.state,
   );
@@ -161,7 +204,7 @@ const flipElements = (
   // of the selection, so we need to center the group back to the original
   // position so that repeated flips don't accumulate the offset
 
-  const { elbowArrows, otherElements } = selectedElements.reduce(
+  const { elbowArrows, otherElements } = flippedElements.reduce(
     (
       acc: {
         elbowArrows: ExcalidrawElbowArrowElement[];
@@ -176,7 +219,7 @@ const flipElements = (
   );
 
   const { midX: newMidX, midY: newMidY } =
-    getCommonBoundingBox(selectedElements);
+    getCommonBoundingBox(flippedElements);
   const [diffX, diffY] = [midX - newMidX, midY - newMidY];
   otherElements.forEach((element) =>
     app.scene.mutateElement(element, {
@@ -192,5 +235,10 @@ const flipElements = (
   );
   // ---------------------------------------------------------------------------
 
+  // Fresh-snapshot: return the live, flipped elements (re-read from the doc), not
+  // the pre-flip `selectedElements`. Bound texts (and any element repositioned
+  // through the doc rather than mutated in place) are stale in `selectedElements`;
+  // returning them would make the action's result clobber the doc's correct
+  // post-flip positions.
   return selectedElements;
 };

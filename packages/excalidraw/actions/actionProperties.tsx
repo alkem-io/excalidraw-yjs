@@ -1,4 +1,4 @@
-import { pointFrom } from "@excalidraw/math";
+import { pointFrom } from "@excalidraw-yjs/math";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -23,25 +23,28 @@ import {
   reduceToCommonValue,
   invariant,
   FONT_SIZES,
-} from "@excalidraw/common";
+} from "@excalidraw-yjs/common";
 
-import { canBecomePolygon, getNonDeletedElements } from "@excalidraw/element";
+import {
+  canBecomePolygon,
+  getNonDeletedElements,
+} from "@excalidraw-yjs/element";
 
 import {
   bindBindingElement,
   calculateFixedPointForElbowArrowBinding,
   updateBoundElements,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
-import { LinearElementEditor } from "@excalidraw/element";
+import { LinearElementEditor } from "@excalidraw-yjs/element";
 
-import { newElementWith } from "@excalidraw/element";
-import { getArrowheadForPicker } from "@excalidraw/element";
+import { newElementWith } from "@excalidraw-yjs/element";
+import { getArrowheadForPicker } from "@excalidraw-yjs/element";
 
 import {
   getBoundTextElement,
   redrawTextBoundingBox,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
 import {
   isArrowElement,
@@ -51,19 +54,19 @@ import {
   isLineElement,
   isTextElement,
   isUsingAdaptiveRadius,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
-import { hasStrokeColor } from "@excalidraw/element";
+import { hasStrokeColor } from "@excalidraw-yjs/element";
 
 import {
   updateElbowArrowPoints,
   CaptureUpdateAction,
   toggleLinePolygonState,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
-import { deriveStylesPanelMode } from "@excalidraw/common";
+import { deriveStylesPanelMode } from "@excalidraw-yjs/common";
 
-import type { LocalPoint, Radians } from "@excalidraw/math";
+import type { LocalPoint, Radians } from "@excalidraw-yjs/math";
 
 import type {
   Arrowhead,
@@ -75,11 +78,12 @@ import type {
   FontFamilyValues,
   TextAlign,
   VerticalAlign,
-} from "@excalidraw/element/types";
+} from "@excalidraw-yjs/element/types";
 
-import type { Scene } from "@excalidraw/element";
+import type { Mutable } from "@excalidraw-yjs/common/utility-types";
+import type { Scene } from "@excalidraw-yjs/element";
 
-import type { CaptureUpdateActionType } from "@excalidraw/element";
+import type { CaptureUpdateActionType } from "@excalidraw-yjs/element";
 
 import { trackEvent } from "../analytics";
 import { RadioSelection } from "../components/RadioSelection";
@@ -265,9 +269,17 @@ const changeFontSize = (
         const newFontSize = getNewFontSize(oldElement);
         newFontSizes.add(newFontSize);
 
-        let newElement: ExcalidrawTextElement = newElementWith(oldElement, {
-          fontSize: newFontSize,
-        });
+        // FR-009: DECLARE the font-size change to the doc. This previously built
+        // a detached `newElementWith` copy and let `redrawTextBoundingBox`'s
+        // whole-object flush carry `fontSize` into the doc as a side effect —
+        // behaviour built on the clobber FR-009 removes. Now that a write only
+        // touches its declared keys, the redraw writes just its geometry and the
+        // font size has to be a write of its own.
+        let newElement: ExcalidrawTextElement = app.scene.mutateElement(
+          oldElement as Mutable<ExcalidrawTextElement>,
+          { fontSize: newFontSize },
+        );
+
         redrawTextBoundingBox(
           newElement,
           app.scene.getContainerElement(oldElement),
@@ -296,8 +308,19 @@ const changeFontSize = (
     }
   });
 
+  // fresh-snapshot: re-read post-mutation. `redrawTextBoundingBox` wrote the
+  // resized CONTAINER and `updateBoundElements` the BOUND ARROWS, which
+  // `changeProperty`'s array returns stale. Under FR-009 the edited text elements
+  // no longer need the exception they used to: their font size is now IN the doc
+  // (declared above) rather than living only in a detached copy, so re-reading
+  // every element is both correct and uniform.
+  const freshMap = app.scene.getNonDeletedElementsMap();
+  const freshElements = updatedElements.map(
+    (element) => freshMap.get(element.id) ?? element,
+  );
+
   return {
-    elements: updatedElements,
+    elements: freshElements,
     appState: {
       ...appState,
       // update state only if we've set all select text elements to
@@ -1021,51 +1044,71 @@ export const actionChangeFontFamily = register<{
 
       // following causes re-render so make sure we changed the family
       // otherwise it could cause unexpected issues, such as preventing opening the popover when in wysiwyg
-      Object.assign(result, {
-        elements: changeProperty(
-          elements,
-          appState,
-          (oldElement) => {
-            if (
-              isTextElement(oldElement) &&
-              (oldElement.fontFamily !== nextFontFamily ||
-                currentItemFontFamily) // force update on selection
-            ) {
-              const newElement: ExcalidrawTextElement = newElementWith(
-                oldElement,
-                {
-                  fontFamily: nextFontFamily,
-                  lineHeight: getLineHeight(nextFontFamily!),
-                },
-              );
+      const nextElements = changeProperty(
+        elements,
+        appState,
+        (oldElement) => {
+          if (
+            isTextElement(oldElement) &&
+            (oldElement.fontFamily !== nextFontFamily || currentItemFontFamily) // force update on selection
+          ) {
+            const newElement: ExcalidrawTextElement = newElementWith(
+              oldElement,
+              {
+                fontFamily: nextFontFamily,
+                lineHeight: getLineHeight(nextFontFamily!),
+              },
+            );
 
-              const cachedContainer =
-                cachedElements?.get(oldElement.containerId || "") || {};
+            const cachedContainer =
+              cachedElements?.get(oldElement.containerId || "") || {};
 
-              const container = app.scene.getContainerElement(oldElement);
+            const container = app.scene.getContainerElement(oldElement);
 
-              if (resetContainers && container && cachedContainer) {
-                // reset the container back to it's cached version
-                app.scene.mutateElement(container, { ...cachedContainer });
-              }
-
-              if (!skipFontFaceCheck) {
-                uniqueChars = new Set([
-                  ...uniqueChars,
-                  ...Array.from(newElement.originalText),
-                ]);
-              }
-
-              elementContainerMapping.set(newElement, container);
-
-              return newElement;
+            if (resetContainers && container && cachedContainer) {
+              // reset the container back to it's cached version
+              app.scene.mutateElement(container, { ...cachedContainer });
             }
 
-            return oldElement;
-          },
-          true,
-        ),
-      });
+            if (!skipFontFaceCheck) {
+              uniqueChars = new Set([
+                ...uniqueChars,
+                ...Array.from(newElement.originalText),
+              ]);
+            }
+
+            elementContainerMapping.set(newElement, container);
+
+            return newElement;
+          }
+
+          return oldElement;
+        },
+        true,
+      );
+      // fresh-snapshot: re-read post-mutation (resetContainers above mutated the
+      // CONTAINERS through the doc, but `nextElements` holds their stale container
+      // entries — re-read those live so the reset is not reverted by the action's
+      // result. The edited text elements are skipped: their new fontFamily/
+      // lineHeight lives only in the returned `newElementWith` copy, so re-reading
+      // them from the doc would revert the font-family change). Applied to BOTH
+      // the sync redraw path below AND the async font-load path: in the async
+      // case the redraw runs later in `.then()`, but the container reset at
+      // `resetContainers` already wrote through the doc, so the returned elements
+      // must reflect it now or `replaceAllElements` would clobber the reset.
+      const editedTextIds = new Set(
+        [...elementContainerMapping.keys()].map((element) => element.id),
+      );
+      const getFreshElements = () => {
+        const freshMap = app.scene.getNonDeletedElementsMap();
+        return nextElements.map((element) =>
+          editedTextIds.has(element.id)
+            ? element
+            : freshMap.get(element.id) ?? element,
+        );
+      };
+
+      Object.assign(result, { elements: getFreshElements() });
 
       // size is irrelevant, but necessary
       const fontString = `10px ${getFontFamilyString({
@@ -1079,6 +1122,9 @@ export const actionChangeFontFamily = register<{
           // trigger synchronous redraw
           redrawTextBoundingBox(element, container, app.scene);
         }
+
+        // re-read again after the synchronous redraw resized the containers.
+        Object.assign(result, { elements: getFreshElements() });
       } else {
         // otherwise try to load all font faces for the given chars and redraw elements once our font faces loaded
         window.document.fonts.load(fontString, chars).then((fontFaces) => {
@@ -1296,27 +1342,41 @@ export const actionChangeTextAlign = register<TextAlign>({
   label: "Change text alignment",
   trackEvent: false,
   perform: (elements, appState, value, app) => {
-    return {
-      elements: changeProperty(
-        elements,
-        appState,
-        (oldElement) => {
-          if (isTextElement(oldElement)) {
-            const newElement: ExcalidrawTextElement = newElementWith(
-              oldElement,
-              { textAlign: value },
-            );
-            redrawTextBoundingBox(
-              newElement,
-              app.scene.getContainerElement(oldElement),
-              app.scene,
-            );
-            return newElement;
-          }
+    const editedTextIds = new Set<string>();
+    const nextElements = changeProperty(
+      elements,
+      appState,
+      (oldElement) => {
+        if (isTextElement(oldElement)) {
+          editedTextIds.add(oldElement.id);
+          const newElement: ExcalidrawTextElement = newElementWith(oldElement, {
+            textAlign: value,
+          });
+          redrawTextBoundingBox(
+            newElement,
+            app.scene.getContainerElement(oldElement),
+            app.scene,
+          );
+          return newElement;
+        }
 
-          return oldElement;
-        },
-        true,
+        return oldElement;
+      },
+      true,
+    );
+
+    // fresh-snapshot: re-read post-mutation (redrawTextBoundingBox resized the
+    // bound-text CONTAINER through the doc, but `changeProperty` returns the
+    // stale container entry — re-read it live so the container resize is not
+    // reverted. The edited text elements are skipped: their new textAlign lives
+    // only in the returned copy, so re-reading them would revert the change)
+    const freshMap = app.scene.getNonDeletedElementsMap();
+
+    return {
+      elements: nextElements.map((element) =>
+        editedTextIds.has(element.id)
+          ? element
+          : freshMap.get(element.id) ?? element,
       ),
       appState: {
         ...appState,
@@ -1397,28 +1457,42 @@ export const actionChangeVerticalAlign = register<VerticalAlign>({
   label: "Change vertical alignment",
   trackEvent: { category: "element" },
   perform: (elements, appState, value, app) => {
+    const editedTextIds = new Set<string>();
+    const nextElements = changeProperty(
+      elements,
+      appState,
+      (oldElement) => {
+        if (isTextElement(oldElement)) {
+          editedTextIds.add(oldElement.id);
+          const newElement: ExcalidrawTextElement = newElementWith(oldElement, {
+            verticalAlign: value,
+          });
+
+          redrawTextBoundingBox(
+            newElement,
+            app.scene.getContainerElement(oldElement),
+            app.scene,
+          );
+          return newElement;
+        }
+
+        return oldElement;
+      },
+      true,
+    );
+
+    // fresh-snapshot: re-read post-mutation (redrawTextBoundingBox resized the
+    // bound-text CONTAINER through the doc, but `changeProperty` returns the
+    // stale container entry — re-read it live so the container resize is not
+    // reverted. The edited text elements are skipped: their new verticalAlign
+    // lives only in the returned copy, so re-reading them would revert it)
+    const freshMap = app.scene.getNonDeletedElementsMap();
+
     return {
-      elements: changeProperty(
-        elements,
-        appState,
-        (oldElement) => {
-          if (isTextElement(oldElement)) {
-            const newElement: ExcalidrawTextElement = newElementWith(
-              oldElement,
-              { verticalAlign: value },
-            );
-
-            redrawTextBoundingBox(
-              newElement,
-              app.scene.getContainerElement(oldElement),
-              app.scene,
-            );
-            return newElement;
-          }
-
-          return oldElement;
-        },
-        true,
+      elements: nextElements.map((element) =>
+        editedTextIds.has(element.id)
+          ? element
+          : freshMap.get(element.id) ?? element,
       ),
       appState: {
         ...appState,
@@ -1804,10 +1878,15 @@ export const actionChangeArrowType = register<keyof typeof ARROW_TYPE>({
   label: "Change arrow types",
   trackEvent: false,
   perform: (elements, appState, value, app) => {
-    const newElements = changeProperty(elements, appState, (el) => {
+    // the edited arrows carry their new type/points/roundness in the returned
+    // copy (bindBindingElement only wrote their bindings to the doc, not the
+    // type conversion) — they must be kept and NOT re-read from the doc
+    const editedArrowIds = new Set<string>();
+    const nextElements = changeProperty(elements, appState, (el) => {
       if (!isArrowElement(el)) {
         return el;
       }
+      editedArrowIds.add(el.id);
       const elementsMap = app.scene.getNonDeletedElementsMap();
       const startPoint = LinearElementEditor.getPointAtIndexGlobalCoordinates(
         el,
@@ -1964,6 +2043,18 @@ export const actionChangeArrowType = register<keyof typeof ARROW_TYPE>({
 
       return newElement;
     });
+
+    // fresh-snapshot: re-read post-mutation (bindBindingElement wrote the
+    // BINDABLE targets' `boundElements` to the doc, but `changeProperty` returns
+    // those targets stale — re-read them live so the back-references are not
+    // reverted. The edited arrows are skipped: their type conversion lives only
+    // in the returned copy, so re-reading them would revert the change)
+    const freshMap = app.scene.getNonDeletedElementsMap();
+    const newElements = nextElements.map((element) =>
+      editedArrowIds.has(element.id)
+        ? element
+        : freshMap.get(element.id) ?? element,
+    );
 
     const newState = {
       ...appState,

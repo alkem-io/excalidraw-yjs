@@ -1,4 +1,4 @@
-import { pointFrom } from "@excalidraw/math";
+import { pointFrom } from "@excalidraw-yjs/math";
 
 import {
   FONT_FAMILY,
@@ -6,15 +6,15 @@ import {
   getFontString,
   getLineHeight,
   ROUGHNESS,
-} from "@excalidraw/common";
+} from "@excalidraw-yjs/common";
 
 import {
   measureText,
   newLinearElement,
   newTextElement,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
-import type { LocalPoint } from "@excalidraw/math";
+import type { LocalPoint } from "@excalidraw-yjs/math";
 
 import {
   BAR_GAP,

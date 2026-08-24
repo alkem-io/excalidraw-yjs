@@ -1,6 +1,6 @@
 import React from "react";
 
-import { sceneCoordsToViewportCoords } from "@excalidraw/common";
+import { sceneCoordsToViewportCoords } from "@excalidraw-yjs/common";
 
 import { FloatingEmoji } from "./FloatingEmoji";
 

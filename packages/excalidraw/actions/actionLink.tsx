@@ -1,8 +1,8 @@
-import { isEmbeddableElement } from "@excalidraw/element";
+import { isEmbeddableElement } from "@excalidraw-yjs/element";
 
-import { KEYS } from "@excalidraw/common";
+import { KEYS } from "@excalidraw-yjs/common";
 
-import { CaptureUpdateAction } from "@excalidraw/element";
+import { CaptureUpdateAction } from "@excalidraw-yjs/element";
 
 import { ToolButton } from "../components/ToolButton";
 import { getContextMenuLabel } from "../components/hyperlink/Hyperlink";

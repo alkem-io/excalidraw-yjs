@@ -5,20 +5,20 @@ import {
   VERTICAL_ALIGN,
   arrayToMap,
   getFontString,
-} from "@excalidraw/common";
+} from "@excalidraw-yjs/common";
 import {
   getOriginalContainerHeightFromCache,
   isBoundToContainer,
   resetOriginalContainerCache,
   updateOriginalContainerCache,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
 import {
   computeBoundTextPosition,
   computeContainerDimensionForBoundText,
   getBoundTextElement,
   redrawTextBoundingBox,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
 import {
   hasBoundTextElement,
@@ -26,26 +26,25 @@ import {
   isTextBindableContainer,
   isTextElement,
   isUsingAdaptiveRadius,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
-import { measureText } from "@excalidraw/element";
+import { measureText } from "@excalidraw-yjs/element";
 
-import { syncMovedIndices } from "@excalidraw/element";
+import { syncMovedIndices } from "@excalidraw-yjs/element";
 
-import { newElement } from "@excalidraw/element";
+import { newElement } from "@excalidraw-yjs/element";
 
-import { CaptureUpdateAction } from "@excalidraw/element";
+import { CaptureUpdateAction } from "@excalidraw-yjs/element";
 
 import type {
   ExcalidrawElement,
-  ExcalidrawLinearElement,
   ExcalidrawTextContainer,
   ExcalidrawTextElement,
-} from "@excalidraw/element/types";
+} from "@excalidraw-yjs/element/types";
 
-import type { Mutable } from "@excalidraw/common/utility-types";
+import type { Mutable } from "@excalidraw-yjs/common/utility-types";
 
-import type { Radians } from "@excalidraw/math";
+import type { Radians } from "@excalidraw-yjs/math";
 
 import { register } from "./register";
 
@@ -172,8 +171,20 @@ export const actionBindText = register({
     // it can be restored when unbind
     updateOriginalContainerCache(container.id, originalContainerHeight);
 
+    // fresh-snapshot: re-read post-mutation (scene.mutateElement +
+    // redrawTextBoundingBox wrote the CONTAINER's boundElements + resized
+    // dimensions to the doc, but `pushTextAboveContainer` keeps the stale
+    // input-array container entry — re-read live so the bind + container resize
+    // is not reverted)
+    const freshMap = app.scene.getNonDeletedElementsMap();
+    const nextElements = pushTextAboveContainer(
+      elements,
+      container,
+      textElement,
+    ).map((element) => freshMap.get(element.id) ?? element);
+
     return {
-      elements: pushTextAboveContainer(elements, container, textElement),
+      elements: nextElements,
       appState: { ...appState, selectedElementIds: { [container.id]: true } },
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     };
@@ -280,9 +291,18 @@ export const actionWrapTextInContainer = register({
           const linearElementIds = textElement.boundElements
             .filter((ele) => ele.type === "arrow")
             .map((el) => el.id);
-          const linearElements = updatedElements.filter((ele) =>
-            linearElementIds.includes(ele.id),
-          ) as ExcalidrawLinearElement[];
+          // fresh-snapshot (native-Yjs core): read the bound arrows LIVE from the
+          // doc, not from the stale `updatedElements` snapshot. When two selected
+          // text elements are opposite endpoints of the SAME arrow, the second
+          // loop iteration must see the first iteration's rebind (already written
+          // through the doc) — otherwise it would re-derive the arrow from the
+          // pre-first-wrap snapshot and clobber the earlier rebind. Arrows always
+          // pre-exist in the doc, so the fresh map contains them.
+          const freshMap = app.scene.getNonDeletedElementsMap();
+          const linearElements = linearElementIds.flatMap((id) => {
+            const ele = freshMap.get(id);
+            return isArrowElement(ele) ? [ele] : [];
+          });
           linearElements.forEach((ele) => {
             let startBinding = ele.startBinding;
             let endBinding = ele.endBinding;
@@ -326,6 +346,15 @@ export const actionWrapTextInContainer = register({
         containerIds[container.id] = true;
       }
     }
+
+    // The post-helper re-read that used to sit here is GONE (spec 002 T016b).
+    // It existed to stop stale input entries reverting helper writes — which the
+    // patch route now protects — but it also replaced the just-reindexed text
+    // with the live doc version still carrying its OLD index, tying it against
+    // the freshly-minted container. Measured: `syncMovedIndices` produces
+    // distinct `a1`/`a2`, and the re-read turned them into `a1`/`a1`, which only
+    // looked harmless while authoritative `replaceAllElements` re-indexed
+    // everything on the way in.
 
     return {
       elements: updatedElements,

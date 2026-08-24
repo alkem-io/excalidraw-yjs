@@ -1,4 +1,4 @@
-import { toIterable } from "@excalidraw/common";
+import { toIterable } from "@excalidraw-yjs/common";
 
 import { isInvisiblySmallElement } from "./sizeHelpers";
 
@@ -100,3 +100,4 @@ export * from "./utils";
 export * from "./zindex";
 export * from "./arrows/helpers";
 export * from "./arrowheads";
+export * from "./yjs";

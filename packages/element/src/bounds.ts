@@ -5,7 +5,7 @@ import {
   invariant,
   rescalePoints,
   sizeOf,
-} from "@excalidraw/common";
+} from "@excalidraw-yjs/common";
 import {
   degreesToRadians,
   lineSegment,
@@ -13,8 +13,8 @@ import {
   pointFrom,
   pointFromArray,
   pointRotateRads,
-} from "@excalidraw/math";
-import { getCurvePathOps } from "@excalidraw/utils/shape";
+} from "@excalidraw-yjs/math";
+import { getCurvePathOps } from "@excalidraw-yjs/utils/shape";
 import { pointsOnBezierCurves } from "points-on-curve";
 
 import type {
@@ -24,9 +24,9 @@ import type {
   LineSegment,
   LocalPoint,
   Radians,
-} from "@excalidraw/math";
-import type { AppState } from "@excalidraw/excalidraw/types";
-import type { Mutable } from "@excalidraw/common/utility-types";
+} from "@excalidraw-yjs/math";
+import type { AppState } from "@excalidraw-yjs/excalidraw/types";
+import type { Mutable } from "@excalidraw-yjs/common/utility-types";
 
 import { generateRoughOptions } from "./shape";
 import { ShapeCache } from "./shape";

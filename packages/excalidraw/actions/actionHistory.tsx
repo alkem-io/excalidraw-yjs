@@ -3,13 +3,13 @@ import {
   matchKey,
   arrayToMap,
   MOBILE_ACTION_BUTTON_BG,
-} from "@excalidraw/common";
+} from "@excalidraw-yjs/common";
 
-import { CaptureUpdateAction } from "@excalidraw/element";
+import { CaptureUpdateAction } from "@excalidraw-yjs/element";
 
-import { orderByFractionalIndex } from "@excalidraw/element";
+import { orderByFractionalIndex } from "@excalidraw-yjs/element";
 
-import type { SceneElementsMap } from "@excalidraw/element/types";
+import type { SceneElementsMap } from "@excalidraw-yjs/element/types";
 
 import { ToolButton } from "../components/ToolButton";
 import { UndoIcon, RedoIcon } from "../components/icons";

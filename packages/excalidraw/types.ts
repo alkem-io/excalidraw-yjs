@@ -4,11 +4,11 @@ import type {
   throttleRAF,
   MIME_TYPES,
   EditorInterface,
-} from "@excalidraw/common";
+} from "@excalidraw-yjs/common";
 
-import type { LinearElementEditor } from "@excalidraw/element";
+import type { LinearElementEditor } from "@excalidraw-yjs/element";
 
-import type { MaybeTransformHandleType } from "@excalidraw/element";
+import type { MaybeTransformHandleType } from "@excalidraw-yjs/element";
 
 import type {
   PointerType,
@@ -33,21 +33,21 @@ import type {
   ExcalidrawNonSelectionElement,
   BindMode,
   ExcalidrawTextElement,
-} from "@excalidraw/element/types";
+} from "@excalidraw-yjs/element/types";
 
 import type {
   Merge,
   MaybePromise,
   ValueOf,
   MakeBrand,
-} from "@excalidraw/common/utility-types";
+} from "@excalidraw-yjs/common/utility-types";
 
 import type {
   CaptureUpdateActionType,
   DurableIncrement,
   EphemeralIncrement,
-} from "@excalidraw/element";
-import type { GlobalPoint } from "@excalidraw/math";
+} from "@excalidraw-yjs/element";
+import type { GlobalPoint } from "@excalidraw-yjs/math";
 
 import type { Action } from "./actions/types";
 import type { Spreadsheet } from "./charts";
@@ -549,12 +549,61 @@ export type LibraryItemsSource =
   | MaybePromise<LibraryItems_anyVersion | Blob>;
 // -----------------------------------------------------------------------------
 
-export type ExcalidrawInitialDataState = Merge<
+/**
+ * A durable scene captured as encoded Yjs bytes, for hosts that persist the
+ * document itself rather than a decoded element snapshot.
+ *
+ * This is the lineage-preserving form: adopting these bytes into the editor's
+ * document keeps the stored CRDT history, where rebuilding a scene from decoded
+ * records starts a fresh lineage and loses it.
+ */
+export type EncodedSceneDocument = {
+  update: Uint8Array;
+  format: "v2";
+};
+
+/**
+ * The classic form: a decoded snapshot of elements / files / appState.
+ * `encodedScene` is forbidden here so the two forms cannot be mixed.
+ */
+export type ExcalidrawRecordInitialDataState = Merge<
   ImportedDataState,
   {
     libraryItems?: MaybePromise<Required<ImportedDataState>["libraryItems"]>;
+    encodedScene?: never;
   }
 >;
+
+/**
+ * The native form: the scene arrives as an encoded document and is ADOPTED, so
+ * `elements` and `files` are forbidden — everything collaborative is derived
+ * from the document itself, including the persisted appState subset and the
+ * `fileId -> locator` asset references.
+ *
+ * `appState` here may still carry LOCAL-ONLY UI keys (theme, zoom, and the
+ * like). It must not be used to override collaborative keys such as `name` or
+ * `viewBackgroundColor`: those live on the document, and changing them requires
+ * a document mutation, not an initial-data override.
+ */
+export type ExcalidrawNativeInitialDataState = Merge<
+  Omit<ImportedDataState, "elements" | "files">,
+  {
+    libraryItems?: MaybePromise<Required<ImportedDataState>["libraryItems"]>;
+    encodedScene: EncodedSceneDocument;
+    elements?: never;
+    files?: never;
+  }
+>;
+
+/**
+ * Two MUTUALLY EXCLUSIVE forms. The union makes mixing them a type error; the
+ * runtime additionally fails loud for untyped JS callers, because silently
+ * honouring one and dropping the other would double-apply the scene or discard
+ * the stored lineage without a trace.
+ */
+export type ExcalidrawInitialDataState =
+  | ExcalidrawRecordInitialDataState
+  | ExcalidrawNativeInitialDataState;
 
 export type OnUserFollowedPayload = {
   userToFollow: UserToFollow;
@@ -568,7 +617,84 @@ export type OnExportProgress = {
   progress?: number;
 };
 
+/**
+ * How the host stores and retrieves image bytes.
+ *
+ * The collaborative document carries only `fileId -> locator`; the bytes
+ * themselves live in the local cache and in whatever store the host provides.
+ * The locator is OPAQUE to the editor — it is round-tripped, never parsed — so
+ * a host may use any identifier it likes without leaking its scheme into the
+ * document.
+ *
+ * Deliberately two operations. There is no `delete`: the editor's GC drops
+ * references, and deleting the underlying asset is the host's decision, not the
+ * editor's. Do not add operations here without a consumer that needs them.
+ *
+ * ASSET IDENTITY: `fileId` is the immutable identity of the asset's CONTENT.
+ * A locator changing for the same `fileId` means the same bytes moved — a
+ * migration, a re-upload, a new signature — never different content. The editor
+ * relies on this: it does not re-fetch bytes it has already cached when a
+ * locator changes, because the content is by definition unchanged. A host that
+ * needs to change an image must mint a NEW `fileId`.
+ *
+ * FAILURE CONTRACT, stated narrowly: if `store` rejects, the image is retained
+ * locally and no reference is published — it is never downgraded to inline
+ * bytes. It is retried on a LATER PUBLISH PASS, which happens when files are
+ * next added. There is no autonomous retry, no backoff and no observable
+ * failure state yet; a host needing those should track them itself around
+ * `store`.
+ */
+/** One file's outcome from an asset publication pass. See {@link AssetAdapter}. */
+export type AssetPublishOutcome =
+  | { fileId: FileId; status: "published" }
+  | {
+      fileId: FileId;
+      status: "skipped";
+      /**
+       * `remote-won` — a peer's locator arrived first; `file-replaced` — the
+       * cached bytes are no longer the ones uploaded; `unmounted` — the editor
+       * went away before the commit, so nothing was written.
+       */
+      reason: "unmounted" | "remote-won" | "file-replaced";
+    }
+  | { fileId: FileId; status: "failed"; error: unknown };
+
+/**
+ * What `flushAssetPublication` reports. **A host must treat a non-empty
+ * `failed` as a failed save**: those files have no locator in the document, so
+ * the saved content references bytes no peer can resolve. `skipped` is not an
+ * error — see {@link AssetPublishOutcome}.
+ */
+export type AssetPublishReport = {
+  published: FileId[];
+  skipped: Array<{ fileId: FileId; reason: string }>;
+  failed: Array<{ fileId: FileId; error: unknown }>;
+};
+
+export interface AssetAdapter {
+  /**
+   * Persist the bytes and return an opaque locator for them.
+   *
+   * **`store` MUST settle.** `flushAssetPublication` waits for it indefinitely
+   * by design — it has no timeout, because a timeout here would either abandon
+   * bytes the host still holds or lie about a locator that never committed.
+   * The host owns the network call and is the only party that knows what a
+   * reasonable bound is, so **the host must bound it** (an `AbortController`, a
+   * `Promise.race`, whatever fits) and reject on expiry. A `store` that hangs
+   * hangs every caller awaiting the flush, including a save or close path.
+   */
+  store: (file: BinaryFileData) => Promise<string>;
+  /** Retrieve the bytes a locator refers to. */
+  resolve: (fileId: FileId, locator: string) => Promise<BinaryFileData>;
+}
+
 export interface ExcalidrawProps {
+  /**
+   * Storage for image bytes. Without it the editor is local-only for images:
+   * they render from the cache but are never published, because the document
+   * cannot carry bytes. See {@link AssetAdapter}.
+   */
+  assetAdapter?: AssetAdapter;
   onChange?: (
     elements: readonly OrderedExcalidrawElement[],
     appState: AppState,
@@ -978,10 +1104,30 @@ export interface ExcalidrawImperativeAPI {
   getSceneElementsMapIncludingDeleted: InstanceType<
     typeof App
   >["getSceneElementsMapIncludingDeleted"];
+  /**
+   * Collaboration transport, carrying the editor's origin policy. Use these rather
+   * than subscribing to a raw `Y.Doc`.
+   */
+  onLocalSceneUpdate: InstanceType<typeof App>["onLocalSceneUpdate"];
+  applyRemoteSceneUpdate: InstanceType<typeof App>["applyRemoteSceneUpdate"];
+  encodeSceneAsUpdate: InstanceType<typeof App>["encodeSceneAsUpdate"];
+  encodeSceneStateVector: InstanceType<typeof App>["encodeSceneStateVector"];
   history: {
     clear: InstanceType<typeof App>["resetHistory"];
   };
   getSceneElements: InstanceType<typeof App>["getSceneElements"];
+  getSceneAssetLocators: InstanceType<typeof App>["getSceneAssetLocators"];
+  /**
+   * Await asset publication before a save/close. Resolves once every pending
+   * file has committed a locator or explicitly not; check `failed` before
+   * reporting a successful save.
+   */
+  flushAssetPublication: InstanceType<typeof App>["flushAssetPublication"];
+  encodeSceneStateAsUpdate: InstanceType<
+    typeof App
+  >["encodeSceneStateAsUpdate"];
+  collectSceneGarbage: InstanceType<typeof App>["collectSceneGarbage"];
+  getSceneContentToken: InstanceType<typeof App>["getSceneContentToken"];
   getAppState: () => InstanceType<typeof App>["state"];
   getFiles: () => InstanceType<typeof App>["files"];
   getName: InstanceType<typeof App>["getName"];

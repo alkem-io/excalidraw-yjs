@@ -1,5 +1,5 @@
 {
-  "name": "@excalidraw/element",
+  "name": "@excalidraw-yjs/element",
   "version": "0.18.0",
   "type": "module",
   "types": "./dist/types/element/src/index.d.ts",
@@ -11,6 +11,13 @@
       "development": "./dist/dev/index.js",
       "production": "./dist/prod/index.js",
       "default": "./dist/prod/index.js"
+    },
+    "./headless": {
+      "types": "./dist/types/element/src/headless.d.ts",
+      "require": "./dist/cjs/headless.cjs",
+      "development": "./dist/dev/headless.js",
+      "production": "./dist/prod/headless.js",
+      "default": "./dist/prod/headless.js"
     },
     "./*": {
       "types": "./dist/types/element/src/*.d.ts",
@@ -56,15 +63,21 @@
       "last 1 safari version"
     ]
   },
-  "bugs": "https://github.com/excalidraw/excalidraw/issues",
-  "repository": "https://github.com/excalidraw/excalidraw",
+  "bugs": "https://github.com/alkem-io/excalidraw-yjs/issues",
+  "repository": "https://github.com/alkem-io/excalidraw-yjs",
   "scripts": {
     "gen:types": "rimraf types && tsc",
-    "build:esm": "rimraf dist && node ../../scripts/buildBase.js && yarn gen:types"
+    "build:esm": "rimraf dist && node ../../scripts/buildBase.js && pnpm run gen:types"
   },
   "dependencies": {
-    "@excalidraw/common": "0.18.0",
-    "@excalidraw/math": "0.18.0",
-    "@excalidraw/fractional-indexing": "3.3.0"
+    "@excalidraw-yjs/common": "workspace:*",
+    "@excalidraw-yjs/math": "workspace:*",
+    "@excalidraw-yjs/fractional-indexing": "workspace:*"
+  },
+  "peerDependencies": {
+    "yjs": "^13.6.27"
+  },
+  "devDependencies": {
+    "yjs": "^13.6.27"
   }
 }

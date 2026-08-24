@@ -24,59 +24,59 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: [
         {
-          find: /^@excalidraw\/common$/,
+          find: /^@excalidraw-yjs\/common$/,
           replacement: path.resolve(
             __dirname,
             "../packages/common/src/index.ts",
           ),
         },
         {
-          find: /^@excalidraw\/common\/(.*?)/,
+          find: /^@excalidraw-yjs\/common\/(.*?)/,
           replacement: path.resolve(__dirname, "../packages/common/src/$1"),
         },
         {
-          find: /^@excalidraw\/element$/,
+          find: /^@excalidraw-yjs\/element$/,
           replacement: path.resolve(
             __dirname,
             "../packages/element/src/index.ts",
           ),
         },
         {
-          find: /^@excalidraw\/element\/(.*?)/,
+          find: /^@excalidraw-yjs\/element\/(.*?)/,
           replacement: path.resolve(__dirname, "../packages/element/src/$1"),
         },
         {
-          find: /^@excalidraw\/excalidraw$/,
+          find: /^@excalidraw-yjs\/excalidraw$/,
           replacement: path.resolve(
             __dirname,
             "../packages/excalidraw/index.tsx",
           ),
         },
         {
-          find: /^@excalidraw\/excalidraw\/(.*?)/,
+          find: /^@excalidraw-yjs\/excalidraw\/(.*?)/,
           replacement: path.resolve(__dirname, "../packages/excalidraw/$1"),
         },
         {
-          find: /^@excalidraw\/math$/,
+          find: /^@excalidraw-yjs\/math$/,
           replacement: path.resolve(__dirname, "../packages/math/src/index.ts"),
         },
         {
-          find: /^@excalidraw\/math\/(.*?)/,
+          find: /^@excalidraw-yjs\/math\/(.*?)/,
           replacement: path.resolve(__dirname, "../packages/math/src/$1"),
         },
         {
-          find: /^@excalidraw\/utils$/,
+          find: /^@excalidraw-yjs\/utils$/,
           replacement: path.resolve(
             __dirname,
             "../packages/utils/src/index.ts",
           ),
         },
         {
-          find: /^@excalidraw\/utils\/(.*?)/,
+          find: /^@excalidraw-yjs\/utils\/(.*?)/,
           replacement: path.resolve(__dirname, "../packages/utils/src/$1"),
         },
         {
-          find: /^@excalidraw\/fractional-indexing$/,
+          find: /^@excalidraw-yjs\/fractional-indexing$/,
           replacement: path.resolve(
             __dirname,
             "../packages/fractional-indexing/src/index.ts",

@@ -1,6 +1,6 @@
-import { isDarwin } from "@excalidraw/common";
+import { isDarwin } from "@excalidraw-yjs/common";
 
-import type { SubtypeOf } from "@excalidraw/common/utility-types";
+import type { SubtypeOf } from "@excalidraw-yjs/common/utility-types";
 
 import { t } from "../i18n";
 import { getShortcutKey } from "../shortcut";

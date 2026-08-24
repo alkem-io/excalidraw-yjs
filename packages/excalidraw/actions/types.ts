@@ -1,9 +1,9 @@
 import type {
   ExcalidrawElement,
   OrderedExcalidrawElement,
-} from "@excalidraw/element/types";
+} from "@excalidraw-yjs/element/types";
 
-import type { CaptureUpdateActionType } from "@excalidraw/element";
+import type { CaptureUpdateActionType } from "@excalidraw-yjs/element";
 
 import type {
   AppClassProperties,
@@ -29,6 +29,16 @@ export type ActionResult =
       files?: BinaryFiles | null;
       captureUpdate: CaptureUpdateActionType;
       replaceFiles?: boolean;
+      /** A per-KEY conflict policy — see `Scene.applyElementChanges`. */
+      overlapPolicy?: ReadonlyMap<string, "result" | "applied">;
+      //
+      // ASYNC RULE (spec 002 / T016b). The derived-diff + journal path applies
+      // only to a SYNCHRONOUS action: `ActionManager` closes both the transport
+      // boundary and the mutation-journal scope before an async result resolves,
+      // so neither the invocation base nor the journal describes the document
+      // the result would land on. No async `perform` currently returns
+      // `elements` (audited: zero). If one is ever added it must supply explicit
+      // intent/ownership rather than rely on the synchronous fallback.
     }
   | false;
 
@@ -39,7 +49,20 @@ type ActionFn<TData = any> = (
   app: AppClassProperties,
 ) => ActionResult | Promise<ActionResult>;
 
-export type UpdaterFn = (res: ActionResult) => void;
+export type UpdaterFn = (
+  res: ActionResult,
+  /**
+   * The elements as they were when the action was INVOKED (spec 002, FR-016 /
+   * T016a) — a deep copy, so it stays a stable "before" image even though
+   * `Scene.mutateElement` mutates scratch objects in place.
+   *
+   * `ActionFn` may be async, so the result can arrive after the scene has moved
+   * on; this is what lets the result be applied as the action's INTENT against
+   * the current doc rather than as an authoritative overwrite. Optional while
+   * T016c wires the consumer.
+   */
+  invocationBase?: readonly OrderedExcalidrawElement[],
+) => void;
 export type ActionFilterFn = (action: Action) => void;
 
 export type ActionName =

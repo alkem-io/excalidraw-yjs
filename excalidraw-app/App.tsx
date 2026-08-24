@@ -3,22 +3,21 @@ import {
   LiveCollaborationTrigger,
   TTDDialogTrigger,
   CaptureUpdateAction,
-  reconcileElements,
   useEditorInterface,
   ExcalidrawAPIProvider,
   useExcalidrawAPI,
-} from "@excalidraw/excalidraw";
-import { trackEvent } from "@excalidraw/excalidraw/analytics";
-import { getDefaultAppState } from "@excalidraw/excalidraw/appState";
+} from "@excalidraw-yjs/excalidraw";
+import { trackEvent } from "@excalidraw-yjs/excalidraw/analytics";
+import { getDefaultAppState } from "@excalidraw-yjs/excalidraw/appState";
 import {
   CommandPalette,
   DEFAULT_CATEGORIES,
-} from "@excalidraw/excalidraw/components/CommandPalette/CommandPalette";
-import { ErrorDialog } from "@excalidraw/excalidraw/components/ErrorDialog";
-import { OverwriteConfirmDialog } from "@excalidraw/excalidraw/components/OverwriteConfirm/OverwriteConfirm";
-import { openConfirmModal } from "@excalidraw/excalidraw/components/OverwriteConfirm/OverwriteConfirmState";
-import { ShareableLinkDialog } from "@excalidraw/excalidraw/components/ShareableLinkDialog";
-import Trans from "@excalidraw/excalidraw/components/Trans";
+} from "@excalidraw-yjs/excalidraw/components/CommandPalette/CommandPalette";
+import { ErrorDialog } from "@excalidraw-yjs/excalidraw/components/ErrorDialog";
+import { OverwriteConfirmDialog } from "@excalidraw-yjs/excalidraw/components/OverwriteConfirm/OverwriteConfirm";
+import { openConfirmModal } from "@excalidraw-yjs/excalidraw/components/OverwriteConfirm/OverwriteConfirmState";
+import { ShareableLinkDialog } from "@excalidraw-yjs/excalidraw/components/ShareableLinkDialog";
+import Trans from "@excalidraw-yjs/excalidraw/components/Trans";
 import {
   APP_NAME,
   EVENT,
@@ -31,11 +30,11 @@ import {
   resolvablePromise,
   isRunningInIframe,
   isDevEnv,
-} from "@excalidraw/common";
-import polyfill from "@excalidraw/excalidraw/polyfill";
+} from "@excalidraw-yjs/common";
+import polyfill from "@excalidraw-yjs/excalidraw/polyfill";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { loadFromBlob } from "@excalidraw/excalidraw/data/blob";
-import { t } from "@excalidraw/excalidraw/i18n";
+import { loadFromBlob } from "@excalidraw-yjs/excalidraw/data/blob";
+import { t } from "@excalidraw-yjs/excalidraw/i18n";
 
 import {
   GithubIcon,
@@ -46,28 +45,27 @@ import {
   exportToPlus,
   share,
   youtubeIcon,
-} from "@excalidraw/excalidraw/components/icons";
-import { isElementLink } from "@excalidraw/element";
+} from "@excalidraw-yjs/excalidraw/components/icons";
+import { isElementLink } from "@excalidraw-yjs/element";
 import {
   bumpElementVersions,
   restoreAppState,
   restoreElements,
-} from "@excalidraw/excalidraw/data/restore";
-import { newElementWith } from "@excalidraw/element";
-import { isInitializedImageElement } from "@excalidraw/element";
+} from "@excalidraw-yjs/excalidraw/data/restore";
+import { newElementWith } from "@excalidraw-yjs/element";
+import { isInitializedImageElement } from "@excalidraw-yjs/element";
 import clsx from "clsx";
 import {
   parseLibraryTokensFromUrl,
   useHandleLibrary,
-} from "@excalidraw/excalidraw/data/library";
+} from "@excalidraw-yjs/excalidraw/data/library";
 
-import type { RemoteExcalidrawElement } from "@excalidraw/excalidraw/data/reconcile";
-import type { RestoredDataState } from "@excalidraw/excalidraw/data/restore";
+import type { RestoredDataState } from "@excalidraw-yjs/excalidraw/data/restore";
 import type {
   FileId,
   NonDeletedExcalidrawElement,
   OrderedExcalidrawElement,
-} from "@excalidraw/element/types";
+} from "@excalidraw-yjs/element/types";
 import type {
   AppState,
   ExcalidrawImperativeAPI,
@@ -75,9 +73,9 @@ import type {
   ExcalidrawInitialDataState,
   UIAppState,
   ExcalidrawProps,
-} from "@excalidraw/excalidraw/types";
-import type { ResolutionType } from "@excalidraw/common/utility-types";
-import type { ResolvablePromise } from "@excalidraw/common/utils";
+} from "@excalidraw-yjs/excalidraw/types";
+import type { ResolutionType } from "@excalidraw-yjs/common/utility-types";
+import type { ResolvablePromise } from "@excalidraw-yjs/common/utils";
 
 import CustomStats from "./CustomStats";
 import {
@@ -329,10 +327,36 @@ const initializeScene = async (opts: {
 
     const scene = await opts.collabAPI.startCollaboration(roomLinkData);
 
+    // T020 — a cold load resolves the NATIVE form: an encoded document to adopt.
+    // Pass it straight through. Only `theme` is layered on, and only because it
+    // is a LOCAL UI key; the collaborative appState (`name`,
+    // `viewBackgroundColor`) comes from the adopted document, and overriding it
+    // here would produce a value no peer ever sees.
+    if (scene?.encodedScene) {
+      return {
+        scene: {
+          ...scene,
+          appState: {
+            ...scene.appState,
+            ...(localDataState?.appState?.theme
+              ? { theme: localDataState.appState.theme }
+              : null),
+            isLoading: false,
+          },
+        },
+        isExternalScene: true,
+        id: roomLinkData.roomId,
+        key: roomLinkData.roomKey,
+      };
+    }
+
     return {
-      // when collaborating, the state may have already been updated at this
-      // point (we may have received updates from other clients), so reconcile
-      // elements and appState with existing state
+      // Native-Yjs core (M3): collaboration converges on the scene's `Y.Doc`, so
+      // by the time `startCollaboration` resolves, the editor's scene already
+      // holds the merged state (remote updates were applied to the doc under
+      // REMOTE_ORIGIN). There is no `reconcileElements` merge here — the resolved
+      // `scene.elements` ARE the converged elements (the collab layer resolves it
+      // from `getSceneElementsIncludingDeleted()`), so we use them directly.
       scene: {
         ...scene,
         appState: {
@@ -347,11 +371,8 @@ const initializeScene = async (opts: {
           // go through App.initializeScene() that resets this flag
           isLoading: false,
         },
-        elements: reconcileElements(
-          scene?.elements || [],
-          excalidrawAPI.getSceneElementsIncludingDeleted() as RemoteExcalidrawElement[],
-          excalidrawAPI.getAppState(),
-        ),
+        elements:
+          scene?.elements || excalidrawAPI.getSceneElementsIncludingDeleted(),
       },
       isExternalScene: true,
       id: roomLinkData.roomId,
@@ -687,7 +708,13 @@ const ExcalidrawWrapper = () => {
     // not to evaludate the nested expression every time
     if (!LocalData.isSavePaused()) {
       LocalData.save(elements, appState, files, () => {
-        if (excalidrawAPI) {
+        // `isDestroyed`, not truthiness. The save is DEBOUNCED, so this callback
+        // can run after the editor unmounted — persisting the data is still
+        // correct (the unload path wants exactly that), but touching the editor
+        // is not. The retained API object is still truthy after unmount; every
+        // method throws, and `isDestroyed` is kept as data precisely so a
+        // consumer can check before calling.
+        if (excalidrawAPI && !excalidrawAPI.isDestroyed) {
           let didChange = false;
 
           const elements = excalidrawAPI

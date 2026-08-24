@@ -2,9 +2,9 @@ import { Popover } from "radix-ui";
 import clsx from "clsx";
 import React, { useCallback, useMemo } from "react";
 
-import { FONT_FAMILY } from "@excalidraw/common";
+import { FONT_FAMILY } from "@excalidraw-yjs/common";
 
-import type { FontFamilyValues } from "@excalidraw/element/types";
+import type { FontFamilyValues } from "@excalidraw-yjs/element/types";
 
 import { t } from "../../i18n";
 import { RadioSelection } from "../RadioSelection";

@@ -4,7 +4,7 @@ import {
   TOOL_TYPE,
   isTestEnv,
   viewportCoordsToSceneCoords,
-} from "@excalidraw/common";
+} from "@excalidraw-yjs/common";
 
 import type { AppClassProperties, UIAppState } from "../../../types";
 

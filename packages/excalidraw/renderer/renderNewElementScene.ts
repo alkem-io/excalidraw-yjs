@@ -1,11 +1,11 @@
-import { throttleRAF } from "@excalidraw/common";
+import { throttleRAF } from "@excalidraw-yjs/common";
 
 import {
   getTargetFrame,
   isInvisiblySmallElement,
   renderElement,
   shouldApplyFrameClip,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
 import { bootstrapCanvas, getNormalizedCanvasDimensions } from "./helpers";
 

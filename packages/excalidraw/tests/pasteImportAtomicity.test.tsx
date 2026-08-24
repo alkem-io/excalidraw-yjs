@@ -1,0 +1,77 @@
+import * as Y from "yjs";
+
+import { Scene } from "@excalidraw-yjs/element";
+
+import { Excalidraw } from "../index";
+
+import { API } from "./helpers/api";
+import { render } from "./test-utils";
+
+const { h } = window;
+
+/**
+ * The paste/import commit site must be ONE logical mutation for a peer.
+ *
+ * `App.addElementsFromPasteOrLibrary` calls `scene.replaceAllElements(...)`, the
+ * authoritative whole-scene path. It ORIGINALLY measured 2 transport updates for
+ * an import that adds ids — the structural/reveal split for new ids was the
+ * leading cause — and the logical-mutation boundary has since collapsed it to one.
+ *
+ * Contract: specs/002-native-yjs-lineage/spec.md FR-017.
+ */
+describe("paste/import is one logical mutation for a peer", () => {
+  // Was SKIPPED as the desired contract; it now PASSES, satisfied by the
+  // logical-mutation boundary (FR-017) rather than by migrating the commit site.
+  // Non-vacuity re-proven when un-skipping: disabling the boundary's buffering
+  // in `Scene.ensureInternalDocHandler` returns this to `expected 2 to be 1` —
+  // exactly the count this test originally measured.
+  it("a multi-element import reaches the peer as ONE update", async () => {
+    await render(<Excalidraw handleKeyboardGlobally />);
+    API.setElements([API.createElement({ type: "rectangle", id: "pre" })]);
+
+    const peer = new Scene(undefined, { doc: new Y.Doc() });
+    peer.applyRemoteUpdate(h.scene.encodeStateAsUpdate());
+
+    const senderUpdates: Uint8Array[] = [];
+    const peerStates: number[] = [];
+    const detachSender = h.scene.onDocUpdate((u) => {
+      senderUpdates.push(u);
+      peer.applyRemoteUpdate(u);
+    });
+    const detachPeer = peer.onUpdate(() => {
+      peerStates.push(peer.getElementsIncludingDeleted().length);
+    });
+
+    h.app.addElementsFromPasteOrLibrary({
+      elements: [
+        API.createElement({ type: "rectangle", id: "i1", x: 0, y: 0 }),
+        API.createElement({ type: "rectangle", id: "i2", x: 50, y: 0 }),
+        API.createElement({ type: "rectangle", id: "i3", x: 100, y: 0 }),
+      ],
+      files: null,
+      position: "center",
+    });
+
+    expect(senderUpdates.length).toBe(1);
+
+    // EXACTLY one receiver state, asserted by equality rather than by
+    // `.every(...)` — which passes on an EMPTY array and would prove nothing
+    // about the receiver at all (the sender-count-only hole this file closes).
+    expect(peerStates).toEqual([4]);
+
+    // ...and the peer converges on the sender's exact content.
+    const sender = h.scene
+      .getElementsIncludingDeleted()
+      .map((e) => `${e.id}:${e.x},${e.y}`)
+      .sort();
+    const received = peer
+      .getElementsIncludingDeleted()
+      .map((e) => `${e.id}:${e.x},${e.y}`)
+      .sort();
+    expect(received).toEqual(sender);
+
+    detachSender();
+    detachPeer();
+    peer.destroy();
+  });
+});

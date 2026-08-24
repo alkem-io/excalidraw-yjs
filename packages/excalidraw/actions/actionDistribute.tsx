@@ -1,20 +1,20 @@
-import { getNonDeletedElements } from "@excalidraw/element";
+import { getNonDeletedElements } from "@excalidraw-yjs/element";
 
-import { isFrameLikeElement } from "@excalidraw/element";
+import { isFrameLikeElement } from "@excalidraw-yjs/element";
 
-import { CODES, KEYS, arrayToMap } from "@excalidraw/common";
+import { CODES, KEYS, arrayToMap } from "@excalidraw-yjs/common";
 
-import { updateFrameMembershipOfSelectedElements } from "@excalidraw/element";
+import { updateFrameMembershipOfSelectedElements } from "@excalidraw-yjs/element";
 
-import { distributeElements } from "@excalidraw/element";
+import { distributeElements } from "@excalidraw-yjs/element";
 
-import { CaptureUpdateAction } from "@excalidraw/element";
+import { CaptureUpdateAction } from "@excalidraw-yjs/element";
 
-import { getSelectedElementsByGroup } from "@excalidraw/element";
+import { getSelectedElementsByGroup } from "@excalidraw-yjs/element";
 
-import type { ExcalidrawElement } from "@excalidraw/element/types";
+import type { ExcalidrawElement } from "@excalidraw-yjs/element/types";
 
-import type { Distribution } from "@excalidraw/element";
+import type { Distribution } from "@excalidraw-yjs/element";
 
 import { ToolButton } from "../components/ToolButton";
 import {
@@ -63,8 +63,20 @@ const distributeSelectedElements = (
 
   const updatedElementsMap = arrayToMap(updatedElements);
 
+  // fresh-snapshot: re-read post-mutation (distributeElements moved the
+  // selection's BOUND ARROWS through the doc via updateBoundElements, but those
+  // arrows are not in `updatedElements` when not themselves selected — fall back
+  // to the live scene map instead of the stale input `element` so their
+  // doc-written points are not reverted)
+  const freshMap = app.scene.getNonDeletedElementsMap();
+
   return updateFrameMembershipOfSelectedElements(
-    elements.map((element) => updatedElementsMap.get(element.id) || element),
+    elements.map(
+      (element) =>
+        updatedElementsMap.get(element.id) ??
+        freshMap.get(element.id) ??
+        element,
+    ),
     appState,
     app,
   );

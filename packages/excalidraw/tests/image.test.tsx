@@ -1,6 +1,6 @@
-import { MIME_TYPES, randomId, reseed } from "@excalidraw/common";
+import { MIME_TYPES, randomId, reseed } from "@excalidraw-yjs/common";
 
-import type { FileId } from "@excalidraw/element/types";
+import type { FileId } from "@excalidraw-yjs/element/types";
 
 import * as blobModule from "../data/blob";
 import * as filesystemModule from "../data/filesystem";

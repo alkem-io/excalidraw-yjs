@@ -1,9 +1,9 @@
 import React from "react";
 import { vi } from "vitest";
 
-import { KEYS, reseed } from "@excalidraw/common";
+import { KEYS, reseed } from "@excalidraw-yjs/common";
 
-import type { ExcalidrawLinearElement } from "@excalidraw/element/types";
+import type { ExcalidrawLinearElement } from "@excalidraw-yjs/element/types";
 
 import { Excalidraw } from "../index";
 import * as InteractiveScene from "../renderer/interactiveScene";
@@ -54,7 +54,7 @@ describe("Test dragCreate", () => {
       fireEvent.pointerUp(canvas);
 
       expect(renderInteractiveScene.mock.calls.length).toMatchInlineSnapshot(
-        `5`,
+        `6`,
       );
       expect(renderStaticScene.mock.calls.length).toMatchInlineSnapshot(`5`);
       expect(h.state.selectionElement).toBeNull();
@@ -88,7 +88,7 @@ describe("Test dragCreate", () => {
       fireEvent.pointerUp(canvas);
 
       expect(renderInteractiveScene.mock.calls.length).toMatchInlineSnapshot(
-        `5`,
+        `6`,
       );
       expect(renderStaticScene.mock.calls.length).toMatchInlineSnapshot(`5`);
 
@@ -123,7 +123,7 @@ describe("Test dragCreate", () => {
       fireEvent.pointerUp(canvas);
 
       expect(renderInteractiveScene.mock.calls.length).toMatchInlineSnapshot(
-        `5`,
+        `6`,
       );
       expect(renderStaticScene.mock.calls.length).toMatchInlineSnapshot(`5`);
       expect(h.state.selectionElement).toBeNull();

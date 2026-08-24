@@ -1,4 +1,4 @@
-name: "Bundle Size check @excalidraw/excalidraw"
+name: "Bundle Size check @excalidraw-yjs/excalidraw"
 on:
   pull_request:
     branches:
@@ -11,12 +11,18 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.17.1
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20.x
-      - name: Install in packages/excalidraw
-        run: yarn
+          cache: pnpm
+      # pnpm installs the whole workspace from any sub-package dir.
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
         working-directory: packages/excalidraw
         env:
           CI: true

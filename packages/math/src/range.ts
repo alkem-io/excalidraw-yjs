@@ -1,6 +1,23 @@
-import { toBrandedType } from "@excalidraw/common";
-
 import type { InclusiveRange } from "./types";
+
+/**
+ * Local brand cast, replacing an import of `toBrandedType` from
+ * `@excalidraw-yjs/common`.
+ *
+ * That import was the ONLY thing `math` took from `common` — one symbol, in
+ * this one file, for a function whose entire body is `return value` — while
+ * `common` imports `math` from three modules. It bought nothing and cost a real
+ * dependency CYCLE between two published packages.
+ *
+ * Deliberately concrete rather than a copy of `common`'s generic: reproducing
+ * that signature faithfully would mean duplicating `UnbrandForValue`, ~30 lines
+ * of recursive conditional type, which is not a clean trade. Every call site
+ * here brands a number pair as an `InclusiveRange`, so naming both types
+ * outright is simpler AND tighter — the generic accepted any unbranded shape,
+ * this accepts exactly a pair.
+ */
+const toInclusiveRange = (value: [number, number]): InclusiveRange =>
+  value as InclusiveRange;
 
 /**
  * Create an inclusive range from the two numbers provided.
@@ -10,7 +27,7 @@ import type { InclusiveRange } from "./types";
  * @returns
  */
 export function rangeInclusive(start: number, end: number): InclusiveRange {
-  return toBrandedType<InclusiveRange>([start, end]);
+  return toInclusiveRange([start, end]);
 }
 
 /**
@@ -20,7 +37,7 @@ export function rangeInclusive(start: number, end: number): InclusiveRange {
  * @returns The new inclusive range
  */
 export function rangeInclusiveFromPair(pair: [start: number, end: number]) {
-  return toBrandedType<InclusiveRange>(pair);
+  return toInclusiveRange(pair);
 }
 
 /**
@@ -62,7 +79,7 @@ export const rangeIntersection = (
   const rangeEnd = Math.min(a1, b1);
 
   if (rangeStart <= rangeEnd) {
-    return toBrandedType<InclusiveRange>([rangeStart, rangeEnd]);
+    return toInclusiveRange([rangeStart, rangeEnd]);
   }
 
   return null;

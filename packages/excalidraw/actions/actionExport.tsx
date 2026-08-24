@@ -3,13 +3,13 @@ import {
   DEFAULT_EXPORT_PADDING,
   EXPORT_SCALES,
   THEME,
-} from "@excalidraw/common";
+} from "@excalidraw-yjs/common";
 
-import { getNonDeletedElements } from "@excalidraw/element";
+import { getNonDeletedElements } from "@excalidraw-yjs/element";
 
-import { CaptureUpdateAction } from "@excalidraw/element";
+import { CaptureUpdateAction } from "@excalidraw-yjs/element";
 
-import type { ExcalidrawElement, Theme } from "@excalidraw/element/types";
+import type { ExcalidrawElement, Theme } from "@excalidraw-yjs/element/types";
 
 import { useEditorInterface } from "../components/App";
 import { CheckboxItem } from "../components/CheckboxItem";
@@ -47,7 +47,16 @@ export const actionChangeProjectName = register<AppState["name"]>({
   name: "changeProjectName",
   label: "labels.fileTitle",
   trackEvent: false,
-  perform: (_elements, appState, value) => {
+  perform: (_elements, appState, value, app) => {
+    // Native-Yjs core (M4): the scene `name` is a collaborative/persistable
+    // appState field. Write the user's change through to the scene doc's
+    // `yAppState` under LOCAL_ORIGIN so a delta is generated and broadcast to
+    // peers (and persisted). Sole producer for the name — the remote→reconcile
+    // consumer (`refreshAppStateFromScene`) does a bare `setState`, never this
+    // action, so a remote-applied change never loops back.
+    if (value !== undefined) {
+      app.scene.setAppState({ name: value });
+    }
     return {
       appState: { ...appState, name: value },
       captureUpdate: CaptureUpdateAction.EVENTUALLY,
@@ -453,6 +462,12 @@ export const actionLoadScene = register({
         elements,
       );
 
+      // `addElementsFromPasteOrLibrary` owns the COMPLETE load: restore/duplicate,
+      // indices, frame placement, the scene write, bound-text redraw, files,
+      // selection/appState, fit-to-content, and `store.scheduleCapture()` — which
+      // is the IMMEDIATELY capture this used to request. Returning an
+      // `ActionResult` here would only re-assert that same freshly-read state
+      // through `syncActionResult`, applying the load's membership a second time.
       app.addElementsFromPasteOrLibrary({
         elements: loadedElements,
         files,
@@ -460,20 +475,17 @@ export const actionLoadScene = register({
         fitToContent: true,
       });
 
-      return {
-        elements: app.scene.getNonDeletedElements(),
-        appState: app.state,
-        files: app.files,
-        captureUpdate: CaptureUpdateAction.IMMEDIATELY,
-        replaceFiles: false,
-      };
+      return false;
     } catch (error: any) {
       if (error?.name === "AbortError") {
         console.warn(error);
         return false;
       }
+      // Report the failure only. `elements` here is the array captured at
+      // INVOCATION, and this path runs after an await — re-applying it would
+      // overwrite anything that reached the doc while the file dialog was open,
+      // reverting a peer's edit as a side effect of a failed load.
       return {
-        elements,
         appState: { ...appState, errorMessage: error.message },
         files: app.files,
         captureUpdate: CaptureUpdateAction.EVENTUALLY,

@@ -1,13 +1,13 @@
-import { getFontString } from "@excalidraw/common";
+import { getFontString } from "@excalidraw-yjs/common";
 
-import { isExcalidrawElement, newElementWith } from "@excalidraw/element";
-import { measureText } from "@excalidraw/element";
+import { isExcalidrawElement, newElementWith } from "@excalidraw-yjs/element";
+import { measureText } from "@excalidraw-yjs/element";
 
-import { isTextElement } from "@excalidraw/element";
+import { isTextElement } from "@excalidraw-yjs/element";
 
-import { CaptureUpdateAction } from "@excalidraw/element";
+import { CaptureUpdateAction } from "@excalidraw-yjs/element";
 
-import type { ExcalidrawElement } from "@excalidraw/element/types";
+import type { ExcalidrawElement } from "@excalidraw-yjs/element/types";
 
 import { getSelectedElements } from "../scene";
 

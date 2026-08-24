@@ -2,9 +2,9 @@ import {
   canCreateLinkFromElements,
   defaultGetElementLinkFromSelection,
   getLinkIdAndTypeFromSelection,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
-import { CaptureUpdateAction } from "@excalidraw/element";
+import { CaptureUpdateAction } from "@excalidraw-yjs/element";
 
 import { copyTextToSystemClipboard } from "../clipboard";
 import { copyIcon, elementLinkIcon } from "../components/icons";
@@ -50,7 +50,6 @@ export const actionCopyElementLink = register({
         }
         return {
           appState,
-          elements,
           app,
           captureUpdate: CaptureUpdateAction.EVENTUALLY,
         };
@@ -59,9 +58,11 @@ export const actionCopyElementLink = register({
       console.error(error);
     }
 
+    // No element change to report. `elements` is the array captured at
+    // INVOCATION and this path runs after an await, so returning it would
+    // overwrite whatever reached the doc while the clipboard write was pending.
     return {
       appState,
-      elements,
       app,
       captureUpdate: CaptureUpdateAction.EVENTUALLY,
     };

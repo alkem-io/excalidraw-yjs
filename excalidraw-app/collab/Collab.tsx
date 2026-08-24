@@ -1,18 +1,9 @@
 import {
   CaptureUpdateAction,
-  getSceneVersion,
-  restoreElements,
   zoomToFitBounds,
-  reconcileElements,
-} from "@excalidraw/excalidraw";
-import { ErrorDialog } from "@excalidraw/excalidraw/components/ErrorDialog";
-import {
-  APP_NAME,
-  cloneJSON,
-  EVENT,
-  randomId,
-  toBrandedType,
-} from "@excalidraw/common";
+} from "@excalidraw-yjs/excalidraw";
+import { ErrorDialog } from "@excalidraw-yjs/excalidraw/components/ErrorDialog";
+import { APP_NAME, EVENT, randomId } from "@excalidraw-yjs/common";
 import {
   IDLE_THRESHOLD,
   ACTIVE_THRESHOLD,
@@ -23,43 +14,42 @@ import {
   preventUnload,
   resolvablePromise,
   throttleRAF,
-} from "@excalidraw/common";
-import { decryptData } from "@excalidraw/excalidraw/data/encryption";
-import { getVisibleSceneBounds } from "@excalidraw/element";
-import { newElementWith } from "@excalidraw/element";
-import { isImageElement, isInitializedImageElement } from "@excalidraw/element";
-import { AbortError } from "@excalidraw/excalidraw/errors";
-import { t } from "@excalidraw/excalidraw/i18n";
-import { withBatchedUpdates } from "@excalidraw/excalidraw/reactUtils";
+} from "@excalidraw-yjs/common";
+import { decryptData } from "@excalidraw-yjs/excalidraw/data/encryption";
+import { getVisibleSceneBounds } from "@excalidraw-yjs/element";
+import { newElementWith } from "@excalidraw-yjs/element";
+import {
+  isImageElement,
+  isInitializedImageElement,
+} from "@excalidraw-yjs/element";
+import { AbortError } from "@excalidraw-yjs/excalidraw/errors";
+import { t } from "@excalidraw-yjs/excalidraw/i18n";
+import { withBatchedUpdates } from "@excalidraw-yjs/excalidraw/reactUtils";
 
 import throttle from "lodash.throttle";
 import { PureComponent } from "react";
 
-import { bumpElementVersions } from "@excalidraw/excalidraw/data/restore";
-
-import type {
-  ReconciledExcalidrawElement,
-  RemoteExcalidrawElement,
-} from "@excalidraw/excalidraw/data/reconcile";
-import type { ImportedDataState } from "@excalidraw/excalidraw/data/types";
+import type { ImportedDataState } from "@excalidraw-yjs/excalidraw/data/types";
 import type {
   ExcalidrawElement,
   FileId,
   InitializedExcalidrawImageElement,
   OrderedExcalidrawElement,
-} from "@excalidraw/element/types";
+} from "@excalidraw-yjs/element/types";
 import type {
   BinaryFileData,
+  ExcalidrawNativeInitialDataState,
   ExcalidrawImperativeAPI,
   SocketId,
   Collaborator,
   Gesture,
-} from "@excalidraw/excalidraw/types";
-import type { Mutable, ValueOf } from "@excalidraw/common/utility-types";
+} from "@excalidraw-yjs/excalidraw/types";
+import type { Mutable, ValueOf } from "@excalidraw-yjs/common/utility-types";
 
 import { appJotaiStore, atom } from "../app-jotai";
 import {
   CURSOR_SYNC_TIMEOUT,
+  DELETED_ELEMENT_TIMEOUT,
   FILE_UPLOAD_MAX_BYTES,
   FIREBASE_STORAGE_PREFIXES,
   INITIAL_SCENE_UPDATE_TIMEOUT,
@@ -96,11 +86,7 @@ import { resetBrowserStateVersions } from "../data/tabSync";
 import { collabErrorIndicatorAtom } from "./CollabError";
 import Portal from "./Portal";
 
-import type {
-  SocketUpdateData,
-  SocketUpdateDataSource,
-  SyncableExcalidrawElement,
-} from "../data";
+import type { SocketUpdateData, SocketUpdateDataSource } from "../data";
 
 export const collabAPIAtom = atom<CollabAPI | null>(null);
 export const isCollaboratingAtom = atom(false);
@@ -144,9 +130,24 @@ class Collab extends PureComponent<CollabProps, CollabState> {
   excalidrawAPI: CollabProps["excalidrawAPI"];
   activeIntervalId: number | null;
   idleTimeoutId: number | null;
+  /**
+   * Interval that drives the periodic full-scene resync safety net (native-Yjs
+   * core, M3). The resync re-broadcasts the FULL doc state so a peer that dropped
+   * an incremental update still converges; it must fire on a TIME interval,
+   * independent of edit activity, NOT once per local edit (that turned every
+   * edit-burst into an O(scene) re-send). Set in `startCollaboration`, cleared +
+   * nulled wherever the socket/broadcast is torn down.
+   */
+  private sceneResyncIntervalId: number | null = null;
 
   private socketInitializationTimer?: number;
-  private lastBroadcastedOrReceivedSceneVersion: number = -1;
+  /**
+   * Detaches the `doc.on("update")` subscription that broadcasts this replica's
+   * local Yjs updates (native-Yjs core, M3). Set in `startCollaboration`, called
+   * + nulled wherever the socket is torn down so a left/remounted room never
+   * double-broadcasts.
+   */
+  private detachDocBroadcast: (() => void) | null = null;
   private collaborators = new Map<SocketId, Collaborator>();
 
   constructor(props: CollabProps) {
@@ -326,6 +327,16 @@ class Collab extends PureComponent<CollabProps, CollabState> {
       window.clearTimeout(this.idleTimeoutId);
       this.idleTimeoutId = null;
     }
+    // Safety net: detach the scene-doc broadcast subscription on unmount in case
+    // the socket teardown path (which also detaches) didn't run (native-Yjs core, M3).
+    this.detachDocBroadcast?.();
+    this.detachDocBroadcast = null;
+    // Safety net: stop the periodic full-scene resync interval on unmount in case
+    // the socket teardown path (which also clears it) didn't run (native-Yjs core, M3).
+    if (this.sceneResyncIntervalId !== null) {
+      window.clearInterval(this.sceneResyncIntervalId);
+      this.sceneResyncIntervalId = null;
+    }
     this.onUmmount?.();
   }
 
@@ -347,11 +358,14 @@ class Collab extends PureComponent<CollabProps, CollabState> {
     if (
       this.isCollaborating() &&
       (this.fileManager.shouldPreventUnload(syncableElements) ||
-        !isSavedToFirebase(this.portal, syncableElements))
+        !isSavedToFirebase(
+          this.portal,
+          this.excalidrawAPI.getSceneContentToken(),
+        ))
     ) {
       // this won't run in time if user decides to leave the site, but
       //  the purpose is to run in immediately after user decides to stay
-      this.saveCollabRoomToFirebase(syncableElements);
+      this.saveCollabRoomToFirebase();
 
       if (import.meta.env.VITE_APP_DISABLE_PREVENT_UNLOAD !== "true") {
         preventUnload(event);
@@ -363,22 +377,27 @@ class Collab extends PureComponent<CollabProps, CollabState> {
     }
   });
 
-  saveCollabRoomToFirebase = async (
-    syncableElements: readonly SyncableExcalidrawElement[],
-  ) => {
-    syncableElements = cloneJSON(syncableElements);
+  saveCollabRoomToFirebase = async () => {
+    // Captured BEFORE the await, alongside the state being saved: anything that
+    // changes the doc while the save is in flight — a peer edit, or a whole
+    // generation swap — replaces the live token, so the scene correctly stays
+    // dirty (T026).
+    const contentToken = this.excalidrawAPI.getSceneContentToken();
     try {
-      const storedElements = await saveToFirebase(
+      // Persistence only — the scene `Y.Doc` is the source of truth and already
+      // holds the merged state, so there is nothing to reconcile back in from
+      // what Firebase stored. Native-Yjs core (M4): the stored scene document is
+      // the doc encoded to Yjs V2 bytes (elements + ASSET REFERENCES + persistable
+      // appState), not element JSON. What travels is `fileId -> locator` (T023);
+      // the image bytes never enter the document and are stored by the host's
+      // asset store instead.
+      await saveToFirebase(
         this.portal,
-        syncableElements,
-        this.excalidrawAPI.getAppState(),
+        this.excalidrawAPI.encodeSceneStateAsUpdate("v2"),
+        contentToken,
       );
 
       this.resetErrorIndicator();
-
-      if (this.isCollaborating() && storedElements) {
-        this.handleRemoteSceneUpdate(this._reconcileElements(storedElements));
-      }
     } catch (error: any) {
       const errorMessage = /is longer than.*?bytes/.test(error.message)
         ? t("errors.collabSaveFailed_sizeExceeded")
@@ -406,16 +425,11 @@ class Collab extends PureComponent<CollabProps, CollabState> {
   };
 
   stopCollaboration = (keepRemoteState = true) => {
-    this.queueBroadcastAllElements.cancel();
     this.queueSaveToFirebase.cancel();
     this.loadImageFiles.cancel();
     this.resetErrorIndicator(true);
 
-    this.saveCollabRoomToFirebase(
-      getSyncableElements(
-        this.excalidrawAPI.getSceneElementsIncludingDeleted(),
-      ),
-    );
+    this.saveCollabRoomToFirebase();
 
     if (this.portal.socket && this.fallbackInitializationHandler) {
       this.portal.socket.off(
@@ -454,7 +468,18 @@ class Collab extends PureComponent<CollabProps, CollabState> {
   };
 
   private destroySocketClient = (opts?: { isUnload: boolean }) => {
-    this.lastBroadcastedOrReceivedSceneVersion = -1;
+    // Stop broadcasting this replica's local Yjs updates (native-Yjs core, M3) —
+    // the socket is going away, so detach the scene-doc `update` subscription so a
+    // left/remounted room never double-broadcasts.
+    this.detachDocBroadcast?.();
+    this.detachDocBroadcast = null;
+    // Stop the periodic full-scene resync interval too — the socket is gone, so a
+    // resync would be a no-op (guarded by `isOpen()`), but leaving the timer
+    // running would leak across a left/remounted room (native-Yjs core, M3).
+    if (this.sceneResyncIntervalId !== null) {
+      window.clearInterval(this.sceneResyncIntervalId);
+      this.sceneResyncIntervalId = null;
+    }
     this.portal.close();
     this.fileManager.reset();
     if (!opts?.isUnload) {
@@ -548,8 +573,16 @@ class Collab extends PureComponent<CollabProps, CollabState> {
     }
 
     // TODO: `ImportedDataState` type here seems abused
+    //
+    // T020: a cold load resolves the NATIVE form (an encoded document to adopt)
+    // instead of a record snapshot, so this carries both alternatives — the same
+    // mutually-exclusive pair the editor's `initialData` accepts.
     const scenePromise = resolvablePromise<
-      | (ImportedDataState & { elements: readonly OrderedExcalidrawElement[] })
+      | (ImportedDataState & {
+          elements: readonly OrderedExcalidrawElement[];
+          encodedScene?: never;
+        })
+      | ExcalidrawNativeInitialDataState
       | null
     >();
 
@@ -605,8 +638,39 @@ class Collab extends PureComponent<CollabProps, CollabState> {
         captureUpdate: CaptureUpdateAction.NEVER,
       });
 
-      this.saveCollabRoomToFirebase(getSyncableElements(elements));
+      this.saveCollabRoomToFirebase();
     }
+
+    // Subscribe to local logical updates and broadcast them to the room.
+    //
+    // The origin policy lives in ONE place — the editor's transport boundary — so
+    // there is deliberately no filtering here. `onLocalSceneUpdate` already
+    // withholds a remote apply (no echo) and delivers a create's structural pass
+    // and reveal as a single update rather than a leaked tombstone. A local reset
+    // never arrives here at all, because it replaces the Scene generation instead
+    // of writing to the shared doc. Re-implementing any of that here would be a
+    // second copy of the policy, free to drift.
+    this.detachDocBroadcast = this.excalidrawAPI.onLocalSceneUpdate(
+      (update: Uint8Array) => {
+        if (this.portal.isOpen()) {
+          void this.portal.broadcastSceneUpdate(WS_SUBTYPES.UPDATE, update);
+        }
+      },
+    );
+
+    // Periodic full-scene resync safety net (native-Yjs core, M3). It re-broadcasts
+    // the FULL doc state as a WS_SUBTYPES.UPDATE so a peer that dropped an
+    // incremental update still converges. It is driven by a TIME interval here —
+    // independent of edit activity — NOT scheduled from `onDocUpdate`: doing the
+    // latter (via the leading-edge throttle) fired a full O(scene) re-send on the
+    // first edit of every burst, on top of the incremental update. Guarded by
+    // `isOpen()` so it is a no-op while the socket is down.
+    if (this.sceneResyncIntervalId !== null) {
+      window.clearInterval(this.sceneResyncIntervalId);
+    }
+    this.sceneResyncIntervalId = window.setInterval(() => {
+      void this.runSceneResyncTick();
+    }, SYNC_FULL_SCENE_INTERVAL_MS);
 
     // fallback in case you're not alone in the room but still don't receive
     // initial SCENE_INIT message
@@ -635,29 +699,28 @@ class Collab extends PureComponent<CollabProps, CollabState> {
           case WS_SUBTYPES.INIT: {
             if (!this.portal.socketInitialized) {
               this.initializeRoom({ fetchScene: false });
-              const remoteElements = toBrandedType<
-                readonly RemoteExcalidrawElement[]
-              >(decryptedData.payload.elements);
-              const reconciledElements =
-                this._reconcileElements(remoteElements);
-              this.handleRemoteSceneUpdate(reconciledElements);
-              // noop if already resolved via init from firebase
+              // INIT carries a full-scene seed as Yjs bytes, encoded from the
+              // sender's LIVE doc (T032), so it carries real lineage: applying it
+              // merges per-property with whatever we already hold, and nothing
+              // concurrent is lost or resurrected.
+              const update = new Uint8Array(decryptedData.payload.update);
+              this.applyRemoteSceneUpdate(update);
+              // The doc now holds the merged state — resolve with the current
+              // scene elements. Noop if already resolved via init from firebase.
               scenePromise.resolve({
-                elements: reconciledElements,
+                elements: this.excalidrawAPI.getSceneElementsIncludingDeleted(),
                 scrollToContent: true,
               });
             }
             break;
           }
-          case WS_SUBTYPES.UPDATE:
-            this.handleRemoteSceneUpdate(
-              this._reconcileElements(
-                toBrandedType<readonly RemoteExcalidrawElement[]>(
-                  decryptedData.payload.elements,
-                ),
-              ),
-            );
+          case WS_SUBTYPES.UPDATE: {
+            // Native-Yjs core (M3): UPDATE carries an incremental Yjs update a
+            // peer originated. Apply its bytes to our doc.
+            const update = new Uint8Array(decryptedData.payload.update);
+            this.applyRemoteSceneUpdate(update);
             break;
+          }
           case WS_SUBTYPES.MOUSE_LOCATION: {
             const { pointer, button, username, selectedElementIds } =
               decryptedData.payload;
@@ -807,18 +870,25 @@ class Collab extends PureComponent<CollabProps, CollabState> {
       this.excalidrawAPI.resetScene();
 
       try {
-        const elements = await loadFromFirebase(
+        const loaded = await loadFromFirebase(
           roomLinkData.roomId,
           roomLinkData.roomKey,
           this.portal.socket,
         );
-        if (elements) {
-          this.setLastBroadcastedOrReceivedSceneVersion(
-            getSceneVersion(elements),
-          );
-
+        if (loaded) {
+          // T020 — ADOPT the stored document rather than rebuilding a scene from
+          // its decoded records. Rebuilding starts a fresh CRDT lineage and
+          // loses the persisted history; adopting keeps it, and carries the
+          // `fileId -> locator` asset references into the live scene as a side
+          // effect, which is what makes a persisted image resolvable after a
+          // reload.
+          //
+          // No `elements` / `files` here — they are the mutually exclusive
+          // record form. Everything collaborative (elements, the persisted
+          // appState subset, asset references) is derived from the adopted doc;
+          // the bytes behind each reference resolve through the asset adapter.
           return {
-            elements,
+            encodedScene: { update: loaded.docBytes, format: "v2" as const },
             scrollToContent: true,
           };
         }
@@ -832,40 +902,6 @@ class Collab extends PureComponent<CollabProps, CollabState> {
       this.portal.socketInitialized = true;
     }
     return null;
-  };
-
-  private _reconcileElements = (
-    remoteElements: readonly RemoteExcalidrawElement[],
-  ): ReconciledExcalidrawElement[] => {
-    const appState = this.excalidrawAPI.getAppState();
-
-    const existingElements = this.getSceneElementsIncludingDeleted();
-
-    // NOTE ideally we restore _after_ reconciliation but we can't do that
-    // as we'd regenerate even elements such as appState.newElement which would
-    // break the state
-    remoteElements = restoreElements(remoteElements, existingElements);
-
-    let reconciledElements = reconcileElements(
-      existingElements,
-      remoteElements,
-      appState,
-    );
-
-    reconciledElements = bumpElementVersions(
-      reconciledElements,
-      existingElements,
-    );
-
-    // Avoid broadcasting to the rest of the collaborators the scene
-    // we just received!
-    // Note: this needs to be set before updating the scene as it
-    // synchronously calls render.
-    this.setLastBroadcastedOrReceivedSceneVersion(
-      getSceneVersion(reconciledElements),
-    );
-
-    return reconciledElements;
   };
 
   private loadImageFiles = throttle(async () => {
@@ -883,13 +919,16 @@ class Collab extends PureComponent<CollabProps, CollabState> {
     });
   }, LOAD_IMAGES_TIMEOUT);
 
-  private handleRemoteSceneUpdate = (
-    elements: ReconciledExcalidrawElement[],
-  ) => {
-    this.excalidrawAPI.updateScene({
-      elements,
-      captureUpdate: CaptureUpdateAction.NEVER,
-    });
+  /**
+   * Apply a remote peer's Yjs update to the scene's `Y.Doc` under
+   * `REMOTE_ORIGIN` (native-Yjs core, M3). The apply integrates into the doc and
+   * flows through the Scene's `observeDeep` → the editor re-renders — so there is
+   * no `updateScene({ elements })` here. The `REMOTE_ORIGIN` origin keeps the
+   * apply out of the local UndoManager and out of our own broadcast subscription
+   * (no echo). Then refresh any image files referenced by the merged scene.
+   */
+  private applyRemoteSceneUpdate = (update: Uint8Array) => {
+    this.excalidrawAPI.applyRemoteSceneUpdate(update);
 
     this.loadImageFiles();
   };
@@ -981,14 +1020,6 @@ class Collab extends PureComponent<CollabProps, CollabState> {
     });
   };
 
-  public setLastBroadcastedOrReceivedSceneVersion = (version: number) => {
-    this.lastBroadcastedOrReceivedSceneVersion = version;
-  };
-
-  public getLastBroadcastedOrReceivedSceneVersion = () => {
-    return this.lastBroadcastedOrReceivedSceneVersion;
-  };
-
   public getSceneElementsIncludingDeleted = () => {
     return this.excalidrawAPI.getSceneElementsIncludingDeleted();
   };
@@ -1023,44 +1054,53 @@ class Collab extends PureComponent<CollabProps, CollabState> {
     this.portal.broadcastIdleChange(userState);
   };
 
-  broadcastElements = (elements: readonly OrderedExcalidrawElement[]) => {
-    if (
-      getSceneVersion(elements) >
-      this.getLastBroadcastedOrReceivedSceneVersion()
-    ) {
-      this.portal.broadcastScene(WS_SUBTYPES.UPDATE, elements, false);
-      this.lastBroadcastedOrReceivedSceneVersion = getSceneVersion(elements);
-      this.queueBroadcastAllElements();
-    }
-  };
-
-  syncElements = (elements: readonly OrderedExcalidrawElement[]) => {
-    this.broadcastElements(elements);
+  /**
+   * Called by the editor's onChange (App.tsx) on every local scene change. Under
+   * the native-Yjs core (M3) the scene `Y.Doc` IS the wire: the local edit that
+   * triggered this already mutated the doc (under a local origin) and fired
+   * `doc.on("update")`, which broadcast it. So onChange no longer broadcasts the
+   * scene — it only triggers the throttled Firebase persistence save.
+   */
+  syncElements = (_elements: readonly OrderedExcalidrawElement[]) => {
     this.queueSaveToFirebase();
   };
 
-  queueBroadcastAllElements = throttle(() => {
-    this.portal.broadcastScene(
-      WS_SUBTYPES.UPDATE,
-      this.excalidrawAPI.getSceneElementsIncludingDeleted(),
-      true,
-    );
-    const currentVersion = this.getLastBroadcastedOrReceivedSceneVersion();
-    const newVersion = Math.max(
-      currentVersion,
-      getSceneVersion(this.getSceneElementsIncludingDeleted()),
-    );
-    this.setLastBroadcastedOrReceivedSceneVersion(newVersion);
-  }, SYNC_FULL_SCENE_INTERVAL_MS);
+  /**
+   * Encode the scene's current state as a full-scene Yjs update — the state used
+   * to seed a new peer (`broadcastSceneInit`, on `new-user`) or to periodically
+   * resync already-joined peers (`broadcastSceneResync`).
+   *
+   * T032/T025b: this now encodes the LIVE scene `Y.Doc`. It previously rebuilt
+   * the scene through a throwaway doc (`encodeSyncableSceneAsUpdate`), which
+   * gave every join/resync a fresh `clientID` and so destroyed CRDT lineage —
+   * measured at ~50% concurrent-edit loss and ~50% deletion resurrection per
+   * resync. A peer that merges such an update cannot tell a concurrent edit from
+   * a stale one, because the identity that would order them is gone.
+   *
+   * The rebuild existed to keep two things off the wire, and both now have a
+   * better answer:
+   *  - aged deleted-element tombstones — reclaimed by the explicit maintenance
+   *    call below, so they are gone from the DOCUMENT rather than filtered out
+   *    of one encoding of it;
+   *  - image binaries — since T023 the document carries `fileId -> locator` and
+   *    never bytes, so there is nothing to strip.
+   *
+   * Maintenance runs immediately BEFORE the encode and is deliberately a
+   * separate call: {@link ExcalidrawImperativeAPI.encodeSceneStateAsUpdate} is
+   * pure. An encoder that pruned on encode would make reading the state a
+   * destructive act, and the resync timer would then quietly drive deletion.
+   */
+  public encodeSceneAsUpdate = (): Uint8Array => {
+    this.excalidrawAPI.collectSceneGarbage({
+      deletedBefore: Date.now() - DELETED_ELEMENT_TIMEOUT,
+    });
+    return this.excalidrawAPI.encodeSceneStateAsUpdate("v1");
+  };
 
   queueSaveToFirebase = throttle(
     () => {
       if (this.portal.socketInitialized) {
-        this.saveCollabRoomToFirebase(
-          getSyncableElements(
-            this.excalidrawAPI.getSceneElementsIncludingDeleted(),
-          ),
-        );
+        this.saveCollabRoomToFirebase();
       }
     },
     SYNC_FULL_SCENE_INTERVAL_MS,
@@ -1080,6 +1120,47 @@ class Collab extends PureComponent<CollabProps, CollabState> {
   };
 
   getActiveRoomLink = () => this.state.activeRoomLink;
+
+  /**
+   * One periodic full-scene resync, with its failure SURFACED.
+   *
+   * The safety net itself (native-Yjs core, M3): a re-broadcast of the FULL doc
+   * state so a peer that dropped an incremental update still converges. It MUST
+   * go via {@link WS_SUBTYPES.UPDATE}, not INIT — an already-initialized peer
+   * DROPS INIT (honored only as its one-time first-in-room seed) but always
+   * applies UPDATE, so an INIT-based resync is silently discarded by every joined
+   * peer. A full-state update is an idempotent `REMOTE_ORIGIN` merge. Replaces
+   * the old `queueBroadcastAllElements` full-scene JSON re-broadcast. (This
+   * contract was documented on a `queueBroadcastSceneResync` throttle that
+   * nothing ever invoked — only its `.cancel()` was called — so the throttle is
+   * gone and its one piece of real documentation lives here, on the interval
+   * that actually runs.)
+   *
+   * `encodeSceneAsUpdate` validates the asset root on every encode and THROWS on
+   * a bad value — which a remote peer can cause, since `applyRemoteUpdate` does
+   * not validate (only encode does) and `assertAssetRootValid`'s own docblock
+   * records that "a remote peer can put an arbitrary value in the asset root".
+   *
+   * This ran as a bare `void this.portal.broadcastSceneResync()` inside the
+   * interval, so the throw became an unhandled rejection: every tick threw into
+   * the console, the resync safety net was silently dead, and the user saw
+   * nothing at all. The assertion is deliberately NOT softened and the root is
+   * NOT sanitized — fail loud is correct here; what was missing was routing that
+   * failure to the indicator the app already has.
+   */
+  runSceneResyncTick = async () => {
+    if (!this.portal.isOpen()) {
+      return;
+    }
+    try {
+      await this.portal.broadcastSceneResync();
+    } catch (error: any) {
+      console.error(error);
+      this.setErrorIndicator(
+        error?.message ?? "Could not sync the scene to other collaborators.",
+      );
+    }
+  };
 
   setErrorIndicator = (errorMessage: string | null) => {
     appJotaiStore.set(collabErrorIndicatorAtom, {

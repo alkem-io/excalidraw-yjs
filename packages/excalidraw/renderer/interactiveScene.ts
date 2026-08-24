@@ -8,7 +8,7 @@ import {
   bezierEquation,
   pointRotateRads,
   pointDistance,
-} from "@excalidraw/math";
+} from "@excalidraw-yjs/math";
 
 import {
   arrayToMap,
@@ -18,7 +18,7 @@ import {
   getFeatureFlag,
   invariant,
   THEME,
-} from "@excalidraw/common";
+} from "@excalidraw-yjs/common";
 
 import {
   deconstructDiamondElement,
@@ -42,29 +42,32 @@ import {
   isTextElement,
   LinearElementEditor,
   getActiveTextElement,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
-import { renderSelectionElement } from "@excalidraw/element";
+import { renderSelectionElement } from "@excalidraw-yjs/element";
 
 import {
   getElementsInGroup,
   getSelectedGroupIds,
   isSelectedViaGroup,
   selectGroupsFromGivenElements,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
-import { getCommonBounds, getElementAbsoluteCoords } from "@excalidraw/element";
+import {
+  getCommonBounds,
+  getElementAbsoluteCoords,
+} from "@excalidraw-yjs/element";
 import {
   getGlobalFixedPointForBindableElement,
   isFocusPointVisible,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
-import type { EditorInterface } from "@excalidraw/common";
+import type { EditorInterface } from "@excalidraw-yjs/common";
 
 import type {
   TransformHandles,
   TransformHandleType,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
 import type {
   ElementsMap,
@@ -78,7 +81,7 @@ import type {
   GroupId,
   NonDeleted,
   NonDeletedSceneElementsMap,
-} from "@excalidraw/element/types";
+} from "@excalidraw-yjs/element/types";
 
 import { renderSnaps } from "../renderer/renderSnaps";
 import { roundRect } from "../renderer/roundRect";

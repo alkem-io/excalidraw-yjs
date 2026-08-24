@@ -7,19 +7,19 @@ import {
   cloneJSON,
   SVG_DOCUMENT_PREAMBLE,
   arrayToMap,
-} from "@excalidraw/common";
+} from "@excalidraw-yjs/common";
 
-import { getNonDeletedElements } from "@excalidraw/element";
+import { getNonDeletedElements } from "@excalidraw-yjs/element";
 
-import { isFrameLikeElement } from "@excalidraw/element";
+import { isFrameLikeElement } from "@excalidraw-yjs/element";
 
-import { getElementsOverlappingFrame } from "@excalidraw/element";
+import { getElementsOverlappingFrame } from "@excalidraw-yjs/element";
 
 import type {
   ExcalidrawElement,
   ExcalidrawFrameLikeElement,
   NonDeletedExcalidrawElement,
-} from "@excalidraw/element/types";
+} from "@excalidraw-yjs/element/types";
 
 import {
   copyBlobToClipboardAsPng,

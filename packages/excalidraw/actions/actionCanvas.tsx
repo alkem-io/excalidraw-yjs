@@ -1,4 +1,4 @@
-import { clamp, roundToStep } from "@excalidraw/math";
+import { clamp, roundToStep } from "@excalidraw-yjs/math";
 
 import {
   DEFAULT_CANVAS_BACKGROUND_PICKS,
@@ -10,15 +10,15 @@ import {
   updateActiveTool,
   CODES,
   KEYS,
-} from "@excalidraw/common";
+} from "@excalidraw-yjs/common";
 
-import { getNonDeletedElements } from "@excalidraw/element";
-import { newElementWith } from "@excalidraw/element";
-import { getCommonBounds, type SceneBounds } from "@excalidraw/element";
+import { getNonDeletedElements } from "@excalidraw-yjs/element";
+import { newElementWith } from "@excalidraw-yjs/element";
+import { getCommonBounds, type SceneBounds } from "@excalidraw-yjs/element";
 
-import { CaptureUpdateAction } from "@excalidraw/element";
+import { CaptureUpdateAction } from "@excalidraw-yjs/element";
 
-import type { ExcalidrawElement } from "@excalidraw/element/types";
+import type { ExcalidrawElement } from "@excalidraw-yjs/element/types";
 
 import {
   getDefaultAppState,
@@ -62,7 +62,16 @@ export const actionChangeViewBackgroundColor = register<Partial<AppState>>({
       !appState.viewModeEnabled
     );
   },
-  perform: (_, appState, value) => {
+  perform: (_, appState, value, app) => {
+    // Native-Yjs core (M4): `viewBackgroundColor` is a collaborative/persistable
+    // appState field. Write the user's change through to the scene doc's
+    // `yAppState` under LOCAL_ORIGIN so a delta is generated and broadcast to
+    // peers (and persisted). This is the ONLY producer for the background — the
+    // remote→reconcile consumer (`refreshAppStateFromScene`) does a bare
+    // `setState`, never this action, so a remote-applied change never loops back.
+    if (value?.viewBackgroundColor !== undefined) {
+      app.scene.setAppState({ viewBackgroundColor: value.viewBackgroundColor });
+    }
     return {
       appState: { ...appState, ...value },
       captureUpdate: !!value?.viewBackgroundColor

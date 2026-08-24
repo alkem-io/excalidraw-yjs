@@ -1,32 +1,32 @@
-import { pointFrom, pointRotateRads } from "@excalidraw/math";
+import { pointFrom, pointRotateRads } from "@excalidraw-yjs/math";
 
 import {
   getBoundTextElement,
   isBindingElement,
   unbindBindingElement,
-} from "@excalidraw/element";
-import { isFrameLikeElement } from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
+import { isFrameLikeElement } from "@excalidraw-yjs/element";
 
 import {
   getSelectedGroupIds,
   getElementsInGroup,
   isInGroup,
-} from "@excalidraw/element";
+} from "@excalidraw-yjs/element";
 
-import { getFrameChildren } from "@excalidraw/element";
+import { getFrameChildren } from "@excalidraw-yjs/element";
 
-import { updateBindings } from "@excalidraw/element";
-import { DRAGGING_THRESHOLD } from "@excalidraw/common";
+import { updateBindings } from "@excalidraw-yjs/element";
+import { DRAGGING_THRESHOLD } from "@excalidraw-yjs/common";
 
-import type { Radians } from "@excalidraw/math";
+import type { Radians } from "@excalidraw-yjs/math";
 
 import type {
   ElementsMap,
   ExcalidrawElement,
   NonDeletedExcalidrawElement,
-} from "@excalidraw/element/types";
+} from "@excalidraw-yjs/element/types";
 
-import type { Scene } from "@excalidraw/element";
+import type { Scene } from "@excalidraw-yjs/element";
 
 import type { AppState } from "../../types";
 
@@ -158,7 +158,8 @@ export const moveElement = (
     -originalElement.angle as Radians,
   );
 
-  scene.mutateElement(
+  // fresh-snapshot: re-read post-mutation
+  const nextLatestElement = scene.mutateElement(
     latestElement,
     {
       x,
@@ -166,14 +167,18 @@ export const moveElement = (
     },
     { informMutation: shouldInformMutation, isDragging: false },
   );
-  updateBindings(latestElement, scene, appState);
+  updateBindings(nextLatestElement, scene, appState);
 
+  // Intentionally reads the ORIGINAL bound text (pre-drag) for its base x/y.
   const boundTextElement = getBoundTextElement(
     originalElement,
     originalElementsMap,
   );
   if (boundTextElement) {
-    const latestBoundTextElement = elementsMap.get(boundTextElement.id);
+    // fresh-snapshot: re-read post-mutation
+    const latestBoundTextElement = scene
+      .getNonDeletedElementsMap()
+      .get(boundTextElement.id);
     latestBoundTextElement &&
       scene.mutateElement(
         latestBoundTextElement,
@@ -191,7 +196,9 @@ export const moveElement = (
       originalElement.id,
     );
     originalChildren.forEach((child) => {
-      const latestChildElement = elementsMap.get(child.id);
+      // fresh-snapshot: re-read post-mutation (prior iterations + the container
+      // move wrote to the doc; the captured map is stale)
+      const latestChildElement = scene.getNonDeletedElementsMap().get(child.id);
 
       if (!latestChildElement) {
         return;
@@ -216,7 +223,8 @@ export const moveElement = (
         -child.angle as Radians,
       );
 
-      scene.mutateElement(
+      // fresh-snapshot: re-read post-mutation
+      const nextLatestChildElement = scene.mutateElement(
         latestChildElement,
         {
           x: childX,
@@ -224,7 +232,7 @@ export const moveElement = (
         },
         { informMutation: shouldInformMutation, isDragging: false },
       );
-      updateBindings(latestChildElement, scene, appState, {
+      updateBindings(nextLatestChildElement, scene, appState, {
         simultaneouslyUpdated: originalChildren,
       });
     });

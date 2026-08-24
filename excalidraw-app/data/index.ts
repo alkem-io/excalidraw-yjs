@@ -1,33 +1,34 @@
 import {
   compressData,
   decompressData,
-} from "@excalidraw/excalidraw/data/encode";
+} from "@excalidraw-yjs/excalidraw/data/encode";
 import {
   decryptData,
   generateEncryptionKey,
   IV_LENGTH_BYTES,
-} from "@excalidraw/excalidraw/data/encryption";
-import { serializeAsJSON } from "@excalidraw/excalidraw/data/json";
-import { isInvisiblySmallElement } from "@excalidraw/element";
-import { isInitializedImageElement } from "@excalidraw/element";
-import { t } from "@excalidraw/excalidraw/i18n";
-import { bytesToHexString } from "@excalidraw/common";
+} from "@excalidraw-yjs/excalidraw/data/encryption";
+import { serializeAsJSON } from "@excalidraw-yjs/excalidraw/data/json";
+import { isInvisiblySmallElement } from "@excalidraw-yjs/element";
+import { isInitializedImageElement } from "@excalidraw-yjs/element";
 
-import type { UserIdleState } from "@excalidraw/common";
-import type { ImportedDataState } from "@excalidraw/excalidraw/data/types";
-import type { SceneBounds } from "@excalidraw/element";
+import { t } from "@excalidraw-yjs/excalidraw/i18n";
+import { bytesToHexString } from "@excalidraw-yjs/common";
+
+import type { UserIdleState } from "@excalidraw-yjs/common";
+import type { ImportedDataState } from "@excalidraw-yjs/excalidraw/data/types";
+import type { SceneBounds } from "@excalidraw-yjs/element";
 import type {
   ExcalidrawElement,
   FileId,
   OrderedExcalidrawElement,
-} from "@excalidraw/element/types";
+} from "@excalidraw-yjs/element/types";
 import type {
   AppState,
   BinaryFileData,
   BinaryFiles,
   SocketId,
-} from "@excalidraw/excalidraw/types";
-import type { MakeBrand } from "@excalidraw/common/utility-types";
+} from "@excalidraw-yjs/excalidraw/types";
+import type { MakeBrand } from "@excalidraw-yjs/common/utility-types";
 
 import {
   DELETED_ELEMENT_TIMEOUT,
@@ -80,16 +81,21 @@ export type SocketUpdateDataSource = {
   INVALID_RESPONSE: {
     type: WS_SUBTYPES.INVALID_RESPONSE;
   };
+  // Native-Yjs core (M3): the scene channel carries Yjs updates on the scene's
+  // `Y.Doc`, NOT element JSON. INIT is the full doc state for a newly-joined peer
+  // (`encodeStateAsUpdate`); UPDATE is an incremental update this replica
+  // originated. The bytes are serialized as a number[] so they survive the
+  // JSON.stringify the encrypted socket payload goes through.
   SCENE_INIT: {
     type: WS_SUBTYPES.INIT;
     payload: {
-      elements: readonly OrderedExcalidrawElement[];
+      update: number[];
     };
   };
   SCENE_UPDATE: {
     type: WS_SUBTYPES.UPDATE;
     payload: {
-      elements: readonly OrderedExcalidrawElement[];
+      update: number[];
     };
   };
   MOUSE_LOCATION: {
