@@ -1,6 +1,10 @@
 {
   "name": "@excalidraw-yjs/common",
-  "version": "0.18.0",
+  "version": "0.5.0",
+  "upstream": {
+    "repository": "https://github.com/excalidraw/excalidraw",
+    "commit": "864353be5ff8b15489a63628c2708e453c83c642"
+  },
   "type": "module",
   "types": "./dist/types/common/src/index.d.ts",
   "main": "./dist/prod/index.js",

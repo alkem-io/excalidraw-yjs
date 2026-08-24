@@ -1,19 +1,20 @@
-name: Release Alkemio package
+name: Release Excalidraw Yjs packages
 
 # pnpm monorepo, native-Yjs Excalidraw fork (@excalidraw-yjs/*).
 #   - Tag push (v*)         -> publish the @excalidraw-yjs/* set to npmjs (OIDC + provenance)
 #   - Pull request / manual -> publish a pkg.pr.new preview for the @excalidraw-yjs/* set
 #
 # The packages form a workspace:* graph (excalidraw -> element/common/math,
-# element -> common/math/fractional-indexing, math -> common). They MUST be published
+# element -> common/math/fractional-indexing, common -> math). They MUST be published
 # as a SET: publishing @excalidraw-yjs/excalidraw alone would leave dangling
 # `workspace:*` sibling deps. pnpm publish (tag) and pkg.pr.new (preview) both rewrite
 # those workspace specifiers to the matching published / preview versions when the
 # whole set is published together.
 #
-# Versioning: @excalidraw-yjs/excalidraw carries a hand-maintained version string
-# (0.18.0-<sha>-alkemio-N) committed in packages/excalidraw/package.json; it is NOT
-# derived from the git tag. Bump it by committing the package.json change before tagging.
+# Versioning: the coordinated @excalidraw-yjs/* release set follows this hard
+# fork's own SemVer. Every published package records the exact upstream Excalidraw
+# commit used as the synchronization baseline. Package versions and upstream
+# provenance are independent; update and commit them deliberately before tagging.
 
 on:
   push:
@@ -38,7 +39,7 @@ permissions:
 env:
   # The publishable set, in dependency order. Single source of truth for the build
   # and both publish paths so they cannot drift.
-  PUBLISH_PACKAGES: "./packages/common ./packages/fractional-indexing ./packages/math ./packages/element ./packages/excalidraw"
+  PUBLISH_PACKAGES: "./packages/fractional-indexing ./packages/math ./packages/common ./packages/element ./packages/excalidraw"
 
 jobs:
   publish:
@@ -85,19 +86,41 @@ jobs:
       - name: Publish @excalidraw-yjs/* to npmjs (Tag)
         if: ${{ startsWith(github.ref, 'refs/tags/v') }}
         run: |
-          for pkg in ${PUBLISH_PACKAGES}; do
+          wait_for_registry() {
+            name="$1"
+            version="$2"
+            for attempt in $(seq 1 24); do
+              if npm view "${name}@${version}" version --json >/dev/null 2>&1; then
+                return 0
+              fi
+              echo "Waiting for ${name}@${version} to become visible on npm (${attempt}/24)"
+              sleep 5
+            done
+            echo "::error::${name}@${version} did not become visible on npm within 120 seconds"
+            return 1
+          }
+
+          read -r -a PACKAGES <<< "${PUBLISH_PACKAGES}"
+          for pkg in "${PACKAGES[@]}"; do
             VERSION=$(node -p "require('${pkg}/package.json').version")
             NAME=$(node -p "require('${pkg}/package.json').name")
-            echo "Publishing ${NAME}@${VERSION} to npmjs"
-            pnpm publish "${pkg}" --access public --provenance --no-git-checks --tag latest
+            if npm view "${NAME}@${VERSION}" version --json >/dev/null 2>&1; then
+              echo "${NAME}@${VERSION} already exists on npmjs; skipping"
+            else
+              echo "Publishing ${NAME}@${VERSION} to npmjs"
+              pnpm publish "${pkg}" --access public --provenance --no-git-checks --tag latest
+            fi
+            wait_for_registry "${NAME}" "${VERSION}"
           done
-          echo "## 📦 Published @excalidraw-yjs/* set to npmjs" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          for pkg in ${PUBLISH_PACKAGES}; do
-            NAME=$(node -p "require('${pkg}/package.json').name")
-            VERSION=$(node -p "require('${pkg}/package.json').version")
-            echo "- \`${NAME}@${VERSION}\`" >> $GITHUB_STEP_SUMMARY
-          done
+          {
+            echo "## 📦 @excalidraw-yjs/* set available on npmjs"
+            echo ""
+            for pkg in "${PACKAGES[@]}"; do
+              NAME=$(node -p "require('${pkg}/package.json').name")
+              VERSION=$(node -p "require('${pkg}/package.json').version")
+              echo "- \`${NAME}@${VERSION}\`"
+            done
+          } >> "${GITHUB_STEP_SUMMARY}"
 
       # --- PR / manual path: pkg.pr.new preview for the @excalidraw-yjs/* set ---
       # On a fork PR the default GITHUB_TOKEN is read-only for pull-requests, so
@@ -116,37 +139,44 @@ jobs:
           else
             COMMENT_ARG="--comment=off"
           fi
-          OUTPUT=$(npx pkg-pr-new@0.0.65 publish "${COMMENT_ARG}" ${PUBLISH_PACKAGES} 2>&1)
+          read -r -a PACKAGES <<< "${PUBLISH_PACKAGES}"
+          OUTPUT=$(npx pkg-pr-new@0.0.65 publish "${COMMENT_ARG}" "${PACKAGES[@]}" 2>&1)
           STATUS=$?
           set -e
           echo "$OUTPUT"
-          URLS=$(echo "$OUTPUT" | grep -oE 'https://pkg\.pr\.new/[^ ]+')
+          URLS=$(echo "$OUTPUT" | grep -oE 'https://pkg\.pr\.new/[^ ]+' || true)
 
-          if [ $STATUS -eq 0 ] && [ -n "$URLS" ]; then
-            echo "## 📦 Published preview to pkg.pr.new" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**SHA:** \`${GITHUB_SHA}\`" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-            while IFS= read -r URL; do
-              echo "npm i ${URL}" >> $GITHUB_STEP_SUMMARY
-            done <<< "$URLS"
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          elif [ $STATUS -ne 0 ]; then
-            echo "## ⚠️ Preview publish failed" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-            echo "$OUTPUT" >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-            exit $STATUS
+          if [ "$STATUS" -eq 0 ] && [ -n "$URLS" ]; then
+            {
+              echo "## 📦 Published preview to pkg.pr.new"
+              echo ""
+              echo "**SHA:** \`${GITHUB_SHA}\`"
+              echo ""
+              echo "\`\`\`"
+              while IFS= read -r URL; do
+                echo "npm i ${URL}"
+              done <<< "$URLS"
+              echo "\`\`\`"
+            } >> "${GITHUB_STEP_SUMMARY}"
+          elif [ "$STATUS" -ne 0 ]; then
+            {
+              echo "## ⚠️ Preview publish failed"
+              echo ""
+              echo "\`\`\`"
+              echo "$OUTPUT"
+              echo "\`\`\`"
+            } >> "${GITHUB_STEP_SUMMARY}"
+            exit "$STATUS"
           else
             # exit 0 but no install URL emitted (e.g. the output format changed):
             # the preview artifact was NOT produced, so fail loudly instead of
             # reporting green.
-            echo "## ⚠️ Preview publish produced no install URL" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-            echo "$OUTPUT" >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            {
+              echo "## ⚠️ Preview publish produced no install URL"
+              echo ""
+              echo "\`\`\`"
+              echo "$OUTPUT"
+              echo "\`\`\`"
+            } >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
