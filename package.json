@@ -83,7 +83,7 @@
     "rm:build": "rimraf --glob excalidraw-app/build excalidraw-app/dist excalidraw-app/dev-dist packages/*/dist packages/*/build examples/*/build examples/*/dist",
     "rm:node_modules": "rimraf --glob node_modules excalidraw-app/node_modules packages/*/node_modules",
     "clean-install": "pnpm run rm:node_modules && pnpm install",
-    "test:headless": "pnpm run build:common && pnpm run build:fractional-indexing && pnpm run build:math && pnpm run build:element && pnpm run build:excalidraw && node scripts/headless-smoke.mjs",
+    "test:headless": "pnpm run build:common && pnpm run build:fractional-indexing && pnpm run build:math && pnpm run build:element && pnpm run build:excalidraw && node scripts/headless-smoke.mjs && node scripts/cjs-headless-smoke.cjs",
     "test:gates": "pnpm install --frozen-lockfile && pnpm run test:other && pnpm run test:code && pnpm run test:typecheck && vitest run --coverage && pnpm run test:headless"
   },
   "resolutions": {

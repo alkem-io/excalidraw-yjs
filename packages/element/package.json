@@ -14,6 +14,7 @@
     },
     "./headless": {
       "types": "./dist/types/element/src/headless.d.ts",
+      "require": "./dist/cjs/headless.cjs",
       "development": "./dist/dev/headless.js",
       "production": "./dist/prod/headless.js",
       "default": "./dist/prod/headless.js"
