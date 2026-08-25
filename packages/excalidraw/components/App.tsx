@@ -5235,6 +5235,7 @@ class App extends React.Component<AppProps, AppState> {
         // Cache ONLY. Going through the publisher would store these bytes back
         // to the host and re-publish a locator for something we just fetched.
         this.cacheResolvedFiles(resolved);
+        void this.addNewImagesToImageCache();
       }
       // Reconcile again ONLY for a locator that changed mid-flight: its result
       // was discarded above and nothing else would re-trigger a fetch for it.
