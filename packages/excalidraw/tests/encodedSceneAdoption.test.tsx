@@ -180,8 +180,9 @@ describe("encodedScene adoption (T020)", () => {
     mockHTMLImageElement(1, 1);
 
     const resolution = resolvablePromise<BinaryFileData>();
+    const store = vi.fn(async (f: BinaryFileData) => `asset://${f.id}`);
     const adapter: AssetAdapter = {
-      store: async (f) => `asset://${f.id}`,
+      store,
       resolve: async () => resolution,
     };
     const stored = storedDocument((scene) => {
@@ -213,6 +214,7 @@ describe("encodedScene adoption (T020)", () => {
 
     expect(h.app.files.f1).toBeDefined();
     expect(h.app.imageCache.has("f1" as any)).toBe(true);
+    expect(store).not.toHaveBeenCalled();
   });
 
   it("fails loud when a caller supplies BOTH forms", async () => {
