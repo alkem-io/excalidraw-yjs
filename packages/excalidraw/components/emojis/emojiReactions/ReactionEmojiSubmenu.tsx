@@ -21,7 +21,7 @@ const ReactionEmojiSubmenu = ({
         {t("toolBar.emojiReactions")}
       </DropdownMenuSub.Trigger>
       <DropdownMenuSub.Content className="emoji-submenu__content">
-        <EmojiPickerPanel onSelect={onSelect} />
+        <EmojiPickerPanel onSelect={onSelect} asMenuItems />
       </DropdownMenuSub.Content>
     </DropdownMenuSub>
   );

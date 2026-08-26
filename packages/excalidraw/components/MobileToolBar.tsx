@@ -424,7 +424,13 @@ export const MobileToolBar = ({
       )}
 
       {/* Other Shapes */}
-      <DropdownMenu open={isOtherShapesMenuOpen}>
+      <DropdownMenu
+        open={isOtherShapesMenuOpen}
+        onOpenChange={(open) => {
+          setIsOtherShapesMenuOpen(open);
+          setAppState({ openMenu: null, openPopup: null });
+        }}
+      >
         <DropdownMenu.Trigger
           className={clsx(
             "App-toolbar__extra-tools-trigger App-toolbar__extra-tools-trigger--mobile",

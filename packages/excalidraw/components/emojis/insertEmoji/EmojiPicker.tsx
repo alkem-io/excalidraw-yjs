@@ -31,16 +31,17 @@ const EmojiPicker = ({ onInsert }: { onInsert: () => void }) => {
       <DropdownMenuSub.Content className="emoji-submenu__content">
         <div className="emoji-submenu__grid">
           {defaultInsertEmojiConfig.emojis.map((entry) => (
-            <button
-              key={entry.emoji}
-              className="emoji-submenu__emoji"
-              onClick={() => handleInsertEmoji(entry.emoji)}
-              title={entry.label}
-              aria-label={entry.label}
-              type="button"
-            >
-              {entry.emoji}
-            </button>
+            <DropdownMenuSub.Item key={entry.emoji} asChild>
+              <button
+                className="emoji-submenu__emoji"
+                onClick={() => handleInsertEmoji(entry.emoji)}
+                title={entry.label}
+                aria-label={entry.label}
+                type="button"
+              >
+                {entry.emoji}
+              </button>
+            </DropdownMenuSub.Item>
           ))}
         </div>
       </DropdownMenuSub.Content>
