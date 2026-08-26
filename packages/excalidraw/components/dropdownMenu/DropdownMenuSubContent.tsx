@@ -14,9 +14,11 @@ const BASE_SIDE_OFFSET = 4;
 const DropdownMenuSubContent = ({
   children,
   className,
+  onKeyDown,
 }: {
   children?: React.ReactNode;
   className?: string;
+  onKeyDown?: React.KeyboardEventHandler<HTMLDivElement>;
 }) => {
   const editorInterface = useEditorInterface();
 
@@ -51,6 +53,7 @@ const DropdownMenuSubContent = ({
       alignOffset={alignOffset}
       collisionPadding={8}
       ref={callbacksRef}
+      onKeyDown={onKeyDown}
     >
       {editorInterface.formFactor === "phone" ? (
         <Stack.Col className="dropdown-menu-container">{children}</Stack.Col>

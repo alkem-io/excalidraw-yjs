@@ -23,9 +23,11 @@ import "./DropdownMenu.scss";
 const DropdownMenu = ({
   children,
   open,
+  onOpenChange,
 }: {
   children?: React.ReactNode;
   open: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) => {
   const MenuTriggerComp = getMenuTriggerComponent(children);
   const MenuContentComp = getMenuContentComponent(children);
@@ -40,7 +42,11 @@ const DropdownMenu = ({
       : MenuContentComp;
 
   return (
-    <DropdownMenuPrimitive.Root open={open} modal={false}>
+    <DropdownMenuPrimitive.Root
+      open={open}
+      onOpenChange={onOpenChange}
+      modal={false}
+    >
       <div
         className={CLASSES.DROPDOWN_MENU_EVENT_WRAPPER}
         style={{

@@ -20,6 +20,7 @@ const DropdownMenuSub = ({ children }: { children?: React.ReactNode }) => {
 
 DropdownMenuSub.Trigger = DropdownMenuSubTrigger;
 DropdownMenuSub.Content = DropdownMenuSubContent;
+DropdownMenuSub.Item = DropdownMenuPrimitive.Item;
 
 DropdownMenuSub.displayName = "DropdownMenuSub";
 

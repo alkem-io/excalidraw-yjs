@@ -1057,7 +1057,6 @@ export const ShapesSwitcher = ({
   onStartCountdownTimer?: (minutes: number, seconds: number) => void;
 }) => {
   const [isExtraToolsMenuOpen, setIsExtraToolsMenuOpen] = useState(false);
-  const [openSubmenu, setOpenSubmenu] = useState<string | null>(null);
   const stylesPanelMode = useStylesPanelMode();
   const isFullStylesPanel = stylesPanelMode === "full";
   const isCompactStylesPanel = stylesPanelMode === "compact";
@@ -1190,7 +1189,15 @@ export const ShapesSwitcher = ({
       )}
       <div className="App-toolbar__divider" />
 
-      <DropdownMenu open={isExtraToolsMenuOpen}>
+      <DropdownMenu
+        open={isExtraToolsMenuOpen}
+        onOpenChange={(open) => {
+          setIsExtraToolsMenuOpen(open);
+          if (open) {
+            setAppState({ openMenu: null, openPopup: null });
+          }
+        }}
+      >
         <DropdownMenu.Trigger
           className={clsx("App-toolbar__extra-tools-trigger", {
             "App-toolbar__extra-tools-trigger--selected":
@@ -1203,7 +1210,6 @@ export const ShapesSwitcher = ({
               (laserToolSelected && !app.props.isCollaborating),
           })}
           onToggle={() => {
-            setIsExtraToolsMenuOpen(!isExtraToolsMenuOpen);
             setAppState({ openMenu: null, openPopup: null });
           }}
           title={t("toolBar.extraTools")}
@@ -1221,11 +1227,9 @@ export const ShapesSwitcher = ({
         <DropdownMenu.Content
           onClickOutside={() => {
             setIsExtraToolsMenuOpen(false);
-            setOpenSubmenu(null);
           }}
           onSelect={() => {
             setIsExtraToolsMenuOpen(false);
-            setOpenSubmenu(null);
           }}
           className="App-toolbar__extra-tools-dropdown"
         >
@@ -1265,46 +1269,22 @@ export const ShapesSwitcher = ({
               {t("toolBar.lasso")}
             </DropdownMenu.Item>
           )}
-          <DropdownMenu.ItemCustom data-testid="toolbar-emoji">
-            <EmojiPicker
-              onInsert={() => setIsExtraToolsMenuOpen(false)}
-              isOpen={openSubmenu === "emoji"}
-              onToggle={() =>
-                setOpenSubmenu(openSubmenu === "emoji" ? null : "emoji")
-              }
-            />
-          </DropdownMenu.ItemCustom>
+          <EmojiPicker onInsert={() => setIsExtraToolsMenuOpen(false)} />
           {onSelectReactionEmoji && (
-            <DropdownMenu.ItemCustom data-testid="toolbar-reactions">
-              <ReactionEmojiSubmenu
-                onSelect={(emoji) => {
-                  setIsExtraToolsMenuOpen(false);
-                  onSelectReactionEmoji(emoji);
-                }}
-                isOpen={openSubmenu === "reactions"}
-                onToggle={() =>
-                  setOpenSubmenu(
-                    openSubmenu === "reactions" ? null : "reactions",
-                  )
-                }
-              />
-            </DropdownMenu.ItemCustom>
+            <ReactionEmojiSubmenu
+              onSelect={(emoji) => {
+                setIsExtraToolsMenuOpen(false);
+                onSelectReactionEmoji(emoji);
+              }}
+            />
           )}
           {onStartCountdownTimer && (
-            <DropdownMenu.ItemCustom data-testid="toolbar-countdown-timer">
-              <CountdownTimerSubmenu
-                onStart={(minutes, seconds) => {
-                  setIsExtraToolsMenuOpen(false);
-                  onStartCountdownTimer(minutes, seconds);
-                }}
-                isOpen={openSubmenu === "countdown"}
-                onToggle={() =>
-                  setOpenSubmenu(
-                    openSubmenu === "countdown" ? null : "countdown",
-                  )
-                }
-              />
-            </DropdownMenu.ItemCustom>
+            <CountdownTimerSubmenu
+              onStart={(minutes, seconds) => {
+                setIsExtraToolsMenuOpen(false);
+                onStartCountdownTimer(minutes, seconds);
+              }}
+            />
           )}
           <div style={{ margin: "6px 0", fontSize: 14, fontWeight: 600 }}>
             Generate
