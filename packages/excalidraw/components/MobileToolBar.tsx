@@ -113,23 +113,12 @@ export const MobileToolBar = ({
 }: MobileToolBarProps) => {
   const activeTool = app.state.activeTool;
   const [isOtherShapesMenuOpen, setIsOtherShapesMenuOpen] = useState(false);
-  const [openSubmenu, setOpenSubmenu] = useState<string | null>(null);
   const [lastActiveGenericShape, setLastActiveGenericShape] = useState<
     "rectangle" | "diamond" | "ellipse"
   >("rectangle");
   const [lastActiveLinearElement, setLastActiveLinearElement] = useState<
     "arrow" | "line"
   >("arrow");
-
-  // reset the nested-panel selector when the overflow ("Other Shapes") menu
-  // closes — otherwise `openSubmenu` survives and reopening the menu immediately
-  // re-opens the last nested panel (reactions / countdown), e.g. after selecting
-  // an emoji or dismissing the menu with an outside click.
-  useEffect(() => {
-    if (!isOtherShapesMenuOpen) {
-      setOpenSubmenu(null);
-    }
-  }, [isOtherShapesMenuOpen]);
 
   // keep lastActiveGenericShape in sync with active tool if user switches via other UI
   useEffect(() => {
@@ -516,33 +505,19 @@ export const MobileToolBar = ({
             {t("toolBar.laser")}
           </DropdownMenu.Item>
           {isCollaborating && (
-            <DropdownMenu.ItemCustom data-testid="toolbar-reactions">
-              <ReactionEmojiSubmenu
-                onSelect={(emoji) => {
-                  setIsOtherShapesMenuOpen(false);
-                  reactions.handleSelectReactionEmoji(emoji);
-                }}
-                isOpen={openSubmenu === "reactions"}
-                onToggle={() =>
-                  setOpenSubmenu(
-                    openSubmenu === "reactions" ? null : "reactions",
-                  )
-                }
-              />
-            </DropdownMenu.ItemCustom>
-          )}
-          <DropdownMenu.ItemCustom data-testid="toolbar-countdown-timer">
-            <CountdownTimerSubmenu
-              onStart={(minutes, seconds) => {
+            <ReactionEmojiSubmenu
+              onSelect={(emoji) => {
                 setIsOtherShapesMenuOpen(false);
-                countdownTimer.startTimer(minutes, seconds);
+                reactions.handleSelectReactionEmoji(emoji);
               }}
-              isOpen={openSubmenu === "countdown"}
-              onToggle={() =>
-                setOpenSubmenu(openSubmenu === "countdown" ? null : "countdown")
-              }
             />
-          </DropdownMenu.ItemCustom>
+          )}
+          <CountdownTimerSubmenu
+            onStart={(minutes, seconds) => {
+              setIsOtherShapesMenuOpen(false);
+              countdownTimer.startTimer(minutes, seconds);
+            }}
+          />
           <div style={{ margin: "6px 0", fontSize: 14, fontWeight: 600 }}>
             Generate
           </div>
