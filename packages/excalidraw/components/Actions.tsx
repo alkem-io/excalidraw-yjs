@@ -1193,7 +1193,9 @@ export const ShapesSwitcher = ({
         open={isExtraToolsMenuOpen}
         onOpenChange={(open) => {
           setIsExtraToolsMenuOpen(open);
-          setAppState({ openMenu: null, openPopup: null });
+          if (open) {
+            setAppState({ openMenu: null, openPopup: null });
+          }
         }}
       >
         <DropdownMenu.Trigger
@@ -1208,7 +1210,6 @@ export const ShapesSwitcher = ({
               (laserToolSelected && !app.props.isCollaborating),
           })}
           onToggle={() => {
-            setIsExtraToolsMenuOpen(!isExtraToolsMenuOpen);
             setAppState({ openMenu: null, openPopup: null });
           }}
           title={t("toolBar.extraTools")}

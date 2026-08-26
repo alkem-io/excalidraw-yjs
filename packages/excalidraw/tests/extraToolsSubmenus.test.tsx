@@ -2,7 +2,7 @@ import React from "react";
 
 import { Excalidraw } from "../index";
 
-import { act, fireEvent, render, screen, waitFor, within } from "./test-utils";
+import { fireEvent, render, screen, waitFor, within } from "./test-utils";
 
 const openExtraToolsWithKeyboard = () => {
   const trigger = screen.getByTitle("More tools");
@@ -15,6 +15,13 @@ const expectExtraToolsClosed = () => {
     "aria-expanded",
     "false",
   );
+};
+
+const openExtraToolsWithPointer = () => {
+  fireEvent.pointerDown(screen.getByTitle("More tools"), {
+    button: 0,
+    ctrlKey: false,
+  });
 };
 
 const openSubmenuWithKeyboard = (name: string) => {
@@ -111,6 +118,29 @@ describe("extra tools submenus", () => {
     });
   });
 
+  it("keeps the countdown menu open when the duration is zero", async () => {
+    const onRequestBroadcastCountdownTimer = vi.fn();
+    await render(
+      <Excalidraw
+        onRequestBroadcastCountdownTimer={onRequestBroadcastCountdownTimer}
+      />,
+    );
+
+    openExtraToolsWithKeyboard();
+    openSubmenuWithKeyboard("Countdown timer");
+
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Min" }), {
+      target: { value: "0" },
+    });
+
+    expect(screen.getByRole("menuitem", { name: "Start" })).toBeDisabled();
+    expect(onRequestBroadcastCountdownTimer).not.toHaveBeenCalled();
+    expect(screen.getByTitle("More tools")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+  });
+
   it("keeps the phone reaction submenu clickable, closable, and dismissible", async () => {
     const onRequestBroadcastEmojiReaction = vi.fn();
     const { container } = await renderPhone({
@@ -118,7 +148,7 @@ describe("extra tools submenus", () => {
       onRequestBroadcastEmojiReaction,
     });
 
-    fireEvent.click(screen.getByTitle("More tools"));
+    openExtraToolsWithPointer();
     fireEvent.click(screen.getByText("Emoji reactions"));
     fireEvent.click(screen.getByRole("menuitem", { name: "👏" }));
 
@@ -127,16 +157,18 @@ describe("extra tools submenus", () => {
       expectExtraToolsClosed();
     });
 
-    await act(async () => {
-      await new Promise((resolve) => window.setTimeout(resolve, 40));
+    await waitFor(() => {
+      expect(container.querySelector(".reaction-overlay")).not.toBeNull();
     });
-    act(() => {
-      fireEvent.pointerDown(container.querySelector(".reaction-overlay")!, {
-        button: 0,
-        clientX: 100,
-        clientY: 120,
-        pointerId: 1,
-      });
+    const reactionOverlay = container.querySelector(".reaction-overlay");
+    if (!reactionOverlay) {
+      throw new Error("Reaction overlay did not mount");
+    }
+    fireEvent.pointerDown(reactionOverlay, {
+      button: 0,
+      clientX: 100,
+      clientY: 120,
+      pointerId: 1,
     });
     expect(onRequestBroadcastEmojiReaction).toHaveBeenCalledWith(
       "👏",
@@ -144,7 +176,7 @@ describe("extra tools submenus", () => {
       expect.any(Number),
     );
 
-    fireEvent.click(screen.getByTitle("More tools"));
+    openExtraToolsWithPointer();
     expect(screen.getByRole("menu", { name: "More tools" })).toBeVisible();
     fireEvent.pointerDown(container.querySelector("canvas.interactive")!);
     await waitFor(expectExtraToolsClosed);
@@ -156,7 +188,7 @@ describe("extra tools submenus", () => {
       onRequestBroadcastCountdownTimer,
     });
 
-    fireEvent.click(screen.getByTitle("More tools"));
+    openExtraToolsWithPointer();
     fireEvent.click(screen.getByText("Countdown timer"));
     fireEvent.click(screen.getByText("Start"));
 
@@ -169,7 +201,7 @@ describe("extra tools submenus", () => {
       expectExtraToolsClosed();
     });
 
-    fireEvent.click(screen.getByTitle("More tools"));
+    openExtraToolsWithPointer();
     expect(
       within(screen.getByRole("menu", { name: "More tools" })).getByText(
         "Countdown timer",

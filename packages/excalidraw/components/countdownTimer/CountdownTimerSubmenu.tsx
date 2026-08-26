@@ -14,6 +14,7 @@ const CountdownTimerSubmenu = ({
 }) => {
   const [minutes, setMinutes] = useState(5);
   const [seconds, setSeconds] = useState(0);
+  const isDurationEmpty = minutes === 0 && seconds === 0;
 
   const handleFormKeyDown: React.KeyboardEventHandler<HTMLDivElement> = (
     event,
@@ -111,10 +112,11 @@ const CountdownTimerSubmenu = ({
               />
             </label>
           </div>
-          <DropdownMenuSub.Item asChild>
+          <DropdownMenuSub.Item asChild disabled={isDurationEmpty}>
             <button
               type="button"
               className="countdown-timer-submenu__start"
+              disabled={isDurationEmpty}
               onClick={() => {
                 if (minutes > 0 || seconds > 0) {
                   onStart(minutes, seconds);

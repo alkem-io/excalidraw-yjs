@@ -428,7 +428,9 @@ export const MobileToolBar = ({
         open={isOtherShapesMenuOpen}
         onOpenChange={(open) => {
           setIsOtherShapesMenuOpen(open);
-          setAppState({ openMenu: null, openPopup: null });
+          if (open) {
+            setAppState({ openMenu: null, openPopup: null });
+          }
         }}
       >
         <DropdownMenu.Trigger
@@ -440,7 +442,6 @@ export const MobileToolBar = ({
             },
           )}
           onToggle={() => {
-            setIsOtherShapesMenuOpen(!isOtherShapesMenuOpen);
             setAppState({ openMenu: null, openPopup: null });
           }}
           title={t("toolBar.extraTools")}
