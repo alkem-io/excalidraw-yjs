@@ -7,6 +7,7 @@ import { resolvablePromise } from "@excalidraw-yjs/common";
 import { Excalidraw } from "../index";
 
 import { API } from "./helpers/api";
+import { mockHTMLImageElement } from "./helpers/mocks";
 import { act, render, waitFor } from "./test-utils";
 
 import type { AssetAdapter, BinaryFileData } from "../types";
@@ -173,6 +174,47 @@ describe("encodedScene adoption (T020)", () => {
     // locator and orphan the stored one.
     expect(calls.store).toEqual([]);
     expect(h.app.files.f1?.dataURL).toBe("data:image/png;base64,AAAA");
+  });
+
+  it("renders an asynchronously resolved cold asset without interaction", async () => {
+    mockHTMLImageElement(1, 1);
+
+    const resolution = resolvablePromise<BinaryFileData>();
+    const store = vi.fn(async (f: BinaryFileData) => `asset://${f.id}`);
+    const adapter: AssetAdapter = {
+      store,
+      resolve: async () => resolution,
+    };
+    const stored = storedDocument((scene) => {
+      scene.replaceAllElements([
+        API.createElement({ id: "img", type: "image", fileId: "f1" as any }),
+      ]);
+      scene.setAssetLocators({ f1: "asset://f1" });
+    });
+
+    await render(
+      <Excalidraw
+        initialData={{ encodedScene: stored }}
+        assetAdapter={adapter}
+      />,
+    );
+
+    expect(h.app.imageCache.has("f1" as any)).toBe(false);
+
+    await act(async () => {
+      resolution.resolve({
+        id: "f1",
+        mimeType: "image/png",
+        dataURL: "data:image/png;base64,AAAA",
+        created: 1,
+      } as BinaryFileData);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(h.app.files.f1).toBeDefined();
+    expect(h.app.imageCache.has("f1" as any)).toBe(true);
+    expect(store).not.toHaveBeenCalled();
   });
 
   it("fails loud when a caller supplies BOTH forms", async () => {
