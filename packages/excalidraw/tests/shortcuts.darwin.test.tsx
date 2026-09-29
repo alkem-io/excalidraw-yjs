@@ -73,8 +73,10 @@ describe("modified delete on Darwin", () => {
         />,
       );
 
+      API.setSelectedElements([window.h.elements[0]]);
       const input = document.createElement("textarea");
       document.body.append(input);
+      input.focus();
 
       try {
         expect(fireEvent.keyDown(input, { key, metaKey: true })).toBe(true);

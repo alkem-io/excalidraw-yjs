@@ -155,25 +155,32 @@ describe("shortcuts", () => {
     },
   );
 
-  it("leaves native input editing to the browser", async () => {
-    await render(
-      <Excalidraw
-        initialData={{ elements: [API.createElement({ type: "rectangle" })] }}
-        handleKeyboardGlobally
-      />,
-    );
+  it.each([KEYS.DELETE, KEYS.BACKSPACE])(
+    "leaves native input editing to the browser for Control+%s",
+    async (key) => {
+      await render(
+        <Excalidraw
+          initialData={{
+            elements: [API.createElement({ type: "rectangle" })],
+          }}
+          handleKeyboardGlobally
+        />,
+      );
 
-    const input = document.createElement("textarea");
-    document.body.append(input);
+      API.setSelectedElements([window.h.elements[0]]);
+      const input = document.createElement("textarea");
+      document.body.append(input);
+      input.focus();
 
-    try {
-      expect(pressModifiedDelete(KEYS.DELETE, input)).toBe(true);
-      expect(window.h.elements[0].isDeleted).toBe(false);
-      expect(document.querySelector(".confirm-dialog")).toBeNull();
-    } finally {
-      input.remove();
-    }
-  });
+      try {
+        expect(pressModifiedDelete(key, input)).toBe(true);
+        expect(window.h.elements[0].isDeleted).toBe(false);
+        expect(document.querySelector(".confirm-dialog")).toBeNull();
+      } finally {
+        input.remove();
+      }
+    },
+  );
 
   it("clears the canvas only through the explicit menu action", async () => {
     const { container } = await render(
