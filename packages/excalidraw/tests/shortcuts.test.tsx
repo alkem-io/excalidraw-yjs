@@ -1,11 +1,25 @@
 import React from "react";
+import { vi } from "vitest";
 
 import { KEYS } from "@excalidraw-yjs/common";
 
 import { Excalidraw, MainMenu } from "../index";
+import { t } from "../i18n";
 
 import { API } from "./helpers/api";
 import { fireEvent, render, toggleMenu, waitFor } from "./test-utils";
+
+vi.mock("@excalidraw-yjs/common", async (importOriginal) => {
+  const common = await importOriginal<
+    typeof import("@excalidraw-yjs/common")
+  >();
+
+  return {
+    ...common,
+    isDarwin: false,
+    KEYS: { ...common.KEYS, CTRL_OR_CMD: "ctrlKey" },
+  };
+});
 
 describe("shortcuts", () => {
   const pressModifiedDelete = (key: string, target: HTMLElement | Document) =>
@@ -186,6 +200,18 @@ describe("shortcuts", () => {
 
     await waitFor(() => {
       expect(window.h.elements[0].isDeleted).toBe(true);
+    });
+  });
+
+  it("does not advertise modified delete as a clear-canvas shortcut", async () => {
+    await render(<Excalidraw handleKeyboardGlobally />);
+
+    fireEvent.keyDown(document, { key: KEYS.QUESTION_MARK });
+
+    await waitFor(() => {
+      const helpDialog = document.querySelector(".HelpDialog");
+      expect(helpDialog).not.toBeNull();
+      expect(helpDialog).not.toHaveTextContent(t("buttons.clearReset"));
     });
   });
 });

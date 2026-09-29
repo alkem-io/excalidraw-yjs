@@ -357,10 +357,6 @@ export const HelpDialog = ({ onClose }: { onClose?: () => void }) => {
               isOr={true}
             />
             <Shortcut
-              label={t("buttons.clearReset")}
-              shortcuts={[getShortcutKey("CtrlOrCmd+Delete")]}
-            />
-            <Shortcut
               label={t("labels.delete")}
               shortcuts={[getShortcutKey("Delete")]}
             />
