@@ -44,6 +44,85 @@ describe("shortcuts", () => {
     },
   );
 
+  it("delegates modified delete to grouped selection and its undo history", async () => {
+    await render(
+      <Excalidraw
+        initialData={{
+          elements: [
+            API.createElement({ type: "rectangle", groupIds: ["group"] }),
+            API.createElement({ type: "ellipse", groupIds: ["group"] }),
+            API.createElement({ type: "diamond" }),
+          ],
+        }}
+        handleKeyboardGlobally
+      />,
+    );
+
+    const [first, second, ungrouped] = window.h.elements;
+    API.setSelectedElements([first, second]);
+
+    pressModifiedDelete(KEYS.DELETE, document);
+
+    expect(window.h.elements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: first.id, isDeleted: true }),
+        expect.objectContaining({ id: second.id, isDeleted: true }),
+        expect.objectContaining({ id: ungrouped.id, isDeleted: false }),
+      ]),
+    );
+
+    fireEvent.keyDown(document, {
+      key: KEYS.Z,
+      [KEYS.CTRL_OR_CMD]: true,
+    });
+
+    expect(window.h.elements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: first.id, isDeleted: false }),
+        expect.objectContaining({ id: second.id, isDeleted: false }),
+        expect.objectContaining({ id: ungrouped.id, isDeleted: false }),
+      ]),
+    );
+  });
+
+  it("delegates modified delete to binding cleanup", async () => {
+    const target = API.createElement({
+      type: "rectangle",
+      id: "target",
+      boundElements: [{ id: "arrow", type: "arrow" }],
+    });
+    const arrow = API.createElement({
+      type: "arrow",
+      id: "arrow",
+      startBinding: {
+        elementId: target.id,
+        fixedPoint: [0.5, 0.5],
+        mode: "orbit",
+      },
+    });
+
+    await render(
+      <Excalidraw
+        initialData={{ elements: [target, arrow] }}
+        handleKeyboardGlobally
+      />,
+    );
+
+    API.setSelectedElements([window.h.elements[0]]);
+    pressModifiedDelete(KEYS.BACKSPACE, document);
+
+    expect(window.h.elements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: target.id, isDeleted: true }),
+        expect.objectContaining({
+          id: arrow.id,
+          isDeleted: false,
+          startBinding: null,
+        }),
+      ]),
+    );
+  });
+
   it.each([KEYS.DELETE, KEYS.BACKSPACE])(
     "does nothing without a canvas selection for the platform modifier and %s",
     async (key) => {
