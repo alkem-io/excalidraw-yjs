@@ -393,9 +393,6 @@ function CommandPaletteInner({
         {
           label: getActionLabel(actionClearCanvas),
           icon: getActionIcon(actionClearCanvas),
-          shortcut: getShortcutFromShortcutName(
-            actionClearCanvas.name as ShortcutName,
-          ),
           category: DEFAULT_CATEGORIES.editor,
           keywords: ["delete", "destroy"],
           viewMode: false,

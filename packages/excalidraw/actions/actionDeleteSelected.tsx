@@ -304,7 +304,8 @@ export const actionDeleteSelected = register({
   },
   keyTest: (event, appState, elements) =>
     (event.key === KEYS.BACKSPACE || event.key === KEYS.DELETE) &&
-    !event[KEYS.CTRL_OR_CMD],
+    (!event[KEYS.CTRL_OR_CMD] ||
+      isSomeElementSelected(getNonDeletedElements(elements), appState)),
   PanelComponent: ({ elements, appState, updateData, app }) => {
     const isMobile = useStylesPanelMode() === "mobile";
 

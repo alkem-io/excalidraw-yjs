@@ -439,7 +439,6 @@ import ConvertElementTypePopup, {
   convertElementTypes,
 } from "./ConvertElementTypePopup";
 
-import { activeConfirmDialogAtom } from "./ActiveConfirmDialog";
 import BraveMeasureTextError from "./BraveMeasureTextError";
 import { ContextMenu, CONTEXT_MENU_SEPARATOR } from "./ContextMenu";
 import { activeEyeDropperAtom } from "./EyeDropper";
@@ -5959,13 +5958,6 @@ class App extends React.Component<AppProps, AppState> {
           event.preventDefault();
           this.setState({ openPopup: "fontFamily" });
         }
-      }
-
-      if (
-        event[KEYS.CTRL_OR_CMD] &&
-        (event.key === KEYS.BACKSPACE || event.key === KEYS.DELETE)
-      ) {
-        this.updateEditorAtom(activeConfirmDialogAtom, "clearCanvas");
       }
 
       // eye dropper
