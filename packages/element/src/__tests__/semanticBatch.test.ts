@@ -188,4 +188,81 @@ describe("semantic preparation", () => {
     expect(scene.getElement("source")!.strokeColor).toBe("#ff0000");
     expect(scene.getElement("source")!.boundElements).toHaveLength(1);
   });
+
+  it.each([NaN, Infinity, "wrong-type"])(
+    "rejects malformed peer geometry %s without writing to input",
+    (x) => {
+      const { doc, scene } = seed();
+      scene.yElements.get("source")!.set("x", x);
+      const before = Y.encodeStateAsUpdate(doc);
+      const result = prepare(doc, [{ op: "addText", text: "not published" }], {
+        textMetricsProvider: metrics,
+      });
+      expect(result).toMatchObject({
+        ok: false,
+        error: { category: "invalid-scene" },
+      });
+      expect(result).not.toHaveProperty("update");
+      expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    },
+  );
+
+  it("retains actual delete-set bytes when removing a bound label", () => {
+    const { doc } = seed();
+    const labelled = prepare(
+      doc,
+      [{ op: "setText", elementId: "source", text: "label" }],
+      { textMetricsProvider: metrics },
+    );
+    expect(labelled.ok).toBe(true);
+    Y.applyUpdate(doc, labelled.update);
+    const scene = new Scene(null, { doc });
+    const label = scene.getElement("source")!.boundElements![0].id;
+    const removed = prepare(doc, [{ op: "remove", elementId: label }], {
+      textMetricsProvider: metrics,
+    });
+    expect(removed.ok).toBe(true);
+    expect(Y.decodeUpdate(removed.update).ds.clients.size).toBeGreaterThan(0);
+    const replica = consume(doc, removed.update);
+    expect(replica.getElement(label)!.isDeleted).toBe(true);
+    expect(replica.getElement("source")!.boundElements || []).toEqual([]);
+  });
+
+  it("cleans a removed connector endpoint while preserving the other binding and grouped siblings", () => {
+    const { doc, scene } = seed();
+    scene.mutateElement(scene.getElement("source")!, { groupIds: ["group"] });
+    scene.mutateElement(scene.getElement("target")!, { groupIds: ["group"] });
+    const connected = prepare(
+      doc,
+      [{ op: "connect", fromId: "source", toId: "target" }],
+      { textMetricsProvider: metrics },
+    );
+    expect(connected.ok).toBe(true);
+    Y.applyUpdate(doc, connected.update);
+    const arrowId = connected.addedElementIds[0];
+    const removed = prepare(doc, [{ op: "remove", elementId: "source" }], {
+      textMetricsProvider: metrics,
+    });
+    const replica = consume(doc, removed.update);
+    expect(replica.getElement(arrowId)).toMatchObject({
+      startBinding: null,
+      endBinding: { elementId: "target" },
+      isDeleted: false,
+    });
+    expect(replica.getElement("target")).toMatchObject({
+      isDeleted: false,
+      groupIds: ["group"],
+    });
+  });
+
+  it("rejects a non-finite metrics result after construction without partial bytes", () => {
+    const { doc } = seed();
+    const before = Y.encodeStateAsUpdate(doc);
+    const result = prepare(doc, [{ op: "addText", text: "invalid metrics" }], {
+      textMetricsProvider: { getLineWidth: () => NaN },
+    });
+    expect(result.ok).toBe(false);
+    expect(result).not.toHaveProperty("update");
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+  });
 });

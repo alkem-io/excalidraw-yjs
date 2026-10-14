@@ -14,10 +14,12 @@ import { getBoundTextElement, redrawTextBoundingBox } from "./textElement";
 import { normalizeText, withTextMetricsProvider } from "./textMeasurements";
 import {
   isBindableElement,
+  isExcalidrawElement,
   isFrameLikeElement,
   isTextBindableContainer,
   isTextElement,
 } from "./typeChecks";
+import { captureElementBase } from "./yjs/intent";
 
 import type { TextMetricsProvider } from "./textMeasurements";
 import type { ExcalidrawTextElement, ExcalidrawTextContainer } from "./types";
@@ -87,18 +89,24 @@ const validateScene = (doc: Y.Doc) => {
     const element = value.toJSON();
     if (
       element.id !== id ||
-      typeof element.type !== "string" ||
+      !isExcalidrawElement({ type: element.type }) ||
       !finiteTree(element) ||
       !["x", "y", "width", "height", "angle"].every(
         (key) => typeof element[key] === "number",
       ) ||
       typeof element.isDeleted !== "boolean" ||
       !Array.isArray(element.groupIds) ||
+      !element.groupIds.every((group: unknown) => typeof group === "string") ||
+      (value.get("boundElements") !== undefined &&
+        !(value.get("boundElements") instanceof Y.Map)) ||
       (element.type === "text" &&
         (typeof element.text !== "string" ||
           typeof element.originalText !== "string" ||
           typeof element.fontSize !== "number" ||
-          element.fontSize <= 0)) ||
+          element.fontSize <= 0 ||
+          typeof element.fontFamily !== "number" ||
+          typeof element.lineHeight !== "number" ||
+          element.lineHeight <= 0)) ||
       (["arrow", "line", "freedraw"].includes(element.type) &&
         (!Array.isArray(element.points) ||
           !element.points.every(
@@ -210,6 +218,16 @@ export const prepareSemanticBatch = (
       operations.forEach((op, index) => {
         operationIndex = index;
         requireCondition(op && typeof op === "object" && finiteTree(op));
+        if (op.op === "addShape" || op.op === "addText") {
+          requireCondition(
+            [op.x, op.y, op.width, op.height].every(
+              (value) => value === undefined || typeof value === "number",
+            ),
+          );
+          requireCondition(
+            op.strokeColor === undefined || typeof op.strokeColor === "string",
+          );
+        }
         const operationIds: string[] = [];
         switch (op.op) {
           case "addShape": {
@@ -337,6 +355,7 @@ export const prepareSemanticBatch = (
           case "remove": {
             const target = get(op.elementId);
             const base = privateScene.getElementsIncludingDeleted();
+            const invocationBase = captureElementBase(base);
             const deletion = planElementDeletion(
               base,
               { [target.id]: true },
@@ -344,7 +363,7 @@ export const prepareSemanticBatch = (
               privateScene,
             );
             repairBindingsAfterDeletion(deletion.elements);
-            privateScene.applyElementChanges(base, deletion.elements);
+            privateScene.applyElementChanges(invocationBase, deletion.elements);
             operationIds.push(target.id);
             break;
           }
