@@ -28,6 +28,8 @@ export const operations: SemanticOperation[] = [
     text: "A long label wraps over several lines and grows its container\n世界",
   },
   { op: "setText", elementId: "existing-text", text: "changed\nmultiline" },
+  { op: "setText", elementId: "centered-text", text: "changed\nmultiline" },
+  { op: "setText", elementId: "right-text", text: "changed\nmultiline" },
   { op: "remove", elementId: "target" },
 ];
 
@@ -52,6 +54,18 @@ export const seed = () => {
     ...core.newTextElement({ text: "before", x: 0, y: 120 }),
     id: "existing-text",
   });
+  for (const textAlign of ["center", "right"] as const) {
+    scene.insertElement({
+      ...core.newTextElement({
+        text: "before",
+        x: 100,
+        y: 120,
+        textAlign,
+        verticalAlign: "middle",
+      }),
+      id: textAlign === "center" ? "centered-text" : "right-text",
+    });
+  }
   return scene;
 };
 
@@ -121,16 +135,19 @@ export const reference = () => {
     scene.getElement("source")! as ExcalidrawTextContainer,
     "A long label wraps over several lines and grows its container\n世界",
   );
-  const text = scene.getElement("existing-text")! as ExcalidrawTextElement;
-  scene.mutateElement(text, {
-    text: "changed\nmultiline",
-    originalText: "changed\nmultiline",
-  });
-  core.redrawTextBoundingBox(
-    scene.getElement(text.id)! as typeof text,
-    null,
-    scene,
-  );
+  for (const id of ["existing-text", "centered-text", "right-text"]) {
+    const text = scene.getElement(id)! as ExcalidrawTextElement;
+    const replacement = "changed\nmultiline";
+    scene.mutateElement(text, {
+      originalText: replacement,
+      ...core.refreshTextDimensions(
+        text,
+        null,
+        scene.getElementsMapIncludingDeleted(),
+        replacement,
+      ),
+    });
+  }
   const base = scene.getElementsIncludingDeleted();
   const invocationBase = core.captureElementBase(base);
   const state = {

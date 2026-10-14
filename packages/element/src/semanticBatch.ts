@@ -8,7 +8,12 @@ import {
   planElementDeletion,
   repairBindingsAfterDeletion,
 } from "./deleteElements";
-import { newArrowElement, newElement, newTextElement } from "./newElement";
+import {
+  newArrowElement,
+  newElement,
+  newTextElement,
+  refreshTextDimensions,
+} from "./newElement";
 import { Scene } from "./Scene";
 import { getBoundTextElement, redrawTextBoundingBox } from "./textElement";
 import { normalizeText, withTextMetricsProvider } from "./textMeasurements";
@@ -330,22 +335,35 @@ export const prepareSemanticBatch = (
             );
             const target = get(op.elementId);
             if (isTextElement(target)) {
-              privateScene.mutateElement(target, {
-                text: normalizeText(op.text),
-                originalText: normalizeText(op.text),
-              });
-              const current = privateScene.getElement(
-                target.id,
-              )! as typeof target;
-              const container = current.containerId
-                ? get(current.containerId)
-                : null;
-              redrawTextBoundingBox(current, container, privateScene);
-              if (container) {
-                updateBoundElements(
-                  privateScene.getElement(container.id)!,
-                  privateScene,
-                );
+              if (!target.containerId) {
+                const replacement = normalizeText(op.text);
+                privateScene.mutateElement(target, {
+                  originalText: replacement,
+                  ...refreshTextDimensions(
+                    target,
+                    null,
+                    privateScene.getNonDeletedElementsMap(),
+                    replacement,
+                  ),
+                });
+              } else {
+                privateScene.mutateElement(target, {
+                  text: normalizeText(op.text),
+                  originalText: normalizeText(op.text),
+                });
+                const current = privateScene.getElement(
+                  target.id,
+                )! as typeof target;
+                const container = current.containerId
+                  ? get(current.containerId)
+                  : null;
+                redrawTextBoundingBox(current, container, privateScene);
+                if (container) {
+                  updateBoundElements(
+                    privateScene.getElement(container.id)!,
+                    privateScene,
+                  );
+                }
               }
             } else {
               requireCondition(isTextBindableContainer(target));
