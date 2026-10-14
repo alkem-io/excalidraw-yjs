@@ -66,6 +66,7 @@ export * from "./distance";
 export * from "./distribute";
 export * from "./dragElements";
 export * from "./duplicate";
+export * from "./deleteElements";
 export * from "./elbowArrow";
 export * from "./elementLink";
 export * from "./embeddable";

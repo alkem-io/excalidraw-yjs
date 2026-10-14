@@ -1,0 +1,191 @@
+import * as Y from "yjs";
+
+import * as headless from "../headless";
+import { newElement } from "../newElement";
+import { Scene } from "../Scene";
+import { setCustomTextMetricsProvider } from "../textMeasurements";
+
+import type { ExcalidrawTextElement } from "../types";
+
+// Geometry tests use the same deterministic provider as browser unit fixtures.
+// Real font and browser comparisons run separately against built packages.
+const metrics = { getLineWidth: (text: string) => text.length * 10 };
+
+const seed = () => {
+  const doc = new Y.Doc();
+  const scene = new Scene(null, { doc });
+  for (const [id, x] of [
+    ["source", 0],
+    ["target", 400],
+  ] as const) {
+    scene.insertElement({
+      ...newElement({ type: "rectangle", x, y: 0, width: 200, height: 100 }),
+      id,
+    });
+  }
+  return { doc, scene };
+};
+
+const prepare = (...args: unknown[]) => {
+  const api = headless as unknown as {
+    prepareSemanticBatch: (...input: unknown[]) => {
+      ok: boolean;
+      update: Uint8Array;
+      addedElementIds: string[];
+      error?: { category: string; operationIndex?: number };
+    };
+  };
+  return api.prepareSemanticBatch(...args);
+};
+
+const consume = (doc: Y.Doc, update: Uint8Array) => {
+  const replica = new Y.Doc();
+  Y.applyUpdate(replica, Y.encodeStateAsUpdate(doc));
+  Y.applyUpdate(replica, update);
+  return new Scene(null, { doc: replica });
+};
+
+beforeEach(() => setCustomTextMetricsProvider(metrics));
+
+describe("semantic preparation", () => {
+  it("prepares multiline text and a bound label without touching input", () => {
+    const { doc } = seed();
+    const before = Y.encodeStateAsUpdate(doc);
+    const updates = vi.fn();
+    doc.on("update", updates);
+    const result = prepare(
+      doc,
+      [
+        { op: "addText", text: "héllo\n世界", x: 10, y: 200 },
+        { op: "addShape", shape: "diamond", label: "bound\nlabel" },
+      ],
+      { textMetricsProvider: metrics },
+    );
+    expect(result.ok).toBe(true);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    expect(updates).not.toHaveBeenCalled();
+    const scene = consume(doc, result.update);
+    const added = result.addedElementIds.map((id) => scene.getElement(id)!);
+    const standalone = added.find(
+      (el) => el.type === "text" && !el.containerId,
+    ) as ExcalidrawTextElement;
+    expect(standalone).toMatchObject({
+      text: "héllo\n世界",
+      originalText: "héllo\n世界",
+      width: 50,
+    });
+    const shape = added.find((el) => el.type === "diamond")!;
+    const label = added.find(
+      (el) => el.type === "text" && el.containerId === shape.id,
+    )!;
+    expect(shape.boundElements).toContainEqual({ id: label.id, type: "text" });
+  });
+
+  it("rejects a late-invalid operation without partial update or input writes", () => {
+    const { doc } = seed();
+    const before = Y.encodeStateAsUpdate(doc);
+    const result = prepare(
+      doc,
+      [
+        { op: "addText", text: "must not leak" },
+        { op: "setText", elementId: "missing", text: "invalid" },
+      ],
+      { textMetricsProvider: metrics },
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      error: { category: "invalid-operation", operationIndex: 1 },
+    });
+    expect(result).not.toHaveProperty("update");
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+  });
+
+  it("creates canonical arrow points and reciprocal endpoint bindings", () => {
+    const { doc } = seed();
+    const result = prepare(
+      doc,
+      [{ op: "connect", fromId: "source", toId: "target", arrowLabel: "link" }],
+      { textMetricsProvider: metrics },
+    );
+    expect(result.ok).toBe(true);
+    const scene = consume(doc, result.update);
+    const arrow = scene
+      .getNonDeletedElements()
+      .find((el) => el.type === "arrow")!;
+    expect(arrow).toMatchObject({
+      type: "arrow",
+      startBinding: { elementId: "source" },
+      endBinding: { elementId: "target" },
+    });
+    for (const id of ["source", "target"]) {
+      expect(scene.getElement(id)!.boundElements).toContainEqual({
+        id: arrow.id,
+        type: "arrow",
+      });
+    }
+  });
+
+  it("reflows bound text and removes dependent text through exact replayable bytes", () => {
+    const { doc } = seed();
+    const first = prepare(
+      doc,
+      [
+        {
+          op: "setText",
+          elementId: "source",
+          text: "a long label that wraps across the shape",
+        },
+      ],
+      { textMetricsProvider: metrics },
+    );
+    expect(first.ok).toBe(true);
+    const labelled = consume(doc, first.update);
+    const label = labelled
+      .getNonDeletedElements()
+      .find((el) => el.type === "text")!;
+    const before = Y.encodeStateAsUpdate(labelled.doc);
+    const removed = prepare(
+      labelled.doc,
+      [{ op: "remove", elementId: "source" }],
+      { textMetricsProvider: metrics },
+    );
+    expect(removed.ok).toBe(true);
+    expect(Y.encodeStateAsUpdate(labelled.doc)).toEqual(before);
+    const final = consume(labelled.doc, removed.update);
+    expect(final.getElement("source")!.isDeleted).toBe(true);
+    expect(final.getElement(label.id)!.isDeleted).toBe(true);
+    const once = Y.encodeStateAsUpdate(final.doc);
+    Y.applyUpdate(final.doc, removed.update);
+    expect(Y.encodeStateAsUpdate(final.doc)).toEqual(once);
+  });
+
+  it.each([NaN, Infinity, -Infinity])(
+    "rejects non-finite operation geometry %s",
+    (x) => {
+      const { doc } = seed();
+      const result = prepare(
+        doc,
+        [{ op: "addShape", shape: "rectangle", x, y: 0 }],
+        { textMetricsProvider: metrics },
+      );
+      expect(result.ok).toBe(false);
+      expect(result).not.toHaveProperty("update");
+    },
+  );
+
+  it("merges a concurrent peer edit without replacing shared lineage", () => {
+    const { doc, scene } = seed();
+    const result = prepare(
+      doc,
+      [{ op: "setText", elementId: "source", text: "label" }],
+      { textMetricsProvider: metrics },
+    );
+    expect(result.ok).toBe(true);
+    scene.mutateElement(scene.getElement("source")!, {
+      strokeColor: "#ff0000",
+    });
+    Y.applyUpdate(doc, result.update);
+    expect(scene.getElement("source")!.strokeColor).toBe("#ff0000");
+    expect(scene.getElement("source")!.boundElements).toHaveLength(1);
+  });
+});

@@ -131,4 +131,17 @@ const createESMRawBuild = async () => {
 
 (async () => {
   await createESMRawBuild();
+  // Keep native canvas and Node builtins outside every browser entry. Font files
+  // are emitted beside this isolated bundle and included in the package tarball.
+  await build({
+    entryPoints: ["nodeMetrics.ts", "headless.ts"],
+    outdir: "dist/node",
+    bundle: true,
+    format: "cjs",
+    platform: "node",
+    external: ["@napi-rs/canvas", "@excalidraw-yjs/element/headless"],
+    define: { "import.meta.env": JSON.stringify({ PROD: true }) },
+    loader: { ".woff2": "file" },
+    outExtension: { ".js": ".cjs" },
+  });
 })();

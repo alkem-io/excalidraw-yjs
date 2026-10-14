@@ -114,6 +114,22 @@ export const setCustomTextMetricsProvider = (provider: TextMetricsProvider) => {
   textMetricsProvider = provider;
 };
 
+/** Synchronous semantic work must not change the editor's process-wide provider. */
+export const withTextMetricsProvider = <T>(
+  provider: TextMetricsProvider,
+  run: () => T,
+): T => {
+  const previous = textMetricsProvider;
+  textMetricsProvider = provider;
+  charWidth.reset();
+  try {
+    return run();
+  } finally {
+    textMetricsProvider = previous;
+    charWidth.reset();
+  }
+};
+
 export interface TextMetricsProvider {
   getLineWidth(text: string, fontString: FontString): number;
 }
@@ -177,7 +193,7 @@ export const getTextHeight = (
 };
 
 export const charWidth = (() => {
-  const cachedCharWidth: { [key: FontString]: Array<number> } = {};
+  let cachedCharWidth: { [key: FontString]: Array<number> } = {};
 
   const calculate = (char: string, font: FontString) => {
     const unicode = char.charCodeAt(0);
@@ -204,6 +220,9 @@ export const charWidth = (() => {
     calculate,
     getCache,
     clearCache,
+    reset: () => {
+      cachedCharWidth = {};
+    },
   };
 })();
 
