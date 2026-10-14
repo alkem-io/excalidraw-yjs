@@ -89,6 +89,8 @@ const validateScene = (doc: Y.Doc) => {
     const element = value.toJSON();
     if (
       element.id !== id ||
+      typeof element.backgroundColor !== "string" ||
+      typeof element.strokeColor !== "string" ||
       !isExcalidrawElement({ type: element.type }) ||
       !finiteTree(element) ||
       !["x", "y", "width", "height", "angle"].every(

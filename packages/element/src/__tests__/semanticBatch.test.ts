@@ -207,6 +207,27 @@ describe("semantic preparation", () => {
     },
   );
 
+  it.each(["backgroundColor", "strokeColor"])(
+    "rejects object-valued peer %s without producing an update or writing input",
+    (property) => {
+      const { doc, scene } = seed();
+      scene.yElements.get("source")!.set(property, { invalid: true });
+      const before = Y.encodeStateAsUpdate(doc);
+      const updates = vi.fn();
+      doc.on("update", updates);
+      const result = prepare(doc, [{ op: "addText", text: "not published" }], {
+        textMetricsProvider: metrics,
+      });
+      expect(result).toMatchObject({
+        ok: false,
+        error: { category: "invalid-scene" },
+      });
+      expect(result).not.toHaveProperty("update");
+      expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+      expect(updates).not.toHaveBeenCalled();
+    },
+  );
+
   it("retains actual delete-set bytes when removing a bound label", () => {
     const { doc } = seed();
     const labelled = prepare(
