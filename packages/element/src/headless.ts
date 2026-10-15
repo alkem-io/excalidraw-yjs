@@ -57,6 +57,8 @@ export * from "./cropElement";
 export * from "./distance";
 export * from "./distribute";
 export * from "./duplicate";
+export * from "./deleteElements";
+export * from "./semanticBatch";
 export * from "./elbowArrow";
 export * from "./flowchart";
 export * from "./fractionalIndex";
