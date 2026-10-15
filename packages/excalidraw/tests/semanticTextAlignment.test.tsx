@@ -12,7 +12,10 @@ import {
 
 import { pointFrom } from "@excalidraw-yjs/math";
 
-import type { ExcalidrawTextElement } from "@excalidraw-yjs/element/types";
+import type {
+  ExcalidrawRectangleElement,
+  ExcalidrawTextElement,
+} from "@excalidraw-yjs/element/types";
 
 import { prepareSemanticBatch } from "../../element/src/semanticBatch";
 
@@ -106,7 +109,7 @@ describe("standalone semantic text alignment matches App text editing", () => {
         y: 300,
         width: 100,
         height: 100,
-      });
+      }) as ExcalidrawRectangleElement;
       const from = endpoint === "start" ? text : rectangle;
       const to = endpoint === "end" ? text : rectangle;
       const x = from.x + from.width / 2;
@@ -198,7 +201,6 @@ describe("standalone semantic text alignment matches App text editing", () => {
           ] as const) {
             expect(
               (actual as unknown as Record<string, unknown>)[key],
-              `${element.type}.${key}`,
             ).toEqual((expected as unknown as Record<string, unknown>)[key]);
           }
         }
