@@ -199,9 +199,9 @@ describe("standalone semantic text alignment matches App text editing", () => {
             "text",
             "originalText",
           ] as const) {
-            expect(
-              (actual as unknown as Record<string, unknown>)[key],
-            ).toEqual((expected as unknown as Record<string, unknown>)[key]);
+            expect((actual as unknown as Record<string, unknown>)[key]).toEqual(
+              (expected as unknown as Record<string, unknown>)[key],
+            );
           }
         }
       }

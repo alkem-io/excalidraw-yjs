@@ -1,11 +1,13 @@
 import * as Y from "yjs";
 
 import * as headless from "../headless";
+import { getCommonBounds } from "../bounds";
 import { newElement } from "../newElement";
 import { Scene } from "../Scene";
 import { setCustomTextMetricsProvider } from "../textMeasurements";
 
 import type { ExcalidrawTextElement } from "../types";
+import type { SemanticOperation } from "../semanticBatch";
 
 // Geometry tests use the same deterministic provider as browser unit fixtures.
 // Real font and browser comparisons run separately against built packages.
@@ -46,6 +48,115 @@ const consume = (doc: Y.Doc, update: Uint8Array) => {
 };
 
 beforeEach(() => setCustomTextMetricsProvider(metrics));
+
+describe("semantic automatic placement", () => {
+  const run = (doc: Y.Doc, operations: SemanticOperation[]) => {
+    const before = Y.encodeStateAsUpdate(doc);
+    const updates = vi.fn();
+    doc.on("update", updates);
+    const result = prepare(doc, operations, { textMetricsProvider: metrics });
+    expect(result.ok).toBe(true);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    expect(updates).not.toHaveBeenCalled();
+    const scene = consume(doc, result.update);
+    const once = Y.encodeStateAsUpdate(scene.doc);
+    Y.applyUpdate(scene.doc, result.update);
+    expect(Y.encodeStateAsUpdate(scene.doc)).toEqual(once);
+    const cold = consume(scene.doc, result.update);
+    const content = (current: Scene) =>
+      current
+        .getNonDeletedElements()
+        .map(({ version, versionNonce, updated, ...element }) => element);
+    expect(content(cold)).toEqual(content(scene));
+    return {
+      scene,
+      added: result.addedElementIds.map((id) => scene.getElement(id)!),
+    };
+  };
+  const box = { op: "addShape", shape: "rectangle" } as const;
+  const lines = Array(20).fill("short").join("\n");
+
+  it("uses completed existing reflow before the first automatic addition", () => {
+    const { doc } = seed();
+    const { scene, added } = run(doc, [
+      { op: "setText", elementId: "source", text: lines },
+      box,
+    ]);
+    expect(scene.getElement("source")!.height).toBe(510);
+    const existing = scene
+      .getNonDeletedElements()
+      .filter((element) => element.id !== added[added.length - 1].id);
+    expect(added[added.length - 1].y).toBe(getCommonBounds(existing)[3] + 100);
+  });
+
+  it("preserves ordinary compact horizontal positions and wrap", () => {
+    const { doc } = seed();
+    const { added } = run(doc, Array(6).fill(box));
+    expect(added.map(({ x, y }) => [x, y])).toEqual([
+      [0, 200],
+      [240, 200],
+      [480, 200],
+      [720, 200],
+      [960, 200],
+      [0, 340],
+    ]);
+  });
+
+  it("uses completed label width for wrap and label height for the next row", () => {
+    const { doc } = seed();
+    const { added } = run(doc, [
+      { ...box, width: 1100 },
+      { ...box, width: 1, label: lines },
+      { ...box, width: 15 },
+    ]);
+    const roots = added.filter((element) => element.type === "rectangle");
+    const label = added.find((element) => element.type === "text")!;
+    expect(roots[1].width).toBeGreaterThan(1);
+    const row = getCommonBounds([roots[0], roots[1], label]);
+    expect(roots[2]).toMatchObject({ x: 0, y: row[3] + 40 });
+    expect(roots[2].y).toBeGreaterThan(340);
+  });
+
+  it("places an oversized tall unit once and wraps below its full bounds", () => {
+    const { doc } = seed();
+    const { added } = run(doc, [{ ...box, width: 1300, height: 600 }, box]);
+    expect(added[0]).toMatchObject({ x: 0, y: 200, width: 1300, height: 600 });
+    expect(added[1]).toMatchObject({ x: 0, y: 840 });
+  });
+
+  it("keeps explicit intrusions exact and starts the next auto unit below them", () => {
+    const { doc } = seed();
+    const { added } = run(doc, [
+      box,
+      { ...box, x: 240, y: 250, height: 400 },
+      box,
+    ]);
+    expect(added[0]).toMatchObject({ x: 0, y: 200 });
+    expect(added[1]).toMatchObject({ x: 240, y: 250, height: 400 });
+    expect(added[2]).toMatchObject({ x: 0, y: 690 });
+  });
+
+  it("observes connector label extent before the first automatic unit", () => {
+    const { doc } = seed();
+    const { scene, added } = run(doc, [
+      { op: "connect", fromId: "source", toId: "target", arrowLabel: lines },
+      box,
+    ]);
+    const root = added[added.length - 1];
+    const existing = scene
+      .getNonDeletedElements()
+      .filter((el) => el.id !== root.id);
+    expect(getCommonBounds(existing)[3]).toBeGreaterThan(100);
+    expect(root.y).toBe(getCommonBounds(existing)[3] + 100);
+  });
+
+  it("does not reserve bounds for an existing element removed earlier", () => {
+    const { doc, scene } = seed();
+    scene.mutateElement(scene.getElement("source")!, { x: -500, y: 1000 });
+    const { added } = run(doc, [{ op: "remove", elementId: "source" }, box]);
+    expect(added[0]).toMatchObject({ x: 400, y: 200 });
+  });
+});
 
 describe("semantic preparation", () => {
   it("prepares multiline text and a bound label without touching input", () => {

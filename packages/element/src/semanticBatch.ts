@@ -157,24 +157,55 @@ export const prepareSemanticBatch = (
         op: SemanticOperation["op"];
         elementIds: string[];
       }> = [];
-      const live = privateScene.getNonDeletedElements();
-      const [minX, , , maxY] = live.length
-        ? getCommonBounds(live)
-        : [0, 0, 0, -100];
-      const cursor = { x: minX, y: maxY + 100, rowHeight: 0 };
-      const place = (op: Placement, width: number, height: number) => {
+      const rowRootIds = new Set<string>();
+      const place = (op: Placement, rootId: string) => {
         if (op.x !== undefined && op.y !== undefined) {
-          return { x: op.x, y: op.y };
+          return;
         }
-        if (cursor.x > minX && cursor.x - minX + width > 1200) {
-          cursor.x = minX;
-          cursor.y += cursor.rowHeight + 40;
-          cursor.rowHeight = 0;
+        const map = privateScene.getNonDeletedElementsMap();
+        const root = map.get(rootId)!;
+        const label = getBoundTextElement(root, map);
+        const unit = label ? [root, label] : [root];
+        const row = [...rowRootIds].flatMap((id) => {
+          const member = map.get(id);
+          if (!member) {
+            return [];
+          }
+          const boundLabel = getBoundTextElement(member, map);
+          return boundLabel ? [member, boundLabel] : [member];
+        });
+        const rowIds = new Set(row.map((element) => element.id));
+        const existing = privateScene
+          .getNonDeletedElements()
+          .filter(
+            (element) => element.id !== rootId && element.id !== label?.id,
+          );
+        const other = existing.filter((element) => !rowIds.has(element.id));
+        const [unitX, unitY, unitMaxX] = getCommonBounds(unit, map);
+        const [existingX, , , existingMaxY] = getCommonBounds(existing, map);
+        let x = existing.length ? existingX : 0;
+        let y = existing.length ? existingMaxY + 100 : 0;
+        if (row.length) {
+          const [rowX, rowY, rowMaxX] = getCommonBounds(row, map);
+          if (
+            rowMaxX - rowX + 40 + unitMaxX - unitX <= 1200 &&
+            (!other.length || getCommonBounds(other, map)[3] <= rowY)
+          ) {
+            x = rowMaxX + 40;
+            y = rowY;
+          } else {
+            x = rowX;
+            y = existingMaxY + 40;
+            rowRootIds.clear();
+          }
         }
-        const position = { x: cursor.x, y: cursor.y };
-        cursor.x += width + 40;
-        cursor.rowHeight = Math.max(cursor.rowHeight, height);
-        return position;
+        for (const element of unit) {
+          privateScene.mutateElement(element, {
+            x: element.x + x - unitX,
+            y: element.y + y - unitY,
+          });
+        }
+        rowRootIds.add(rootId);
       };
       const get = (id: string) => {
         requireCondition(typeof id === "string" && id.length > 0);
@@ -251,7 +282,8 @@ export const prepareSemanticBatch = (
             );
             const shape = newElement({
               type: op.shape,
-              ...place(op, width, height),
+              x: op.x ?? 0,
+              y: op.y ?? 0,
               width,
               height,
               backgroundColor: op.fillColor,
@@ -267,6 +299,7 @@ export const prepareSemanticBatch = (
                 setLabel(shape, op.label);
               }
             }
+            place(op, shape.id);
             break;
           }
           case "addText": {
@@ -277,15 +310,15 @@ export const prepareSemanticBatch = (
               op.fontSize === undefined ||
                 (typeof op.fontSize === "number" && op.fontSize > 0),
             );
-            let text = newTextElement({
-              x: 0,
-              y: 0,
+            const text = newTextElement({
+              x: op.x ?? 0,
+              y: op.y ?? 0,
               text: op.text,
               fontSize: op.fontSize,
               strokeColor: op.strokeColor,
             });
-            text = { ...text, ...place(op, text.width, text.height) };
             privateScene.insertElement(text);
+            place(op, text.id);
             addedElementIds.push(text.id);
             operationIds.push(text.id);
             break;
