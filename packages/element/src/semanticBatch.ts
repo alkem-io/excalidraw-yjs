@@ -346,6 +346,10 @@ export const prepareSemanticBatch = (
                     replacement,
                   ),
                 });
+                updateBoundElements(
+                  privateScene.getElement(target.id)! as typeof target,
+                  privateScene,
+                );
               } else {
                 privateScene.mutateElement(target, {
                   text: normalizeText(op.text),

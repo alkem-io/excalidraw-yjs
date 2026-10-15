@@ -23,6 +23,18 @@ export const operations: SemanticOperation[] = [
     arrowLabel: "arrow label",
   },
   {
+    op: "connect",
+    fromId: "existing-text",
+    toId: "source",
+    arrowLabel: "text start",
+  },
+  {
+    op: "connect",
+    fromId: "target",
+    toId: "centered-text",
+    arrowLabel: "text end",
+  },
+  {
     op: "setText",
     elementId: "source",
     text: "A long label wraps over several lines and grows its container\n世界",
@@ -104,33 +116,42 @@ export const reference = () => {
   scene.insertElement(
     core.newTextElement({ text: "Καλημέρα\nПривет café", x: 10, y: 450 }),
   );
-  const from = scene.getElement("source")!;
-  const to = scene.getElement("target")!;
-  const arrow = core.newArrowElement({
-    type: "arrow",
-    x: 100,
-    y: 50,
-    width: 400,
-    height: 0,
-    points: [pointFrom(0, 0), pointFrom(400, 0)],
-    endArrowhead: "arrow",
-  });
-  scene.insertElement(arrow);
-  core.bindBindingElement(
-    arrow,
-    from as Parameters<typeof core.bindBindingElement>[1],
-    "orbit",
-    "start",
-    scene,
-  );
-  core.bindBindingElement(
-    scene.getElement(arrow.id)! as typeof arrow,
-    to as Parameters<typeof core.bindBindingElement>[1],
-    "orbit",
-    "end",
-    scene,
-  );
-  label(scene.getElement(arrow.id)! as typeof arrow, "arrow label");
+  const connect = (fromId: string, toId: string, caption: string) => {
+    const from = scene.getElement(fromId)!;
+    const to = scene.getElement(toId)!;
+    const x = from.x + from.width / 2;
+    const y = from.y + from.height / 2;
+    const dx = to.x + to.width / 2 - x;
+    const dy = to.y + to.height / 2 - y;
+    const arrow = core.newArrowElement({
+      type: "arrow",
+      x,
+      y,
+      width: Math.abs(dx),
+      height: Math.abs(dy),
+      points: [pointFrom(0, 0), pointFrom(dx, dy)],
+      endArrowhead: "arrow",
+    });
+    scene.insertElement(arrow);
+    core.bindBindingElement(
+      arrow,
+      from as Parameters<typeof core.bindBindingElement>[1],
+      "orbit",
+      "start",
+      scene,
+    );
+    core.bindBindingElement(
+      scene.getElement(arrow.id)! as typeof arrow,
+      to as Parameters<typeof core.bindBindingElement>[1],
+      "orbit",
+      "end",
+      scene,
+    );
+    label(scene.getElement(arrow.id)! as typeof arrow, caption);
+  };
+  connect("source", "target", "arrow label");
+  connect("existing-text", "source", "text start");
+  connect("target", "centered-text", "text end");
   label(
     scene.getElement("source")! as ExcalidrawTextContainer,
     "A long label wraps over several lines and grows its container\n世界",
@@ -147,6 +168,10 @@ export const reference = () => {
         replacement,
       ),
     });
+    core.updateBoundElements(
+      scene.getNonDeletedElementsMap().get(text.id)!,
+      scene,
+    );
   }
   const base = scene.getElementsIncludingDeleted();
   const invocationBase = core.captureElementBase(base);
