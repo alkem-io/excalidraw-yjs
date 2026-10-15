@@ -270,6 +270,9 @@ export const prepareSemanticBatch = (
         switch (op.op) {
           case "addShape": {
             requireCondition(
+              op.fillColor === undefined || typeof op.fillColor === "string",
+            );
+            requireCondition(
               ["rectangle", "ellipse", "diamond"].includes(op.shape),
             );
             const width = op.width ?? 200;

@@ -14,6 +14,14 @@ yarn add react react-dom @excalidraw-yjs/excalidraw
 
 > **Note**: If you want to try unreleased changes, use `@excalidraw-yjs/excalidraw@next`.
 
+### Node text metrics
+
+Only consumers of `@excalidraw-yjs/excalidraw/node-metrics` need the optional native canvas peer. Install its declared version explicitly before using that subpath; browser and ordinary headless consumers do not need it:
+
+```bash
+npm install @napi-rs/canvas@1.0.11
+```
+
 ## Quick start
 
 The minimum working setup has two easy-to-miss requirements:

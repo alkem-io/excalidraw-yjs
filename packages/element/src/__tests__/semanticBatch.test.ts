@@ -102,6 +102,17 @@ describe("semantic automatic placement", () => {
     ]);
   });
 
+  it.each([
+    { ...box, x: 999 },
+    { ...box, y: 999 },
+    { op: "addText", text: "partial", x: 999 } as const,
+    { op: "addText", text: "partial", y: 999 } as const,
+  ])("auto-places without both explicit coordinates: %j", (operation) => {
+    const { doc } = seed();
+    const { added } = run(doc, [operation]);
+    expect(added[0]).toMatchObject({ x: 0, y: 200 });
+  });
+
   it("uses completed label width for wrap and label height for the next row", () => {
     const { doc } = seed();
     const { added } = run(doc, [
@@ -159,6 +170,28 @@ describe("semantic automatic placement", () => {
 });
 
 describe("semantic preparation", () => {
+  it("reports an invalid fill color at its operation without leaking a partial update", () => {
+    const { doc } = seed();
+    const before = Y.encodeStateAsUpdate(doc);
+    const updates = vi.fn();
+    doc.on("update", updates);
+    const result = prepare(
+      doc,
+      [
+        { op: "addShape", shape: "rectangle", fillColor: 42 },
+        { op: "addText", text: "later valid operation" },
+      ],
+      { textMetricsProvider: metrics },
+    );
+    expect(result).toEqual({
+      ok: false,
+      error: { category: "invalid-operation", operationIndex: 0 },
+    });
+    expect(result).not.toHaveProperty("update");
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    expect(updates).not.toHaveBeenCalled();
+  });
+
   it("prepares multiline text and a bound label without touching input", () => {
     const { doc } = seed();
     const before = Y.encodeStateAsUpdate(doc);

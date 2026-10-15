@@ -7,6 +7,7 @@ import path from "node:path";
 const directory = await mkdtemp(path.join(tmpdir(), "semantic-package-"));
 try {
   const dependencies = { yjs: "13.6.27" };
+  let canvasVersion;
   for (const name of [
     "common",
     "fractional-indexing",
@@ -17,6 +18,12 @@ try {
     const pkg = JSON.parse(
       await readFile(`packages/${name}/package.json`, "utf8"),
     );
+    if (name === "excalidraw") {
+      canvasVersion = pkg.peerDependencies["@napi-rs/canvas"];
+      assert.equal(pkg.dependencies["@napi-rs/canvas"], undefined);
+      assert.equal(pkg.peerDependenciesMeta["@napi-rs/canvas"].optional, true);
+      assert.equal(canvasVersion, pkg.devDependencies["@napi-rs/canvas"]);
+    }
     execFileSync("pnpm", ["pack", "--pack-destination", directory], {
       cwd: `packages/${name}`,
       stdio: "pipe",
@@ -36,7 +43,24 @@ try {
   );
   execFileSync(
     "pnpm",
-    ["install", "--ignore-scripts", "--config.auto-install-peers=false"],
+    ["install", "--ignore-scripts"],
+    { cwd: directory, stdio: "pipe" },
+  );
+  execFileSync(
+    process.execPath,
+    [
+      "-e",
+      `const assert = require("node:assert/strict");
+       assert.throws(() => require.resolve("@napi-rs/canvas"), {code:"MODULE_NOT_FOUND"});
+       const core = require("@excalidraw-yjs/excalidraw/headless");
+       assert.equal(typeof core.prepareSemanticBatch, "function");
+       console.log("PASS packed browser-only dependency graph and headless import without native canvas");`,
+    ],
+    { cwd: directory, stdio: "inherit" },
+  );
+  execFileSync(
+    "pnpm",
+    ["add", `@napi-rs/canvas@${canvasVersion}`, "--ignore-scripts"],
     { cwd: directory, stdio: "pipe" },
   );
   const installed = path.join(
