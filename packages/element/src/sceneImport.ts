@@ -1,9 +1,11 @@
 import { FONT_FAMILY, randomId } from "@excalidraw-yjs/common";
 import * as Y from "yjs";
+import { validateOrderKey } from "@excalidraw-yjs/fractional-indexing";
 
 import { duplicateElements } from "./duplicate";
-import { validateFractionalIndices } from "./fractionalIndex";
-import { isBindableElement } from "./typeChecks";
+import { validateElbowPoints } from "./elbowArrow";
+import { getBoundTextElement } from "./textElement";
+import { hasBoundTextElement, isBindableElement } from "./typeChecks";
 import {
   readAssetLocators,
   validateAssetLocator,
@@ -32,10 +34,6 @@ export const validateImportDestination = (doc: Y.Doc) => {
     }
     return { ...yMapToElement(value), version: 1, versionNonce: 0, updated: 0 };
   });
-  // Fractional ordering uses code units, not locale collation.
-  elements.sort((a: any, b: any) =>
-    a.index < b.index ? -1 : a.index > b.index ? 1 : 0,
-  );
   validateImportElements(elements);
   readAssetLocators(doc.getMap("files"));
 };
@@ -183,6 +181,7 @@ export function validateImportElements(
         (element.link === null || typeof element.link === "string"),
     );
     check(typeof element.index === "string");
+    validateOrderKey(element.index);
     check(
       element.boundElements === null ||
         (Array.isArray(element.boundElements) &&
@@ -280,6 +279,7 @@ export function validateImportElements(
       );
       if (element.type === "arrow") {
         check(typeof element.elbowed === "boolean");
+        check(!element.elbowed || validateElbowPoints(element.points));
         check(
           ["startIsSpecial", "endIsSpecial"].every(
             (key) =>
@@ -364,6 +364,10 @@ export function validateImportElements(
     return element;
   };
   for (const element of elements) {
+    if (hasBoundTextElement(element)) {
+      const text = getBoundTextElement(element, ids);
+      check(!text || text.index! > element.index!);
+    }
     if (element.isDeleted) {
       continue;
     }
@@ -406,11 +410,6 @@ export function validateImportElements(
       }
     }
   }
-  validateFractionalIndices(elements, {
-    shouldThrow: true,
-    includeBoundTextValidation: true,
-    ignoreLogs: true,
-  });
 }
 
 /** Called only by the shared private-replica preparation owner. */

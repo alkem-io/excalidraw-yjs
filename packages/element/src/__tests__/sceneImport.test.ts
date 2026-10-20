@@ -442,3 +442,232 @@ it.each(["self", "other-source"])(
     sourceScene.destroy();
   },
 );
+
+it.each(["empty", "nonempty", "editor-append"])(
+  "imports after concurrent appends to a %s destination",
+  (kind) => {
+    const doc = new Y.Doc();
+    const scene = new Scene(null, { doc });
+    if (kind === "nonempty") {
+      scene.insertElement(newElement({ type: "rectangle", x: -100, y: 0 }));
+    }
+    const input = source();
+    const content = (elements: typeof input.scene.elements) =>
+      elements.map(({ version, versionNonce, updated, ...element }) => element);
+    const original = JSON.stringify(input);
+    const base = Y.encodeStateAsUpdate(doc);
+    const first = prepare(doc, input);
+    expect(first.ok).toBe(true);
+    let secondUpdate;
+    if (kind === "editor-append") {
+      scene.insertElement(newElement({ type: "rectangle", x: 200, y: 0 }));
+      secondUpdate = Y.encodeStateAsUpdate(
+        doc,
+        Y.encodeStateVectorFromUpdate(base),
+      );
+    } else {
+      const second = prepare(doc, input);
+      expect(second.ok).toBe(true);
+      expect(Y.encodeStateAsUpdate(doc)).toEqual(base);
+      secondUpdate = second.update;
+    }
+    Y.applyUpdate(doc, first.update);
+    Y.applyUpdate(doc, secondUpdate);
+    const merged = scene.getElementsIncludingDeleted();
+    expect(new Set(merged.map((element) => element.index)).size).toBeLessThan(
+      merged.length,
+    );
+    const reverse = new Y.Doc();
+    Y.applyUpdate(reverse, base);
+    Y.applyUpdate(reverse, secondUpdate);
+    Y.applyUpdate(reverse, first.update);
+    const reverseScene = new Scene(null, { doc: reverse });
+    expect(content(reverseScene.getElementsIncludingDeleted())).toEqual(
+      content(merged),
+    );
+    const before = Y.encodeStateAsUpdate(doc);
+    const third = prepare(doc, input);
+    expect(third.ok).toBe(true);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    expect(JSON.stringify(input)).toBe(original);
+    Y.applyUpdate(doc, third.update);
+    Y.applyUpdate(reverse, third.update);
+    expect(content(reverseScene.getElementsIncludingDeleted())).toEqual(
+      content(scene.getElementsIncludingDeleted()),
+    );
+    const once = Y.encodeStateAsUpdate(doc);
+    Y.applyUpdate(doc, third.update);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(once);
+
+    reverseScene.destroy();
+    reverse.destroy();
+    scene.destroy();
+    doc.destroy();
+  },
+);
+
+it("preserves array order from an actual editor export with merged tied keys", () => {
+  const doc = new Y.Doc();
+  const scene = new Scene(null, { doc });
+  const peer = new Scene();
+  scene.insertElement(newElement({ type: "rectangle", x: 100, y: 0 }));
+  peer.insertElement(newElement({ type: "rectangle", x: 200, y: 0 }));
+  Y.applyUpdate(doc, Y.encodeStateAsUpdate(peer.doc));
+  const merged = scene.getElementsIncludingDeleted();
+  expect(merged[0].index).toBe(merged[1].index);
+  const exported = JSON.parse(serializeAsJSON(merged, {}, {}, "database"));
+  expect(exported.elements.map((element: any) => element.index)).toEqual(
+    merged.map((element) => element.index),
+  );
+  const exportedInput = { scene: exported, targetFileIDs: {} };
+  const exportedBefore = JSON.stringify(exportedInput);
+  const target = new Y.Doc();
+  const targetBefore = Y.encodeStateAsUpdate(target);
+  const imported = prepare(target, exportedInput);
+  expect(imported.ok).toBe(true);
+  expect(Y.encodeStateAsUpdate(target)).toEqual(targetBefore);
+  expect(JSON.stringify(exportedInput)).toBe(exportedBefore);
+  Y.applyUpdate(target, imported.update);
+  const targetScene = new Scene(null, { doc: target });
+  expect(
+    targetScene.getNonDeletedElements().map((element) => element.x),
+  ).toEqual(merged.map((element) => element.x));
+  targetScene.destroy();
+  target.destroy();
+  peer.destroy();
+  scene.destroy();
+  doc.destroy();
+});
+
+it.each(["source", "destination"])(
+  "rejects bound text at its container key in the %s",
+  (location) => {
+    const fixture = sceneImportFixture(headless);
+    const elements = JSON.parse(
+      JSON.stringify(fixture.getElementsIncludingDeleted()),
+    );
+    const label = elements.find((element: any) => element.type === "text");
+    const container = elements.find(
+      (element: any) => element.id === label.containerId,
+    );
+    label.index = container.index;
+    const doc = new Y.Doc();
+    const scene = new Scene(null, { doc });
+    const input =
+      location === "source"
+        ? {
+            scene: { type: "excalidraw", version: 2, elements },
+            targetFileIDs: { "source-image": "target-logical-file" },
+          }
+        : source();
+    if (location === "destination") {
+      Y.applyUpdate(doc, Y.encodeStateAsUpdate(fixture.doc));
+      scene.yElements.get(label.id)!.set("index", container.index);
+    }
+    const before = Y.encodeStateAsUpdate(doc);
+    const original = JSON.stringify(input);
+    expect(prepare(doc, input)).toEqual({
+      ok: false,
+      error: { category: "invalid-scene" },
+    });
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    expect(JSON.stringify(input)).toBe(original);
+    scene.destroy();
+    fixture.destroy();
+    doc.destroy();
+  },
+);
+
+it.each(
+  [
+    {
+      name: "diagonal elbow",
+      elbowed: true,
+      points: [
+        [0, 0],
+        [100, 100],
+      ],
+      valid: false,
+    },
+    {
+      name: "orthogonal elbow",
+      elbowed: true,
+      points: [
+        [0, 0],
+        [100, 0],
+        [100, 100],
+      ],
+      valid: true,
+    },
+    {
+      name: "horizontal elbow",
+      elbowed: true,
+      points: [
+        [0, 0],
+        [100, 0],
+      ],
+      valid: true,
+    },
+    {
+      name: "ordinary diagonal",
+      elbowed: false,
+      points: [
+        [0, 0],
+        [100, 100],
+      ],
+      valid: true,
+    },
+  ].flatMap((geometry) =>
+    ["source", "destination"].map((location) => ({ ...geometry, location })),
+  ),
+)(
+  "validates $name geometry in $location",
+  ({ elbowed, points, valid, location }) => {
+    const sourceScene = new Scene();
+    sourceScene.insertElement(
+      headless.newArrowElement({
+        type: "arrow",
+        x: 0,
+        y: 0,
+        width: 100,
+        height: points[points.length - 1][1],
+        points: points as any,
+        elbowed,
+        fixedSegments: [],
+      } as any),
+    );
+    const input =
+      location === "source"
+        ? {
+            scene: {
+              type: "excalidraw",
+              version: 2,
+              elements: sourceScene.getElementsIncludingDeleted(),
+            },
+            targetFileIDs: {},
+          }
+        : source();
+    const doc = new Y.Doc();
+    if (location === "destination") {
+      Y.applyUpdate(doc, Y.encodeStateAsUpdate(sourceScene.doc));
+    }
+    const before = Y.encodeStateAsUpdate(doc);
+    const original = JSON.stringify(input);
+    const updates = vi.fn();
+    doc.on("update", updates);
+    const result = prepare(doc, input);
+    if (valid) {
+      expect(result.ok).toBe(true);
+    } else {
+      expect(result).toEqual({
+        ok: false,
+        error: { category: "invalid-scene" },
+      });
+    }
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    expect(JSON.stringify(input)).toBe(original);
+    expect(updates).not.toHaveBeenCalled();
+    sourceScene.destroy();
+    doc.destroy();
+  },
+);
