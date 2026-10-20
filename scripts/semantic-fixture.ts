@@ -6,6 +6,9 @@ import * as core from "../packages/element/src/headless";
 import { bundledFontFaces } from "../packages/excalidraw/fonts/bundledFontFaces";
 import { actionDeleteSelected } from "../packages/excalidraw/actions/actionDeleteSelected";
 import { getDefaultAppState } from "../packages/excalidraw/appState";
+import { serializeAsJSON } from "../packages/excalidraw/data/json";
+
+import { sceneImportFixture } from "./scene-import-fixture.cjs";
 
 import type { SemanticOperation } from "../packages/element/src/semanticBatch";
 import type {
@@ -188,6 +191,65 @@ export const reference = () => {
   }
   scene.applyElementChanges(invocationBase, result.elements);
   return scene.getElementsIncludingDeleted();
+};
+
+export const widthCases = [
+  { op: "addText", text: "Natural text", x: 31, y: 47, fontSize: 20 },
+  ...[1, 60, 90, 190].map((width) => ({
+    op: "addText",
+    text: "Hello café Привет 世界 hello again\nand another long line",
+    x: 31,
+    y: 47,
+    fontSize: 20,
+    width,
+  })),
+] as const;
+
+export const widthReference = () =>
+  widthCases.map((operation) => {
+    const scene = new core.Scene();
+    const text = core.newTextElement(operation);
+    scene.insertElement(text);
+    if ("width" in operation) {
+      core.resizeSingleTextElement(
+        text,
+        text,
+        scene,
+        "e",
+        false,
+        operation.width,
+        text.height,
+      );
+    }
+    const initial = JSON.parse(JSON.stringify(scene.getNonDeletedElements()));
+    const current = scene.getElement(text.id)! as ExcalidrawTextElement;
+    const replacement =
+      "Changed text stays within its fixed width\nHello café 世界";
+    scene.mutateElement(current, {
+      originalText: replacement,
+      ...core.refreshTextDimensions(
+        current,
+        null,
+        scene.getNonDeletedElementsMap(),
+        replacement,
+      ),
+    });
+    return { initial, changed: scene.getNonDeletedElements() };
+  });
+
+export const importReference = () => {
+  const source = sceneImportFixture(core);
+  const exported = JSON.parse(
+    serializeAsJSON(source.getElementsIncludingDeleted(), {}, {}, "database"),
+  );
+  const scene = new core.Scene();
+  const duplicated = core.duplicateElements({
+    type: "everything",
+    elements: exported.elements,
+    preserveFrameChildrenOrder: true,
+  }).duplicatedElements;
+  scene.insertElementsAtIndex(duplicated, null);
+  return { exported, elements: scene.getNonDeletedElements() };
 };
 
 export { core, Y, bundledFontFaces };

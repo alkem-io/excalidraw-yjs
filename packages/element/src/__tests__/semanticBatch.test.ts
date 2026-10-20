@@ -170,6 +170,114 @@ describe("semantic automatic placement", () => {
 });
 
 describe("semantic preparation", () => {
+  it("wraps width without a font-resize minimum blocking the requested font size", () => {
+    const { doc } = seed();
+    const result = prepare(
+      doc,
+      [
+        {
+          op: "addText",
+          text: "long text",
+          x: 1,
+          y: 2,
+          width: 30,
+          fontSize: 1,
+        },
+      ],
+      { textMetricsProvider: metrics },
+    );
+    const scene = consume(doc, result.update);
+    expect(scene.getElement(result.addedElementIds[0])).toMatchObject({
+      autoResize: false,
+      fontSize: 1,
+    });
+  });
+  it.each([1, 60, 90])(
+    "wraps explicit width %s through canonical horizontal resize",
+    (width) => {
+      const { doc } = seed();
+      const result = prepare(
+        doc,
+        [
+          {
+            op: "addText",
+            text: "long words wrap\nand more words",
+            x: 17,
+            y: 231,
+            fontSize: 20,
+            width,
+          },
+        ],
+        { textMetricsProvider: metrics },
+      );
+      expect(result.ok).toBe(true);
+      const scene = consume(doc, result.update);
+      const text = scene.getElement(
+        result.addedElementIds[0],
+      )! as ExcalidrawTextElement;
+      expect(text).toMatchObject({
+        x: 17,
+        y: 231,
+        fontSize: 20,
+        autoResize: false,
+      });
+      expect(text.width).toBeGreaterThanOrEqual(width);
+      expect(text.text).toContain("\n");
+      expect(text.height).toBeGreaterThan(50);
+      const next = prepare(
+        scene.doc,
+        [
+          {
+            op: "setText",
+            elementId: text.id,
+            text: "even longer text wraps within the fixed width",
+          },
+        ],
+        { textMetricsProvider: metrics },
+      );
+      const changed = consume(scene.doc, next.update).getElement(text.id)!;
+      expect(changed.width).toBe(text.width);
+      expect(changed).toMatchObject({
+        x: 17,
+        y: 231,
+        fontSize: 20,
+        autoResize: false,
+      });
+    },
+  );
+
+  it.each([undefined, null, 10, 0, -1, NaN, "100"])(
+    "rejects any supplied text height %s atomically",
+    (height) => {
+      const { doc } = seed();
+      const before = Y.encodeStateAsUpdate(doc);
+      for (const width of [undefined, 80]) {
+        const input = [
+          { op: "addShape", shape: "rectangle" },
+          { op: "addText", text: "unsupported", height, width },
+        ];
+        expect(
+          prepare(doc, input, { textMetricsProvider: metrics }),
+        ).toMatchObject({
+          ok: false,
+          error: { category: "invalid-operation", operationIndex: 1 },
+        });
+        expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+      }
+    },
+  );
+
+  it.each([0, -1, NaN, Infinity, null, "80"])(
+    "rejects invalid text width %s",
+    (width) => {
+      const { doc } = seed();
+      expect(
+        prepare(doc, [{ op: "addText", text: "bad width", width }], {
+          textMetricsProvider: metrics,
+        }),
+      ).toMatchObject({ ok: false, error: { category: "invalid-operation" } });
+    },
+  );
   it("reports an invalid fill color at its operation without leaking a partial update", () => {
     const { doc } = seed();
     const before = Y.encodeStateAsUpdate(doc);

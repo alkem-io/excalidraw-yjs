@@ -31,5 +31,10 @@
  * so they cannot fall out of sync: import-safety is the guarantee rather than
  * zero-reachability, and text measurement needs
  * `setCustomTextMetricsProvider` at bootstrap. See that module's doc comment.
+ *
+ * `prepareSceneImport` validates current exports with resolved logical file IDs
+ * and prepares an additive captured update without mutating its inputs. Text
+ * batches accept width for canonical wrapping and derived height; supplied
+ * addText height is rejected. Omitting dimensions retains natural measurement.
  */
 export * from "@excalidraw-yjs/element/headless";

@@ -1,6 +1,6 @@
 /**
  * `@excalidraw-yjs/element/headless` — the Node-safe surface of the element
- * package (spec 002, FR-016 companion).
+ * package.
  *
  * ## What this is for
  *
@@ -37,6 +37,13 @@
  *   server provider must agree with the browser's real font metrics, or text
  *   wraps at different points and every bound element shifts.
  *
+ * `prepareSceneImport` strictly validates current exports and resolved image
+ * locators, then captures an additive update on a private replica. It never
+ * mutates its inputs. `prepareSemanticBatch` supports positive finite addText
+ * width using canonical horizontal wrapping, preserving origin and font size
+ * with derived height. Any supplied addText height is invalid; no dimensions
+ * retain natural sizing, and setText retains existing reflow behavior.
+ *
  * ## Not exported here (browser-only)
  *
  * `renderElement` (canvas rasterization), `elementLink` (reads the browser
@@ -59,6 +66,7 @@ export * from "./distribute";
 export * from "./duplicate";
 export * from "./deleteElements";
 export * from "./semanticBatch";
+export type { SceneImportInput } from "./sceneImport";
 export * from "./elbowArrow";
 export * from "./flowchart";
 export * from "./fractionalIndex";

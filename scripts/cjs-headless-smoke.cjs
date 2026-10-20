@@ -122,6 +122,27 @@ check("require() of the headless entry succeeds", () => {
   }
 });
 
+check(
+  "umbrella CommonJS scene import preserves graph and concurrent edits with actual fonts",
+  () => {
+    const umbrellaRequire = createRequire(
+      path.resolve("packages/excalidraw/package.json"),
+    );
+    const core = umbrellaRequire("@excalidraw-yjs/excalidraw/headless");
+    const { createNodeTextMetricsProvider } = umbrellaRequire(
+      "@excalidraw-yjs/excalidraw/node-metrics",
+    );
+    const provider = createNodeTextMetricsProvider();
+    core.setCustomTextMetricsProvider(provider);
+    require("./scene-import-fixture.cjs").assertSceneImport(
+      require("node:assert/strict"),
+      core,
+      Y,
+      provider,
+    );
+  },
+);
+
 check("a Scene adopts a Y.Doc created by require('yjs')", () => {
   scene = new headless.Scene(undefined, { doc: new Y.Doc() });
 });
