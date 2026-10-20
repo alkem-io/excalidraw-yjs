@@ -3,6 +3,7 @@ import * as Y from "yjs";
 
 import { duplicateElements } from "./duplicate";
 import { validateFractionalIndices } from "./fractionalIndex";
+import { isBindableElement } from "./typeChecks";
 import {
   readAssetLocators,
   validateAssetLocator,
@@ -50,7 +51,7 @@ const jsonValue = (value: unknown): boolean => {
     return true;
   }
   if (typeof value === "string") {
-    return !/^\s*data:/i.test(value);
+    return true;
   }
   if (typeof value === "number") {
     return Number.isFinite(value);
@@ -197,6 +198,21 @@ export function validateImportElements(
           element.boundElements.filter((edge: any) => edge.type === "text")
             .length <= 1),
     );
+    if (
+      element.type === "iframe" &&
+      element.customData?.generationData !== undefined
+    ) {
+      const data = element.customData.generationData;
+      check(data && typeof data === "object" && !Array.isArray(data));
+      check(["pending", "done", "error"].includes(data.status));
+      if (data.status === "done") {
+        check(typeof data.html === "string");
+      }
+      if (data.status === "error") {
+        check(typeof data.code === "string");
+        check(data.message === undefined || typeof data.message === "string");
+      }
+    }
     if (element.type === "text") {
       check(
         typeof element.text === "string" &&
@@ -381,7 +397,7 @@ export function validateImportElements(
         if (binding) {
           const endpoint = target(binding.elementId, element);
           check(
-            !["arrow", "line", "freedraw"].includes(endpoint.type) &&
+            isBindableElement(endpoint, true) &&
               endpoint.boundElements?.some(
                 (edge: any) => edge.id === element.id && edge.type === "arrow",
               ),
@@ -430,7 +446,7 @@ export const importSceneElements = (scene: Scene, input: unknown): string[] => {
     check(
       !/^(?:[a-z][a-z0-9+.-]*:\/\/|\/\/|(?:data|blob|file):)/i.test(
         locator.trim(),
-      ) && !files.has(locator as FileId),
+      ),
     );
   }
   const occupied = new Set<string>();
@@ -466,6 +482,9 @@ export const importSceneElements = (scene: Scene, input: unknown): string[] => {
           collision = true;
         }
       }
+    }
+    if (collision) {
+      continue;
     }
     const groupMap = new Map<string, string>();
     for (const original of elements) {

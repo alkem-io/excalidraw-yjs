@@ -23,6 +23,7 @@ import process from "node:process";
 import assert from "node:assert/strict";
 import { assertSceneImport } from "./scene-import-fixture.cjs";
 import { createNodeTextMetricsProvider } from "../packages/excalidraw/dist/node/nodeMetrics.cjs";
+import "./semantic-result-types.mjs";
 
 const require = createRequire(import.meta.url);
 const BUNDLES = [

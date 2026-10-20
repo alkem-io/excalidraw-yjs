@@ -134,6 +134,19 @@ try {
       }
       check.destroy();
     }
+    const fractional = core.prepareSemanticBatch(doc, [{op:"addText",text:"long text",fontSize:0.5,width:10,x:13,y:29}], {textMetricsProvider:provider});
+    assert.equal(fractional.ok,true);
+    Y.applyUpdate(doc,fractional.update);
+    const fractionalScene = new core.Scene(null,{doc});
+    const fractionalId = fractional.addedElementIds[0];
+    assert.equal(fractionalScene.getElement(fractionalId).autoResize,false);
+    assert.equal(fractionalScene.getElement(fractionalId).width,10);
+    assert.equal(fractionalScene.getElement(fractionalId).fontSize,0.5);
+    const fractionalChange = core.prepareSemanticBatch(doc,[{op:"setText",elementId:fractionalId,text:"much longer text retains fixed width"}],{textMetricsProvider:provider});
+    assert.equal(fractionalChange.ok,true);
+    Y.applyUpdate(doc,fractionalChange.update);
+    assert.equal(fractionalScene.getElement(fractionalId).width,10);
+    fractionalScene.destroy();
     console.log("PASS packed CommonJS actual-font semantic preparation, unchanged input, late-invalid atomicity, wrapped metrics and exact update replay");
     // The existing element-owner cache retains a sixty-second cleanup timer.
     // This one-shot subprocess, like the existing headless smoke, owns its exit.

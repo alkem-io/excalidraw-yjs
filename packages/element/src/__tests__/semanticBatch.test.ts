@@ -6,7 +6,7 @@ import { newElement } from "../newElement";
 import { Scene } from "../Scene";
 import { setCustomTextMetricsProvider } from "../textMeasurements";
 
-import type { ExcalidrawTextElement } from "../types";
+import type { ExcalidrawTextElement, NonDeleted } from "../types";
 import type { SemanticOperation } from "../semanticBatch";
 
 // Geometry tests use the same deterministic provider as browser unit fixtures.
@@ -170,28 +170,48 @@ describe("semantic automatic placement", () => {
 });
 
 describe("semantic preparation", () => {
-  it("wraps width without a font-resize minimum blocking the requested font size", () => {
-    const { doc } = seed();
-    const result = prepare(
-      doc,
-      [
-        {
-          op: "addText",
-          text: "long text",
-          x: 1,
-          y: 2,
-          width: 30,
-          fontSize: 1,
-        },
-      ],
-      { textMetricsProvider: metrics },
-    );
-    const scene = consume(doc, result.update);
-    expect(scene.getElement(result.addedElementIds[0])).toMatchObject({
-      autoResize: false,
-      fontSize: 1,
-    });
-  });
+  it.each([0.5, 1, 20])(
+    "wraps width at font size %s without font scaling",
+    (fontSize) => {
+      const { doc } = seed();
+      const result = prepare(
+        doc,
+        [
+          {
+            op: "addText",
+            text: "long text",
+            x: 1,
+            y: 2,
+            width: 30,
+            fontSize,
+          },
+        ],
+        { textMetricsProvider: metrics },
+      );
+      const scene = consume(doc, result.update);
+      expect(scene.getElement(result.addedElementIds[0])).toMatchObject({
+        autoResize: false,
+        fontSize,
+        width: 30,
+        x: 1,
+        y: 2,
+      });
+      const next = prepare(
+        scene.doc,
+        [
+          {
+            op: "setText",
+            elementId: result.addedElementIds[0],
+            text: "longer text keeps wrapping within its fixed width",
+          },
+        ],
+        { textMetricsProvider: metrics },
+      );
+      expect(
+        consume(scene.doc, next.update).getElement(result.addedElementIds[0]),
+      ).toMatchObject({ width: 30, fontSize, autoResize: false });
+    },
+  );
   it.each([1, 60, 90])(
     "wraps explicit width %s through canonical horizontal resize",
     (width) => {
@@ -539,3 +559,42 @@ describe("semantic preparation", () => {
     expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
   });
 });
+
+it.each([
+  { fontSize: 0.5, heightRatio: 1, handle: "e", changes: false },
+  { fontSize: 20, heightRatio: 0.01, handle: "e", changes: false },
+  { fontSize: 20, heightRatio: 1, handle: "e", changes: true },
+  { fontSize: 20, heightRatio: 2, handle: "s", changes: true },
+] as const)(
+  "retains browser text resize behavior for $fontSize/$heightRatio/$handle",
+  ({ fontSize, heightRatio, handle, changes }) => {
+    const scene = new Scene();
+    scene.insertElement(
+      headless.newTextElement({ text: "long text", x: 10, y: 20, fontSize }),
+    );
+    const text =
+      scene.getNonDeletedElements()[0] as NonDeleted<ExcalidrawTextElement>;
+    const nextHeight = text.height * heightRatio;
+    headless.resizeSingleTextElement(
+      text,
+      text,
+      scene,
+      handle,
+      false,
+      30,
+      nextHeight,
+    );
+    const resized = scene.getElement(text.id)!;
+    if (!changes) {
+      expect(resized).toEqual(text);
+    } else if (handle === "s") {
+      expect(resized).toMatchObject({
+        fontSize: fontSize * heightRatio,
+        height: nextHeight,
+      });
+    } else {
+      expect(resized).toMatchObject({ width: 30, fontSize, autoResize: false });
+    }
+    scene.destroy();
+  },
+);

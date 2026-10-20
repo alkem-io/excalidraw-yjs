@@ -15,7 +15,7 @@ import {
   refreshTextDimensions,
 } from "./newElement";
 import { Scene } from "./Scene";
-import { resizeSingleTextElement } from "./resizeElements";
+import { getTextElementWidthResize } from "./resizeElements";
 import { getBoundTextElement, redrawTextBoundingBox } from "./textElement";
 import { normalizeText, withTextMetricsProvider } from "./textMeasurements";
 import {
@@ -52,13 +52,13 @@ export type SemanticOperation =
   | { op: "setText"; elementId: string; text: string }
   | { op: "remove"; elementId: string };
 
-export type SemanticBatchResult =
+type PreparedResult<Operation extends string> =
   | {
       ok: true;
       update: Uint8Array;
       addedElementIds: string[];
       summary: Array<{
-        op: SemanticOperation["op"] | "importScene";
+        op: Operation;
         elementIds: string[];
       }>;
     }
@@ -69,6 +69,9 @@ export type SemanticBatchResult =
         operationIndex?: number;
       };
     };
+
+export type SemanticBatchResult = PreparedResult<SemanticOperation["op"]>;
+export type SceneImportResult = PreparedResult<"importScene">;
 
 class InvalidOperation extends Error {}
 
@@ -150,14 +153,25 @@ export const prepareSceneImport = (
   doc: Y.Doc,
   input: SceneImportInput,
   options: { textMetricsProvider: TextMetricsProvider },
-): SemanticBatchResult => prepareBatch(doc, input, options, true);
+): SceneImportResult => prepareBatch(doc, input, options, true);
 
-const prepareBatch = (
+function prepareBatch(
+  doc: Y.Doc,
+  input: readonly SemanticOperation[],
+  options: { textMetricsProvider: TextMetricsProvider },
+): SemanticBatchResult;
+function prepareBatch(
+  doc: Y.Doc,
+  input: SceneImportInput,
+  options: { textMetricsProvider: TextMetricsProvider },
+  sceneInput: true,
+): SceneImportResult;
+function prepareBatch(
   doc: Y.Doc,
   input: readonly SemanticOperation[] | SceneImportInput,
   options: { textMetricsProvider: TextMetricsProvider },
   sceneInput = false,
-): SemanticBatchResult => {
+): PreparedResult<SemanticOperation["op"] | "importScene"> {
   const working = new Y.Doc();
   let scene: Scene | undefined;
   let operationIndex: number | undefined;
@@ -367,14 +381,9 @@ const prepareBatch = (
             });
             privateScene.insertElement(text);
             if (op.width !== undefined) {
-              resizeSingleTextElement(
+              privateScene.mutateElement(
                 text,
-                text,
-                privateScene,
-                "e",
-                false,
-                op.width,
-                text.height,
+                getTextElementWidthResize(text, op.width),
               );
             }
             place(op, text.id);
@@ -512,4 +521,4 @@ const prepareBatch = (
       working.destroy();
     }
   }
-};
+}

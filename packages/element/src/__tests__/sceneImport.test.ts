@@ -210,3 +210,235 @@ it.each(["index", "boundElements"])(
     expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
   },
 );
+
+it.each(
+  ["Data: customer events", "data: ready", "  DATA: reference"].flatMap(
+    (text) => ["source", "destination"].map((location) => ({ text, location })),
+  ),
+)("preserves literal $text in $location text", ({ text, location }) => {
+  const doc = new Y.Doc();
+  const scene = new Scene(null, { doc });
+  const input = source();
+  if (location === "source") {
+    const sourceScene = new Scene();
+    sourceScene.insertElement(headless.newTextElement({ text, x: 0, y: 0 }));
+    input.scene.elements = sourceScene.getElementsIncludingDeleted();
+    sourceScene.destroy();
+  } else {
+    scene.insertElement(headless.newTextElement({ text, x: 0, y: 0 }));
+  }
+  const before = Y.encodeStateAsUpdate(doc);
+  const original = JSON.stringify(input);
+  const result = prepare(doc, input);
+  expect(result.ok).toBe(true);
+  expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+  expect(JSON.stringify(input)).toBe(original);
+  Y.applyUpdate(doc, result.update);
+  expect(
+    scene.getNonDeletedElements().find((element) => element.type === "text"),
+  ).toMatchObject({ text, originalText: text });
+  scene.destroy();
+});
+
+it("retries a collision with a later grouped source before reading its missing mapping", () => {
+  const input = source();
+  const sourceScene = new Scene();
+  sourceScene.insertElementsAtIndex(
+    [
+      { ...input.scene.elements[0], groupIds: ["group"] },
+      { ...input.scene.elements[0], id: "later-source", groupIds: ["group"] },
+    ],
+    null,
+  );
+  input.scene.elements = sourceScene.getElementsIncludingDeleted();
+  const doc = new Y.Doc();
+  const before = Y.encodeStateAsUpdate(doc);
+  const original = JSON.stringify(input);
+  const random = vi
+    .spyOn(common, "randomId")
+    .mockReturnValueOnce("later-source");
+  try {
+    const result = prepare(doc, input);
+    expect(result.ok).toBe(true);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    expect(JSON.stringify(input)).toBe(original);
+    Y.applyUpdate(doc, result.update);
+    const scene = new Scene(null, { doc });
+    const elements = scene.getNonDeletedElements();
+    expect(elements).toHaveLength(2);
+    expect(new Set(elements.map((element) => element.id)).size).toBe(2);
+    expect(elements[0].groupIds).toEqual(elements[1].groupIds);
+    expect(elements[0].groupIds).not.toContain("group");
+    scene.destroy();
+  } finally {
+    random.mockRestore();
+    sourceScene.destroy();
+    doc.destroy();
+  }
+});
+
+it.each([
+  "bound-label",
+  "standalone-text",
+  "locked-text",
+  "missing-reciprocal",
+])("validates canonical endpoint eligibility for %s", (kind) => {
+  const sourceScene = sceneImportFixture(headless);
+  const elements = JSON.parse(
+    JSON.stringify(sourceScene.getElementsIncludingDeleted()),
+  );
+  const arrow = elements.find((element: any) => element.type === "arrow");
+  const container = elements.find(
+    (element: any) => element.id === arrow.startBinding.elementId,
+  );
+  const label = elements.find(
+    (element: any) => element.containerId === container.id,
+  );
+  container.boundElements = container.boundElements.filter(
+    (edge: any) => edge.id !== arrow.id,
+  );
+  arrow.startBinding.elementId = label.id;
+  label.boundElements =
+    kind === "missing-reciprocal" ? null : [{ id: arrow.id, type: "arrow" }];
+  if (kind !== "bound-label") {
+    label.containerId = null;
+    container.boundElements = null;
+  }
+  label.locked = kind === "locked-text";
+  const input = {
+    scene: { type: "excalidraw", version: 2, elements },
+    targetFileIDs: { "source-image": "target-logical-file" },
+  };
+  const doc = new Y.Doc();
+  const before = Y.encodeStateAsUpdate(doc);
+  const original = JSON.stringify(input);
+  const result = prepare(doc, input);
+  if (kind === "bound-label" || kind === "missing-reciprocal") {
+    expect(result).toEqual({ ok: false, error: { category: "invalid-scene" } });
+  } else {
+    expect(result.ok).toBe(true);
+  }
+  expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+  expect(JSON.stringify(input)).toBe(original);
+  sourceScene.destroy();
+  doc.destroy();
+});
+
+it.each([
+  null,
+  [],
+  {},
+  { status: "unknown" },
+  { status: "error" },
+  { status: "error", code: 1 },
+  { status: "error", code: "error", message: { toString: 0 } },
+  { status: "error", code: "error", message: null },
+  { status: "done" },
+  { status: "done", html: 1 },
+])(
+  "rejects malformed reserved iframe generation metadata %j atomically",
+  (generationData) => {
+    const input = source();
+    input.scene.elements = [
+      {
+        ...input.scene.elements[0],
+        type: "iframe",
+        customData: { generationData },
+      } as any,
+    ];
+    const doc = new Y.Doc();
+    const before = Y.encodeStateAsUpdate(doc);
+    const original = JSON.stringify(input);
+    expect(prepare(doc, input)).toEqual({
+      ok: false,
+      error: { category: "invalid-scene" },
+    });
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    expect(JSON.stringify(input)).toBe(original);
+    doc.destroy();
+  },
+);
+
+it.each([
+  {},
+  { generationData: { status: "pending" } },
+  { generationData: { status: "done", html: "<p>ready</p>" } },
+  { generationData: { status: "error", code: "ERR_GENERATION_INTERRUPTED" } },
+  {
+    generationData: {
+      status: "error",
+      code: "custom",
+      message: "Data: unavailable",
+    },
+  },
+])(
+  "preserves valid iframe metadata and unrelated custom fields %j",
+  (reserved) => {
+    const customData = { ...reserved, unrelated: { label: "ordinary" } };
+    const input = source();
+    input.scene.elements = [
+      { ...input.scene.elements[0], type: "iframe", customData } as any,
+    ];
+    const doc = new Y.Doc();
+    const result = prepare(doc, input);
+    expect(result.ok).toBe(true);
+    Y.applyUpdate(doc, result.update);
+    const scene = new Scene(null, { doc });
+    expect(scene.getElement(result.addedElementIds[0])?.customData).toEqual(
+      customData,
+    );
+    scene.destroy();
+  },
+);
+
+it.each(["self", "other-source"])(
+  "keeps source local keys independent of trusted logical locators: %s",
+  (kind) => {
+    const sourceScene = sceneImportFixture(headless);
+    const first = "11111111-1111-4111-8111-111111111111";
+    const second = "22222222-2222-4222-8222-222222222222";
+    const image = sourceScene
+      .getNonDeletedElements()
+      .find((element: any) => element.type === "image")!;
+    sourceScene.mutateElement(image, { fileId: first } as any);
+    sourceScene.insertElement({
+      ...image,
+      id: "second-image",
+      fileId: second,
+    } as any);
+    const locator = kind === "self" ? first : second;
+    const input = {
+      scene: {
+        type: "excalidraw",
+        version: 2,
+        elements: sourceScene.getElementsIncludingDeleted(),
+      },
+      targetFileIDs: { [first]: locator, [second]: first },
+    };
+    const doc = new Y.Doc();
+    const before = Y.encodeStateAsUpdate(doc);
+    const original = JSON.stringify(input);
+    const result = prepare(doc, input);
+    expect(result.ok).toBe(true);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    expect(JSON.stringify(input)).toBe(original);
+    Y.applyUpdate(doc, result.update);
+    const scene = new Scene(null, { doc });
+    const images = scene
+      .getNonDeletedElements()
+      .filter((element) => element.type === "image");
+    expect(images).toHaveLength(2);
+    expect(
+      images.every(
+        (element) => element.fileId !== first && element.fileId !== second,
+      ),
+    ).toBe(true);
+    expect(new Set(images.map((element) => element.fileId)).size).toBe(2);
+    expect(Object.values(scene.getAssetLocators())).toEqual([locator, first]);
+    const once = Y.encodeStateAsUpdate(doc);
+    Y.applyUpdate(doc, result.update);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(once);
+    scene.destroy();
+    sourceScene.destroy();
+  },
+);

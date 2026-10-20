@@ -77,7 +77,16 @@ export * from "./image";
 export * from "./mutateElement";
 export * from "./newElement";
 export * from "./positionElementsOnGrid";
-export * from "./resizeElements";
+export {
+  transformElements,
+  rescalePointsInElement,
+  measureFontSizeFromWidth,
+  resizeSingleTextElement,
+  getResizeOffsetXY,
+  getResizeArrowDirection,
+  resizeSingleElement,
+  resizeMultipleElements,
+} from "./resizeElements";
 export * from "./Scene";
 export * from "./selection";
 export * from "./shape";
