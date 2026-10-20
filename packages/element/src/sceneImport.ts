@@ -501,6 +501,13 @@ export const importSceneElements = (scene: Scene, input: unknown): string[] => {
       generated.add(group);
     }
     if (!collision) {
+      // Duplication gathers groups; imports retain the exported stacking order.
+      duplicated = elements.map(
+        (element) =>
+          duplication.duplicateElementsMap.get(
+            duplication.origIdToDuplicateId.get(element.id)!,
+          )!,
+      );
       break;
     }
   }

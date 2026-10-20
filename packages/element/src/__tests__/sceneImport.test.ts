@@ -539,6 +539,107 @@ it("preserves array order from an actual editor export with merged tied keys", (
   doc.destroy();
 });
 
+it.each(["fragmented", "group-first", "group-last"])(
+  "preserves exported stacking for a %s group through preparation and replay",
+  (kind) => {
+    const sourceScene = new Scene();
+    const peer = new Scene();
+    const target = new Y.Doc();
+    const targetScene = new Scene(null, { doc: target });
+    try {
+      const shapes = ["A", "B", "C"].map((id) => ({
+        ...newElement({
+          type: "rectangle",
+          x: 10,
+          y: 20,
+          width: 100,
+          height: 80,
+          backgroundColor: { A: "red", B: "green", C: "blue" }[id],
+          fillStyle: "solid",
+          groupIds: id === "B" ? [] : ["G"],
+        }),
+        id,
+      }));
+      const [a, b, c] = shapes;
+      if (kind === "fragmented") {
+        sourceScene.insertElementsAtIndex([a, c], null);
+        peer.insertElement(b);
+        Y.applyUpdate(sourceScene.doc, Y.encodeStateAsUpdate(peer.doc));
+      } else {
+        sourceScene.insertElementsAtIndex(
+          kind === "group-first" ? [a, c, b] : [b, a, c],
+          null,
+        );
+      }
+      const sourceElements = sourceScene.getNonDeletedElements();
+      const order =
+        kind === "fragmented"
+          ? ["A", "B", "C"]
+          : kind === "group-first"
+          ? ["A", "C", "B"]
+          : ["B", "A", "C"];
+      expect(sourceElements.map((element) => element.id)).toEqual(order);
+      if (kind === "fragmented") {
+        expect(sourceElements.map((element) => element.index)).toEqual([
+          "a0",
+          "a0",
+          "a1",
+        ]);
+      }
+      const exported = JSON.parse(
+        serializeAsJSON(sourceElements, {}, {}, "database"),
+      );
+      expect(exported.elements).toEqual(sourceElements);
+      const input = { scene: exported, targetFileIDs: {} };
+      const original = JSON.stringify(input);
+      const sourceBefore = Y.encodeStateAsUpdate(sourceScene.doc);
+      targetScene.insertElement(
+        newElement({ type: "rectangle", x: -100, y: 0 }),
+      );
+      const existing = targetScene.getNonDeletedElements()[0];
+      const targetBefore = Y.encodeStateAsUpdate(target);
+      const result = prepare(target, input);
+      expect(result.ok).toBe(true);
+      expect(Y.encodeStateAsUpdate(target)).toEqual(targetBefore);
+      Y.applyUpdate(target, result.update);
+      const elements = targetScene.getNonDeletedElements();
+      const imported = elements.slice(1);
+      expect(elements[0]).toEqual(existing);
+      const content = (items: typeof sourceElements) =>
+        items.map(
+          ({ id, index, groupIds, version, versionNonce, updated, ...rest }) =>
+            rest,
+        );
+      expect(content(imported)).toEqual(content(sourceElements));
+      expect(result.addedElementIds).toEqual(imported.map(({ id }) => id));
+      expect(result.summary).toEqual([
+        { op: "importScene", elementIds: result.addedElementIds },
+      ]);
+      const group = imported[order.indexOf("A")].groupIds;
+      expect(group).toHaveLength(1);
+      expect(group).not.toContain("G");
+      expect(imported[order.indexOf("C")].groupIds).toEqual(group);
+      expect(imported[order.indexOf("B")].groupIds).toEqual([]);
+      expect(new Set(elements.map(({ id }) => id)).size).toBe(4);
+      expect(imported.every(({ id }) => !order.includes(id))).toBe(true);
+      elements.slice(1).forEach((element, index) => {
+        expect(element.index! > elements[index].index!).toBe(true);
+      });
+      const once = Y.encodeStateAsUpdate(target);
+      Y.applyUpdate(target, result.update);
+      expect(Y.encodeStateAsUpdate(target)).toEqual(once);
+      expect(targetScene.getNonDeletedElements()).toEqual(elements);
+      expect(JSON.stringify(input)).toBe(original);
+      expect(Y.encodeStateAsUpdate(sourceScene.doc)).toEqual(sourceBefore);
+      expect(sourceScene.getNonDeletedElements()).toEqual(sourceElements);
+    } finally {
+      targetScene.destroy();
+      peer.destroy();
+      sourceScene.destroy();
+    }
+  },
+);
+
 it.each(["source", "destination"])(
   "rejects bound text at its container key in the %s",
   (location) => {
