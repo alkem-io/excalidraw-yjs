@@ -6,11 +6,7 @@ import { duplicateElements } from "./duplicate";
 import { validateElbowPoints } from "./elbowArrow";
 import { getBoundTextElement } from "./textElement";
 import { hasBoundTextElement, isBindableElement } from "./typeChecks";
-import {
-  readAssetLocators,
-  validateAssetLocator,
-  yMapToElement,
-} from "./yjs/schema";
+import { readAssetLocators, validateAssetLocator } from "./yjs/schema";
 
 import type { Scene } from "./Scene";
 import type { ExcalidrawElement, FileId } from "./types";
@@ -25,16 +21,11 @@ export type SceneImportInput = {
 };
 
 export const validateImportDestination = (doc: Y.Doc) => {
-  const elements = [...doc.getMap("elements").entries()].map(([id, value]) => {
-    check(value instanceof Y.Map && value.get("id") === id);
-    const bound = value.get("boundElements");
-    check(bound === undefined || bound instanceof Y.Map);
-    if (bound instanceof Y.Map) {
-      check([...bound.values()].filter((type) => type === "text").length <= 1);
-    }
-    return { ...yMapToElement(value), version: 1, versionNonce: 0, updated: 0 };
-  });
-  validateImportElements(elements);
+  for (const value of doc.getMap<Y.Map<unknown>>("elements").values()) {
+    const index = value.get("index");
+    check(typeof index === "string");
+    validateOrderKey(index);
+  }
   readAssetLocators(doc.getMap("files"));
 };
 
@@ -427,7 +418,6 @@ export const importSceneElements = (scene: Scene, input: unknown): string[] => {
       Object.getPrototypeOf(value.targetFileIDs) === Object.prototype,
   );
   validateImportElements(value.scene.elements);
-  validateImportElements(scene.getElementsIncludingDeleted());
   const elements = value.scene.elements.filter((element) => !element.isDeleted);
   check(elements.length > 0);
   const files = new Set(
@@ -443,9 +433,7 @@ export const importSceneElements = (scene: Scene, input: unknown): string[] => {
     check(Object.prototype.hasOwnProperty.call(value.targetFileIDs, id));
     const locator = validateAssetLocator(id, value.targetFileIDs[id]);
     check(
-      !/^(?:[a-z][a-z0-9+.-]*:\/\/|\/\/|(?:data|blob|file):)/i.test(
-        locator.trim(),
-      ),
+      !/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(locator.trim()),
     );
   }
   const occupied = new Set<string>();

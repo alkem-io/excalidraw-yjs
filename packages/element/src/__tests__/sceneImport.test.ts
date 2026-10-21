@@ -6,6 +6,7 @@ import * as common from "@excalidraw-yjs/common";
 import * as headless from "../headless";
 import { Scene } from "../Scene";
 import { newElement } from "../newElement";
+import { bindBindingElement } from "../binding";
 import { setCustomTextMetricsProvider } from "../textMeasurements";
 import { serializeAsJSON } from "../../../excalidraw/data/json";
 import {
@@ -188,28 +189,235 @@ it("regenerates a forced canonical fresh-ID collision before appending", () => {
   }
 });
 
-it.each(["index", "boundElements"])(
+it.each(["index", "boundElements", "identity", "map", "geometry", "asset"])(
   "rejects malformed raw destination %s before Scene can normalize it",
   (key) => {
     const doc = new Y.Doc();
     const scene = new Scene(null, { doc });
     scene.insertElement(newElement({ type: "rectangle", x: 0, y: 0 }));
-    const element = scene.yElements.values().next().value!;
+    const id = scene.getNonDeletedElements()[0].id;
+    const raw = new Y.Doc();
+    Y.applyUpdate(raw, Y.encodeStateAsUpdate(doc));
+    scene.destroy();
+    const element = raw.getMap<Y.Map<unknown>>("elements").get(id)!;
     if (key === "index") {
       element.set("index", "invalid");
+    } else if (key === "boundElements") {
+      element.set("boundElements", [{ id: "missing", type: "arrow" }]);
+    } else if (key === "identity") {
+      element.set("id", "different");
+    } else if (key === "map") {
+      raw.getMap("elements").set(id, { id });
+    } else if (key === "geometry") {
+      element.set("x", Infinity);
     } else {
-      const bound = new Y.Map();
-      bound.set("missing", "arrow");
-      element.set("boundElements", bound);
+      raw.getMap("files").set("existing-file", { locator: "unreadable" });
     }
+    const before = Y.encodeStateAsUpdate(raw);
+    const input = source();
+    const original = JSON.stringify(input);
+    const updates = vi.fn();
+    raw.on("update", updates);
+    expect(prepare(raw, input)).toEqual({
+      ok: false,
+      error: { category: "invalid-scene" },
+    });
+    expect(Y.encodeStateAsUpdate(raw)).toEqual(before);
+    expect(JSON.stringify(input)).toBe(original);
+    expect(updates).not.toHaveBeenCalled();
+    raw.destroy();
+  },
+);
+
+it.each(["delete-first", "bind-first"])(
+  "preserves concurrent delete/bind remnants during unrelated import: %s",
+  (order) => {
+    const target = new Scene();
+    target.doc.clientID = 101;
+    const shape = newElement({ type: "rectangle", x: 0, y: 0 });
+    const arrow = headless.newArrowElement({
+      type: "arrow",
+      x: 100,
+      y: 0,
+      width: 100,
+      height: 0,
+      points: [
+        [0, 0],
+        [100, 0],
+      ] as any,
+    });
+    target.insertElementsAtIndex([shape, arrow], null);
+    const peerDoc = new Y.Doc();
+    peerDoc.clientID = 202;
+    Y.applyUpdate(peerDoc, Y.encodeStateAsUpdate(target.doc));
+    const peer = new Scene(null, { doc: peerDoc });
+    try {
+      const deletion = headless.prepareSemanticBatch(
+        target.doc,
+        [{ op: "remove", elementId: arrow.id }],
+        { textMetricsProvider: metrics },
+      );
+      expect(deletion.ok).toBe(true);
+      if (!deletion.ok) {
+        throw new Error("deletion failed");
+      }
+      bindBindingElement(
+        peer.getElement(arrow.id)! as typeof arrow,
+        peer.getElement(shape.id)! as typeof shape,
+        "orbit",
+        "start",
+        peer,
+      );
+      const binding = Y.encodeStateAsUpdate(peerDoc);
+      const changes =
+        order === "delete-first"
+          ? [deletion.update, binding]
+          : [binding, deletion.update];
+      changes.forEach((update) => target.applyRemoteUpdate(update));
+      peer.applyRemoteUpdate(deletion.update);
+      expect(target.yElements.toJSON()).toEqual(peer.yElements.toJSON());
+      expect(target.getElement(arrow.id)?.isDeleted).toBe(true);
+      expect(target.getElement(shape.id)?.boundElements).toContainEqual({
+        id: arrow.id,
+        type: "arrow",
+      });
+      const existing = target.yElements.toJSON();
+      const files = target.doc.getMap("files").toJSON();
+      const appState = target.doc.getMap("appState").toJSON();
+      const input = source();
+      const original = JSON.stringify(input);
+      const before = Y.encodeStateAsUpdate(target.doc);
+      const result = prepare(target.doc, input);
+      expect(result.ok).toBe(true);
+      expect(Y.encodeStateAsUpdate(target.doc)).toEqual(before);
+      expect(JSON.stringify(input)).toBe(original);
+      const strictDoc = new Y.Doc();
+      expect(
+        prepare(strictDoc, {
+          scene: {
+            type: "excalidraw",
+            version: 2,
+            elements: target.getElementsIncludingDeleted(),
+          },
+          targetFileIDs: {},
+        }),
+      ).toEqual({ ok: false, error: { category: "invalid-scene" } });
+      strictDoc.destroy();
+      Y.applyUpdate(target.doc, result.update);
+      for (const [id, record] of Object.entries(existing)) {
+        expect(target.yElements.get(id)!.toJSON()).toEqual(record);
+      }
+      expect(target.doc.getMap("files").toJSON()).toEqual(files);
+      expect(target.doc.getMap("appState").toJSON()).toEqual(appState);
+      expect(target.getElementsIncludingDeleted()).toHaveLength(3);
+      const once = Y.encodeStateAsUpdate(target.doc);
+      Y.applyUpdate(target.doc, result.update);
+      expect(Y.encodeStateAsUpdate(target.doc)).toEqual(once);
+    } finally {
+      peer.destroy();
+      target.destroy();
+    }
+  },
+);
+
+it("preserves schema-supported extra destination scalars but rejects them in imported source", () => {
+  const scene = new Scene();
+  scene.insertElement(source().scene.elements[0]);
+  const element = scene.getNonDeletedElements()[0];
+  scene.mutateElement(element, { futureScalar: "retained" } as any);
+  const existing = scene.yElements.toJSON();
+  const before = Y.encodeStateAsUpdate(scene.doc);
+  const input = source();
+  const original = JSON.stringify(input);
+  const result = prepare(scene.doc, input);
+  expect(result.ok).toBe(true);
+  expect(Y.encodeStateAsUpdate(scene.doc)).toEqual(before);
+  expect(JSON.stringify(input)).toBe(original);
+  const strictDoc = new Y.Doc();
+  expect(
+    prepare(strictDoc, {
+      scene: {
+        type: "excalidraw",
+        version: 2,
+        elements: scene.getElementsIncludingDeleted(),
+      },
+      targetFileIDs: {},
+    }),
+  ).toEqual({ ok: false, error: { category: "invalid-scene" } });
+  strictDoc.destroy();
+  Y.applyUpdate(scene.doc, result.update);
+  expect(scene.yElements.get(element.id)!.toJSON()).toEqual(
+    existing[element.id],
+  );
+  expect(scene.yElements.get(element.id)!.get("futureScalar")).toBe("retained");
+  scene.destroy();
+});
+
+it.each([
+  "https:evil.example/x",
+  "https:/evil.example/x",
+  "javascript:alert(1)",
+  "mailto:a@b",
+  "urn:example:asset",
+  "custom+v1.foo-bar:asset",
+  "  HtTpS:evil.example/x  ",
+  "\thttps:evil.example/x\n",
+  "https://example.com/x",
+  "//example.com/x",
+  "  //example.com/x  ",
+  "data:image/png;base64,secret",
+  "blob:asset",
+  "file:/asset",
+])(
+  "rejects scheme or protocol-relative import locator %j without writes",
+  (locator) => {
+    const fixture = sceneImportFixture(headless);
+    const doc = new Y.Doc();
+    const input = {
+      scene: {
+        type: "excalidraw",
+        version: 2,
+        elements: fixture.getElementsIncludingDeleted(),
+      },
+      targetFileIDs: { "source-image": locator },
+    };
     const before = Y.encodeStateAsUpdate(doc);
-    expect(prepare(doc, source())).toMatchObject({
+    const original = JSON.stringify(input);
+    const updates = vi.fn();
+    doc.on("update", updates);
+    expect(prepare(doc, input)).toEqual({
       ok: false,
       error: { category: "invalid-scene" },
     });
     expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    expect(JSON.stringify(input)).toBe(original);
+    expect(updates).not.toHaveBeenCalled();
+    fixture.destroy();
+    doc.destroy();
   },
 );
+
+it.each([
+  "11111111-1111-4111-8111-111111111111",
+  "target-logical-file",
+  "asset_1.2-3",
+])("preserves ordinary logical import locator %j", (locator) => {
+  const fixture = sceneImportFixture(headless);
+  const doc = new Y.Doc();
+  const result = prepare(doc, {
+    scene: {
+      type: "excalidraw",
+      version: 2,
+      elements: fixture.getElementsIncludingDeleted(),
+    },
+    targetFileIDs: { "source-image": locator },
+  });
+  expect(result.ok).toBe(true);
+  Y.applyUpdate(doc, result.update);
+  expect(Object.values(doc.getMap("files").toJSON())).toEqual([locator]);
+  fixture.destroy();
+  doc.destroy();
+});
 
 it.each(
   ["Data: customer events", "data: ready", "  DATA: reference"].flatMap(
@@ -641,7 +849,7 @@ it.each(["fragmented", "group-first", "group-last"])(
 );
 
 it.each(["source", "destination"])(
-  "rejects bound text at its container key in the %s",
+  "requires strict bound-text order only for imported source: %s",
   (location) => {
     const fixture = sceneImportFixture(headless);
     const elements = JSON.parse(
@@ -667,12 +875,22 @@ it.each(["source", "destination"])(
     }
     const before = Y.encodeStateAsUpdate(doc);
     const original = JSON.stringify(input);
-    expect(prepare(doc, input)).toEqual({
-      ok: false,
-      error: { category: "invalid-scene" },
-    });
+    const result = prepare(doc, input);
     expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
     expect(JSON.stringify(input)).toBe(original);
+    if (location === "source") {
+      expect(result).toEqual({
+        ok: false,
+        error: { category: "invalid-scene" },
+      });
+    } else {
+      expect(result.ok).toBe(true);
+      const existing = scene.yElements.toJSON();
+      Y.applyUpdate(doc, result.update);
+      for (const [id, record] of Object.entries(existing)) {
+        expect(scene.yElements.get(id)!.toJSON()).toEqual(record);
+      }
+    }
     scene.destroy();
     fixture.destroy();
     doc.destroy();
@@ -722,7 +940,7 @@ it.each(
     ["source", "destination"].map((location) => ({ ...geometry, location })),
   ),
 )(
-  "validates $name geometry in $location",
+  "requires strict $name geometry only for imported source: $location",
   ({ elbowed, points, valid, location }) => {
     const sourceScene = new Scene();
     sourceScene.insertElement(
@@ -757,7 +975,7 @@ it.each(
     const updates = vi.fn();
     doc.on("update", updates);
     const result = prepare(doc, input);
-    if (valid) {
+    if (valid || location === "destination") {
       expect(result.ok).toBe(true);
     } else {
       expect(result).toEqual({
