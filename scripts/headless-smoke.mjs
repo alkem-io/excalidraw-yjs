@@ -20,6 +20,10 @@ import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import assert from "node:assert/strict";
+import { assertSceneImport } from "./scene-import-fixture.cjs";
+import { createNodeTextMetricsProvider } from "../packages/excalidraw/dist/node/nodeMetrics.cjs";
+import "./semantic-result-types.mjs";
 
 const require = createRequire(import.meta.url);
 const BUNDLES = [
@@ -74,6 +78,15 @@ for (const [label, bundle] of BUNDLES) {
   if (!mod) {
     continue;
   }
+  await check(
+    `${label}: actual-font scene import preserves graph, lineage and assets`,
+    async () => {
+      const Y = await import("yjs");
+      const provider = createNodeTextMetricsProvider();
+      mod.setCustomTextMetricsProvider(provider);
+      assertSceneImport(assert, mod, Y, provider);
+    },
+  );
 
   await check(`${label}: exports the server-facing surface`, () => {
     const missing = REQUIRED.filter((n) => mod[n] === undefined);

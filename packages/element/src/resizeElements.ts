@@ -307,6 +307,35 @@ export const measureFontSizeFromWidth = (
   };
 };
 
+export const getTextElementWidthResize = (
+  element: NonDeleted<ExcalidrawTextElement>,
+  nextWidth: number,
+) => {
+  const minWidth = getMinTextElementWidth(
+    getFontString({
+      fontSize: element.fontSize,
+      fontFamily: element.fontFamily,
+    }),
+    element.lineHeight,
+  );
+
+  const newWidth = Math.max(minWidth, nextWidth);
+
+  const text = wrapText(
+    element.originalText,
+    getFontString(element),
+    Math.abs(newWidth),
+  );
+  const metrics = measureText(text, getFontString(element), element.lineHeight);
+
+  return {
+    width: Math.abs(newWidth),
+    height: Math.abs(metrics.height),
+    text,
+    autoResize: false,
+  };
+};
+
 export const resizeSingleTextElement = (
   origElement: NonDeleted<ExcalidrawTextElement>,
   element: NonDeleted<ExcalidrawTextElement>,
@@ -351,28 +380,7 @@ export const resizeSingleTextElement = (
   }
 
   if (transformHandleType === "e" || transformHandleType === "w") {
-    const minWidth = getMinTextElementWidth(
-      getFontString({
-        fontSize: element.fontSize,
-        fontFamily: element.fontFamily,
-      }),
-      element.lineHeight,
-    );
-
-    const newWidth = Math.max(minWidth, nextWidth);
-
-    const text = wrapText(
-      element.originalText,
-      getFontString(element),
-      Math.abs(newWidth),
-    );
-    const metrics = measureText(
-      text,
-      getFontString(element),
-      element.lineHeight,
-    );
-
-    const newHeight = metrics.height;
+    const dimensions = getTextElementWidthResize(element, nextWidth);
 
     const previousOrigin = pointFrom<GlobalPoint>(origElement.x, origElement.y);
 
@@ -380,8 +388,8 @@ export const resizeSingleTextElement = (
       previousOrigin,
       origElement.width,
       origElement.height,
-      newWidth,
-      newHeight,
+      dimensions.width,
+      dimensions.height,
       element.angle,
       transformHandleType,
       false,
@@ -389,12 +397,9 @@ export const resizeSingleTextElement = (
     );
 
     const resizedElement: Partial<ExcalidrawTextElement> = {
-      width: Math.abs(newWidth),
-      height: Math.abs(metrics.height),
+      ...dimensions,
       x: newOrigin.x,
       y: newOrigin.y,
-      text,
-      autoResize: false,
     };
 
     scene.mutateElement(element, resizedElement);

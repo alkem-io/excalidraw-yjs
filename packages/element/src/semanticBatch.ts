@@ -15,6 +15,7 @@ import {
   refreshTextDimensions,
 } from "./newElement";
 import { Scene } from "./Scene";
+import { getTextElementWidthResize } from "./resizeElements";
 import { getBoundTextElement, redrawTextBoundingBox } from "./textElement";
 import { normalizeText, withTextMetricsProvider } from "./textMeasurements";
 import {
@@ -25,6 +26,9 @@ import {
   isTextElement,
 } from "./typeChecks";
 import { captureElementBase } from "./yjs/intent";
+import { importSceneElements, validateImportDestination } from "./sceneImport";
+
+import type { SceneImportInput } from "./sceneImport";
 
 import type { TextMetricsProvider } from "./textMeasurements";
 import type { ExcalidrawTextElement, ExcalidrawTextContainer } from "./types";
@@ -43,17 +47,20 @@ export type SemanticOperation =
       text: string;
       fontSize?: number;
       strokeColor?: string;
-    } & Placement)
+    } & Omit<Placement, "height">)
   | { op: "connect"; fromId: string; toId: string; arrowLabel?: string }
   | { op: "setText"; elementId: string; text: string }
   | { op: "remove"; elementId: string };
 
-export type SemanticBatchResult =
+type PreparedResult<Operation extends string> =
   | {
       ok: true;
       update: Uint8Array;
       addedElementIds: string[];
-      summary: Array<{ op: SemanticOperation["op"]; elementIds: string[] }>;
+      summary: Array<{
+        op: Operation;
+        elementIds: string[];
+      }>;
     }
   | {
       ok: false;
@@ -62,6 +69,9 @@ export type SemanticBatchResult =
         operationIndex?: number;
       };
     };
+
+export type SemanticBatchResult = PreparedResult<SemanticOperation["op"]>;
+export type SceneImportResult = PreparedResult<"importScene">;
 
 class InvalidOperation extends Error {}
 
@@ -137,7 +147,31 @@ export const prepareSemanticBatch = (
   doc: Y.Doc,
   operations: readonly SemanticOperation[],
   options: { textMetricsProvider: TextMetricsProvider },
-): SemanticBatchResult => {
+): SemanticBatchResult => prepareBatch(doc, operations, options);
+
+export const prepareSceneImport = (
+  doc: Y.Doc,
+  input: SceneImportInput,
+  options: { textMetricsProvider: TextMetricsProvider },
+): SceneImportResult => prepareBatch(doc, input, options, true);
+
+function prepareBatch(
+  doc: Y.Doc,
+  input: readonly SemanticOperation[],
+  options: { textMetricsProvider: TextMetricsProvider },
+): SemanticBatchResult;
+function prepareBatch(
+  doc: Y.Doc,
+  input: SceneImportInput,
+  options: { textMetricsProvider: TextMetricsProvider },
+  sceneInput: true,
+): SceneImportResult;
+function prepareBatch(
+  doc: Y.Doc,
+  input: readonly SemanticOperation[] | SceneImportInput,
+  options: { textMetricsProvider: TextMetricsProvider },
+  sceneInput = false,
+): PreparedResult<SemanticOperation["op"] | "importScene"> {
   const working = new Y.Doc();
   let scene: Scene | undefined;
   let operationIndex: number | undefined;
@@ -145,12 +179,27 @@ export const prepareSemanticBatch = (
   try {
     Y.applyUpdate(working, Y.encodeStateAsUpdate(doc));
     validateScene(working);
+    if (sceneInput) {
+      validateImportDestination(working);
+    }
     scene = new Scene(null, { doc: working });
     const privateScene = scene;
     const captured: Uint8Array[] = [];
     working.on("update", (update: Uint8Array) => captured.push(update));
     phase = "semantic-failure";
     return withTextMetricsProvider(options.textMetricsProvider, () => {
+      if (sceneInput) {
+        phase = "invalid-scene";
+        const addedElementIds = importSceneElements(privateScene, input);
+        validateScene(working);
+        return {
+          ok: true,
+          update: Y.mergeUpdates(captured),
+          addedElementIds,
+          summary: [{ op: "importScene", elementIds: addedElementIds }],
+        };
+      }
+      const operations = input as readonly SemanticOperation[];
       requireCondition(Array.isArray(operations) && operations.length > 0);
       const addedElementIds: string[] = [];
       const summary: Array<{
@@ -258,7 +307,12 @@ export const prepareSemanticBatch = (
         requireCondition(op && typeof op === "object" && finiteTree(op));
         if (op.op === "addShape" || op.op === "addText") {
           requireCondition(
-            [op.x, op.y, op.width, op.height].every(
+            [
+              op.x,
+              op.y,
+              op.width,
+              ...(op.op === "addShape" ? [op.height] : []),
+            ].every(
               (value) => value === undefined || typeof value === "number",
             ),
           );
@@ -306,6 +360,11 @@ export const prepareSemanticBatch = (
             break;
           }
           case "addText": {
+            requireCondition(!("height" in op));
+            requireCondition(
+              op.width === undefined ||
+                (typeof op.width === "number" && op.width > 0),
+            );
             requireCondition(
               typeof op.text === "string" && op.text.trim().length > 0,
             );
@@ -321,6 +380,12 @@ export const prepareSemanticBatch = (
               strokeColor: op.strokeColor,
             });
             privateScene.insertElement(text);
+            if (op.width !== undefined) {
+              privateScene.mutateElement(
+                text,
+                getTextElementWidthResize(text, op.width),
+              );
+            }
             place(op, text.id);
             addedElementIds.push(text.id);
             operationIds.push(text.id);
@@ -456,4 +521,4 @@ export const prepareSemanticBatch = (
       working.destroy();
     }
   }
-};
+}

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -144,6 +145,12 @@ try {
       samples,
       wrapped,
       reference: fixture.reference(),
+      widthCases: fixture.widthCases,
+      widthReference: fixture.widthReference(),
+      importReference: fixture.importReference(),
+      fontData: Object.values(fixture.bundledFontFaces).flatMap((faces) =>
+        faces.map((face) => face.uri),
+      ),
       seed: Array.from(fixture.Y.encodeStateAsUpdate(scene.doc)),
       operations: fixture.operations,
       loadedFonts: Array.from(document.fonts).map((face) => ({
@@ -154,6 +161,23 @@ try {
     };
   });
   const provider = createNodeTextMetricsProvider();
+  const checksum = (bytes) => createHash("sha256").update(bytes).digest("hex");
+  const browserFonts = actual.fontData
+    .map((uri) => checksum(Buffer.from(uri.split(",")[1], "base64")))
+    .sort();
+  const fontDirectory = "packages/excalidraw/dist/node";
+  const nodeFonts = await Promise.all(
+    (await readdir(fontDirectory))
+      .filter((name) => name.endsWith(".woff2"))
+      .map(async (name) =>
+        checksum(await readFile(path.join(fontDirectory, name))),
+      ),
+  );
+  assert.deepEqual(
+    [...new Set(browserFonts)],
+    [...new Set(nodeFonts)].sort(),
+    "browser and Node must load identical font bytes",
+  );
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("DOM.enable");
   await cdp.send("CSS.enable");
@@ -295,6 +319,16 @@ try {
     const ids = new Map(
       elements.map((element, i) => [element.id, `element-${i}`]),
     );
+    for (const element of elements) {
+      for (const id of [
+        ...element.groupIds,
+        ...(element.fileId ? [element.fileId] : []),
+      ]) {
+        if (!ids.has(id)) {
+          ids.set(id, `identity-${ids.size}`);
+        }
+      }
+    }
     const visit = (value, key) => {
       if (["seed", "version", "versionNonce", "updated"].includes(key)) {
         return undefined;
@@ -344,6 +378,64 @@ try {
     canonical(scene.getElementsIncludingDeleted()),
     canonical(actual.reference),
   );
+  for (const [index, operation] of actual.widthCases.entries()) {
+    const doc = new Y.Doc();
+    const before = Y.encodeStateAsUpdate(doc);
+    const result = core.prepareSemanticBatch(doc, [operation], {
+      textMetricsProvider: provider,
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.deepEqual(Y.encodeStateAsUpdate(doc), before);
+    Y.applyUpdate(doc, result.update);
+    const scene = new core.Scene(null, { doc });
+    compare(
+      canonical(scene.getNonDeletedElements()),
+      canonical(actual.widthReference[index].initial),
+    );
+    const changed = core.prepareSemanticBatch(
+      doc,
+      [
+        {
+          op: "setText",
+          elementId: result.addedElementIds[0],
+          text: "Changed text stays within its fixed width\nHello café 世界",
+        },
+      ],
+      { textMetricsProvider: provider },
+    );
+    assert.equal(changed.ok, true, JSON.stringify(changed));
+    Y.applyUpdate(doc, changed.update);
+    compare(
+      canonical(scene.getNonDeletedElements()),
+      canonical(actual.widthReference[index].changed),
+    );
+    for (const height of [10, null]) {
+      assert.equal(
+        core.prepareSemanticBatch(doc, [{ ...operation, height }], {
+          textMetricsProvider: provider,
+        }).ok,
+        false,
+      );
+    }
+    scene.destroy();
+  }
+  const importDoc = new Y.Doc();
+  const imported = core.prepareSceneImport(
+    importDoc,
+    {
+      scene: actual.importReference.exported,
+      targetFileIDs: { "source-image": "logical-target" },
+    },
+    { textMetricsProvider: provider },
+  );
+  assert.equal(imported.ok, true, JSON.stringify(imported));
+  Y.applyUpdate(importDoc, imported.update);
+  const importedScene = new core.Scene(null, { doc: importDoc });
+  compare(
+    canonical(importedScene.getNonDeletedElements()),
+    canonical(actual.importReference.elements),
+  );
+  importedScene.destroy();
   scene.destroy();
   assert.deepEqual(mismatches, [], "actual registered font/cluster parity");
   process.stdout.write(

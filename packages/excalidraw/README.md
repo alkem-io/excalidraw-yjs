@@ -24,6 +24,32 @@ npm install @napi-rs/canvas@1.0.11
 
 ## Quick start
 
+### Headless preparation
+
+`@excalidraw-yjs/excalidraw/headless` supports bare Node ESM and CommonJS without a DOM or React entry. Supply a `TextMetricsProvider`, for example from `@excalidraw-yjs/excalidraw/node-metrics` with the optional native peer installed.
+
+```ts
+import { prepareSceneImport } from "@excalidraw-yjs/excalidraw/headless";
+import { createNodeTextMetricsProvider } from "@excalidraw-yjs/excalidraw/node-metrics";
+
+const prepared = prepareSceneImport(
+  doc,
+  {
+    scene: exportedScene,
+    targetFileIDs: { "export-image-id": "resolved-logical-file-id" },
+  },
+  { textMetricsProvider: createNodeTextMetricsProvider() },
+);
+```
+
+The supported input is a current `type: "excalidraw", version: 2` export with its `files` payload removed. Resolve every live image's source `fileId` to an opaque target logical file ID before preparation. Embedded bytes and URL locators are rejected. Validation is strict: malformed fields, unsupported types, duplicate identities, invalid ordering and dangling or inconsistent bindings fail as `invalid-scene`; legacy data is never repaired or dropped.
+
+On success, the result contains `update: Uint8Array`, `addedElementIds` and `summary: [{ op: "importScene", elementIds }]`. The captured update appends fresh element, group and file identities through the canonical editor owners, preserving coordinates and relationships. Preparation leaves both input and caller document unchanged. Apply the bytes with `Y.applyUpdate(doc, prepared.update)` only when `prepared.ok` is true; replaying the same bytes has one effect. Destination app state, existing assets and concurrent edits survive. Preparation performs no storage or network I/O; the host owns asset authorization and publication.
+
+`prepareSemanticBatch` retains natural `addText` measurement and `autoResize: true` when no width is supplied. A positive finite `width` invokes canonical horizontal text resize: it preserves origin and font size, clamps to the editor's minimum text width, wraps `originalText`, derives height and sets `autoResize: false`. Subsequent `setText` retains fixed width and remeasures height; natural text and bound labels retain their existing behavior.
+
+`addText` does not accept `height`. Any supplied property, including `undefined` or `null` from untyped callers, returns `invalid-operation` before publication. `addShape.height` remains supported. Returned text geometry always includes the measured height.
+
 The minimum working setup has two easy-to-miss requirements:
 
 1. Import the package CSS:

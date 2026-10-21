@@ -6,6 +6,10 @@ import path from "node:path";
 
 const directory = await mkdtemp(path.join(tmpdir(), "semantic-package-"));
 try {
+  await writeFile(
+    path.join(directory, "scene-import-fixture.cjs"),
+    await readFile("scripts/scene-import-fixture.cjs"),
+  );
   const dependencies = { yjs: "13.6.27" };
   let canvasVersion;
   for (const name of [
@@ -41,11 +45,10 @@ try {
       pnpm: { overrides: dependencies },
     }),
   );
-  execFileSync(
-    "pnpm",
-    ["install", "--ignore-scripts"],
-    { cwd: directory, stdio: "pipe" },
-  );
+  execFileSync("pnpm", ["install", "--ignore-scripts"], {
+    cwd: directory,
+    stdio: "pipe",
+  });
   execFileSync(
     process.execPath,
     [
@@ -85,6 +88,7 @@ try {
     assert.ok(Math.abs(provider.getLineWidth("Привет", font) - 63.44) < 0.01);
     assert.ok(Math.abs(provider.getLineWidth("世界", font) - 40) < 0.01);
     core.setCustomTextMetricsProvider(provider);
+    require("./scene-import-fixture.cjs").assertSceneImport(assert, core, Y, provider);
     assert.equal(core.wrapText("Hello Hello", font, 95), "Hello Hello");
     assert.equal(core.wrapText("Hello Hello", font, 80), "Hello\\nHello");
     const doc = new Y.Doc();
@@ -113,6 +117,39 @@ try {
     assert.equal(failed.update,undefined);
     assert.deepEqual(Y.encodeStateAsUpdate(doc),once);
     scene.destroy();
+    for (const width of [1, 60, 90]) {
+      const wrapped = core.prepareSemanticBatch(doc, [{op:"addText",text:"Hello café Привет 世界 hello again",width,x:13,y:29}], {textMetricsProvider:provider});
+      assert.equal(wrapped.ok,true);
+      Y.applyUpdate(doc,wrapped.update);
+      const check = new core.Scene(null,{doc});
+      const text = check.getElement(wrapped.addedElementIds[0]);
+      assert.equal(text.autoResize,false);
+      assert.equal(text.x,13);
+      assert.equal(text.y,29);
+      assert.ok(text.height > 25);
+      for (const height of [undefined,null,10]) {
+        const rejected = core.prepareSemanticBatch(doc,[{op:"addText",text:"bad",width,height}],{textMetricsProvider:provider});
+        assert.equal(rejected.ok,false);
+        assert.equal(rejected.error.category,"invalid-operation");
+      }
+      check.destroy();
+    }
+    const fractional = core.prepareSemanticBatch(doc, [{op:"addText",text:"long text",fontSize:0.5,width:10,x:13,y:29}], {textMetricsProvider:provider});
+    assert.equal(fractional.ok,true);
+    Y.applyUpdate(doc,fractional.update);
+    const fractionalScene = new core.Scene(null,{doc});
+    const fractionalId = fractional.addedElementIds[0];
+    const fractionalText = fractionalScene.getElement(fractionalId);
+    const {getFontString} = require("@excalidraw-yjs/common");
+    const fractionalWidth = Math.max(10, core.getMinTextElementWidth(getFontString(fractionalText), fractionalText.lineHeight));
+    assert.equal(fractionalScene.getElement(fractionalId).autoResize,false);
+    assert.equal(fractionalText.width,fractionalWidth);
+    assert.equal(fractionalScene.getElement(fractionalId).fontSize,0.5);
+    const fractionalChange = core.prepareSemanticBatch(doc,[{op:"setText",elementId:fractionalId,text:"much longer text retains fixed width"}],{textMetricsProvider:provider});
+    assert.equal(fractionalChange.ok,true);
+    Y.applyUpdate(doc,fractionalChange.update);
+    assert.equal(fractionalScene.getElement(fractionalId).width,fractionalWidth);
+    fractionalScene.destroy();
     console.log("PASS packed CommonJS actual-font semantic preparation, unchanged input, late-invalid atomicity, wrapped metrics and exact update replay");
     // The existing element-owner cache retains a sixty-second cleanup timer.
     // This one-shot subprocess, like the existing headless smoke, owns its exit.
@@ -125,14 +162,19 @@ try {
   const esm = `
     import assert from "node:assert/strict";
     import * as Y from "yjs";
-    import {prepareSemanticBatch,Scene} from "@excalidraw-yjs/excalidraw/headless";
+    import * as core from "@excalidraw-yjs/excalidraw/headless";
+    import fixture from "./scene-import-fixture.cjs";
     import {createNodeTextMetricsProvider} from "@excalidraw-yjs/excalidraw/node-metrics";
     const doc = new Y.Doc();
-    const result = prepareSemanticBatch(doc,[{op:"addText",text:"built ESM 世界"}],{textMetricsProvider:createNodeTextMetricsProvider()});
+    const provider = createNodeTextMetricsProvider();
+    core.setCustomTextMetricsProvider(provider);
+    fixture.assertSceneImport(assert,core,Y,provider);
+    const result = core.prepareSemanticBatch(doc,[{op:"addText",text:"built ESM 世界",width:60}],{textMetricsProvider:provider});
     assert.equal(result.ok,true,JSON.stringify(result));
     Y.applyUpdate(doc,result.update);
-    const scene = new Scene(null,{doc});
+    const scene = new core.Scene(null,{doc});
     assert.equal(scene.getNonDeletedElements()[0].originalText,"built ESM 世界");
+    assert.equal(scene.getNonDeletedElements()[0].autoResize,false);
     scene.destroy();
     console.log("PASS packed ESM actual-font semantic execution without DOM or source aliases");
     process.exit(0);
