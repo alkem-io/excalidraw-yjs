@@ -1,6 +1,8 @@
 import { FONT_FAMILY, randomId } from "@excalidraw-yjs/common";
-import * as Y from "yjs";
-import { validateOrderKey } from "@excalidraw-yjs/fractional-indexing";
+import {
+  generateNKeysBetween,
+  validateOrderKey,
+} from "@excalidraw-yjs/fractional-indexing";
 
 import { duplicateElements } from "./duplicate";
 import { validateElbowPoints } from "./elbowArrow";
@@ -8,8 +10,10 @@ import { getBoundTextElement } from "./textElement";
 import { hasBoundTextElement, isBindableElement } from "./typeChecks";
 import { readAssetLocators, validateAssetLocator } from "./yjs/schema";
 
+import type * as Y from "yjs";
+
 import type { Scene } from "./Scene";
-import type { ExcalidrawElement, FileId } from "./types";
+import type { ExcalidrawElement, FileId, FractionalIndex } from "./types";
 
 export type SceneImportInput = {
   scene: {
@@ -432,9 +436,7 @@ export const importSceneElements = (scene: Scene, input: unknown): string[] => {
   for (const id of files) {
     check(Object.prototype.hasOwnProperty.call(value.targetFileIDs, id));
     const locator = validateAssetLocator(id, value.targetFileIDs[id]);
-    check(
-      !/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(locator.trim()),
-    );
+    check(!/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(locator.trim()));
   }
   const occupied = new Set<string>();
   for (const element of [
@@ -514,12 +516,20 @@ export const importSceneElements = (scene: Scene, input: unknown): string[] => {
     fileMap.set(id, fresh as FileId);
     locators[fresh] = value.targetFileIDs[id];
   }
-  const imported = duplicated.map((element) =>
-    element.type === "image"
-      ? { ...element, fileId: fileMap.get(element.fileId!)! }
-      : element,
-  );
-  scene.insertElementsAtIndex(imported, null);
+  const indices = generateNKeysBetween(
+    scene.getElementsIncludingDeleted().at(-1)?.index,
+    null,
+    duplicated.length,
+  ) as FractionalIndex[];
+  const imported = duplicated.map((element, index) => ({
+    ...element,
+    index: indices[index],
+    ...(element.type === "image"
+      ? { fileId: fileMap.get(element.fileId!)! }
+      : {}),
+  }));
+  // The empty base describes this operation's additions, not the target scene.
+  scene.applyElementChanges([], imported);
   scene.setAssetLocators(locators);
   return imported.map((element) => element.id);
 };

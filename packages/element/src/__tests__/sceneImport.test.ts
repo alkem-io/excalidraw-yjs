@@ -7,12 +7,17 @@ import * as headless from "../headless";
 import { Scene } from "../Scene";
 import { newElement } from "../newElement";
 import { bindBindingElement } from "../binding";
+import { moveAllLeft } from "../zindex";
+import { deepCopyElement } from "../duplicate";
 import { setCustomTextMetricsProvider } from "../textMeasurements";
+import { getDefaultAppState } from "../../../excalidraw/appState";
 import { serializeAsJSON } from "../../../excalidraw/data/json";
 import {
   sceneImportFixture,
   assertSceneImport,
 } from "../../../../scripts/scene-import-fixture.cjs";
+
+import type { ExcalidrawRectangleElement } from "../types";
 
 const metrics = { getLineWidth: (text: string) => text.length * 10 };
 beforeEach(() => setCustomTextMetricsProvider(metrics));
@@ -234,7 +239,11 @@ it.each(["delete-first", "bind-first"])(
   (order) => {
     const target = new Scene();
     target.doc.clientID = 101;
-    const shape = newElement({ type: "rectangle", x: 0, y: 0 });
+    const shape = newElement({
+      type: "rectangle",
+      x: 0,
+      y: 0,
+    }) as ExcalidrawRectangleElement;
     const arrow = headless.newArrowElement({
       type: "arrow",
       x: 100,
@@ -356,6 +365,8 @@ it("preserves schema-supported extra destination scalars but rejects them in imp
 it.each([
   "https:evil.example/x",
   "https:/evil.example/x",
+  // Deliberately invalid input verifies rejection of script URI schemes.
+  // eslint-disable-next-line no-script-url
   "javascript:alert(1)",
   "mailto:a@b",
   "urn:example:asset",
@@ -713,6 +724,194 @@ it.each(["empty", "nonempty", "editor-append"])(
     doc.destroy();
   },
 );
+
+it.each(["no-peer", "import-first", "peer-first"])(
+  "preserves ordinary concurrent target appends and canonical send-to-back: %s",
+  (order) => {
+    const target = new Scene();
+    target.doc.clientID = 101;
+    const append = new Scene();
+    append.doc.clientID = 202;
+    target.insertElement(newElement({ type: "rectangle", x: 100, y: 0 }));
+    append.insertElement(newElement({ type: "rectangle", x: 200, y: 0 }));
+    target.applyRemoteUpdate(Y.encodeStateAsUpdate(append.doc));
+    const existing = target.yElements.toJSON();
+    const tied = target.getNonDeletedElements();
+    expect(tied.map(({ index }) => index)).toEqual(["a0", "a0"]);
+    const fixture = sceneImportFixture(headless);
+    const input = {
+      scene: JSON.parse(
+        serializeAsJSON(fixture.getNonDeletedElements(), {}, {}, "database"),
+      ),
+      targetFileIDs: { "source-image": "logical-target-file" },
+    };
+    const original = JSON.stringify(input);
+    const sourceBefore = Y.encodeStateAsUpdate(fixture.doc);
+    const base = Y.encodeStateAsUpdate(target.doc);
+    const on = Y.Doc.prototype.on;
+    // Set the private replica's client before capture and before its first write.
+    // A higher import client makes competing old-owner writes win deterministically.
+    const capture = vi
+      .spyOn(Y.Doc.prototype, "on")
+      .mockImplementation(function (
+        this: Y.Doc,
+        ...args: Parameters<typeof on>
+      ) {
+        if (args[0] === "update") {
+          this.clientID = 404;
+        }
+        return on.apply(this, args);
+      });
+    let result;
+    try {
+      result = prepare(target.doc, input);
+    } finally {
+      capture.mockRestore();
+    }
+    expect(result.ok).toBe(true);
+    expect(Y.encodeStateAsUpdate(target.doc)).toEqual(base);
+    expect(Y.encodeStateAsUpdate(fixture.doc)).toEqual(sourceBefore);
+    expect(JSON.stringify(input)).toBe(original);
+    const peerDoc = new Y.Doc();
+    peerDoc.clientID = 303;
+    Y.applyUpdate(peerDoc, base);
+    const peer = new Scene(null, { doc: peerDoc });
+    try {
+      if (order === "no-peer") {
+        Y.applyUpdate(target.doc, result.update);
+        for (const [id, record] of Object.entries(existing)) {
+          expect(target.yElements.get(id)!.toJSON()).toEqual(record);
+        }
+      } else {
+        const elements = peer.getElementsIncludingDeleted();
+        const selected = elements[1].id;
+        peer.applyElementChanges(
+          elements,
+          moveAllLeft(elements.map(deepCopyElement), {
+            ...getDefaultAppState(),
+            width: 1000,
+            height: 800,
+            offsetTop: 0,
+            offsetLeft: 0,
+            selectedElementIds: { [selected]: true },
+          }),
+        );
+        const sentBack = peer.yElements.get(selected)!.get("index");
+        expect(sentBack).toBe("Zz");
+        const reorder = Y.encodeStateAsUpdate(
+          peerDoc,
+          Y.encodeStateVectorFromUpdate(base),
+        );
+        const updates =
+          order === "import-first"
+            ? [result.update, reorder]
+            : [reorder, result.update];
+        updates.forEach((update) => Y.applyUpdate(target.doc, update));
+        expect(target.yElements.get(selected)!.get("index")).toBe(sentBack);
+        Y.applyUpdate(peerDoc, result.update);
+        expect(target.yElements.toJSON()).toEqual(peer.yElements.toJSON());
+      }
+      const imported = result.addedElementIds.map((id: string) =>
+        target.getElement(id),
+      );
+      const sourceElements = input.scene.elements;
+      const idMap = new Map<string, string>(
+        sourceElements.map((element: any, index: number) => [
+          element.id,
+          imported[index].id,
+        ]),
+      );
+      expect(
+        target
+          .getNonDeletedElements()
+          .slice(2)
+          .map(({ id }) => id),
+      ).toEqual(result.addedElementIds);
+      const groups = new Map<string, string>();
+      imported.forEach((element: any, index: number) => {
+        const original = sourceElements[index];
+        expect(idMap.has(element.id)).toBe(false);
+        expect(element.index > tied[1].index!).toBe(true);
+        expect([element.type, element.x, element.y]).toEqual([
+          original.type,
+          original.x,
+          original.y,
+        ]);
+        expect(element.frameId).toBe(idMap.get(original.frameId) ?? null);
+        if (original.boundElements) {
+          expect(element.boundElements).toHaveLength(
+            original.boundElements.length,
+          );
+          expect(element.boundElements).toEqual(
+            expect.arrayContaining(
+              original.boundElements.map((edge: any) => ({
+                ...edge,
+                id: idMap.get(edge.id),
+              })),
+            ),
+          );
+        } else {
+          expect(element.boundElements).toBeNull();
+        }
+        if (element.type === "text") {
+          expect(element.containerId).toBe(
+            idMap.get(original.containerId) ?? null,
+          );
+        }
+        if (element.type === "arrow") {
+          for (const key of ["startBinding", "endBinding"]) {
+            expect(element[key]).toEqual({
+              ...original[key],
+              elementId: idMap.get(original[key].elementId),
+            });
+          }
+        }
+        original.groupIds.forEach((group: string, index: number) => {
+          expect(element.groupIds[index]).not.toBe(group);
+          if (!groups.has(group)) {
+            groups.set(group, element.groupIds[index]);
+          }
+          expect(element.groupIds[index]).toBe(groups.get(group));
+        });
+        if (element.type === "image") {
+          expect(element.fileId).not.toBe(original.fileId);
+          expect(target.getAssetLocators()[element.fileId]).toBe(
+            input.targetFileIDs["source-image"],
+          );
+        }
+      });
+      const once = Y.encodeStateAsUpdate(target.doc);
+      Y.applyUpdate(target.doc, result.update);
+      expect(Y.encodeStateAsUpdate(target.doc)).toEqual(once);
+    } finally {
+      peer.destroy();
+      fixture.destroy();
+      append.destroy();
+      target.destroy();
+    }
+  },
+);
+
+it("assigns imported order keys after the destination's deleted tail", () => {
+  const target = new Scene();
+  target.insertElementsAtIndex(
+    [0, 100].map((x) => newElement({ type: "rectangle", x, y: 0 })),
+    null,
+  );
+  const tail = target.getNonDeletedElements()[1];
+  target.mutateElement(tail, { isDeleted: true });
+  const existing = target.yElements.toJSON();
+  const result = prepare(target.doc, source());
+  expect(result.ok).toBe(true);
+  Y.applyUpdate(target.doc, result.update);
+  expect(
+    target.getElement(result.addedElementIds[0])!.index! > tail.index!,
+  ).toBe(true);
+  for (const [id, record] of Object.entries(existing)) {
+    expect(target.yElements.get(id)!.toJSON()).toEqual(record);
+  }
+  target.destroy();
+});
 
 it("preserves array order from an actual editor export with merged tied keys", () => {
   const doc = new Y.Doc();
