@@ -55,6 +55,7 @@ import {
   elementToYMap,
   ELEMENT_DELETIONS,
   yMapToElement,
+  isRequiredElementKey,
   writeChangedKeys,
   wouldWriteChange,
   computeElementIntent,
@@ -2241,12 +2242,87 @@ export class Scene {
    * `true` iff a step was actually applied.
    */
   undoElements(): boolean {
-    return this.undoManager.undo() !== null;
+    return this.applyElementHistoryStep(() => this.undoManager.undo());
   }
 
   /** Re-apply the most recently undone local element step on the doc. */
   redoElements(): boolean {
-    return this.undoManager.redo() !== null;
+    return this.applyElementHistoryStep(() => this.undoManager.redo());
+  }
+
+  /**
+   * Run one undo/redo step, then put back any REQUIRED property the step left
+   * with no value (see {@link isRequiredElementKey}).
+   *
+   * `Y.UndoManager` deletes this replica's writes and re-inserts the values they
+   * replaced — except where a peer's concurrent write to the same key sits in
+   * between, which it treats as a conflict and skips. When that peer write had
+   * already lost the map-key conflict (lower client id) it is a tombstone too,
+   * so the key is left empty: on 2026-11-03 an arrow lost `points`/`height` this
+   * way and every editor on the board crashed rendering it.
+   *
+   * Such a key keeps the value it held just before the step — the undo could not
+   * revert it, so it stays as it was, the same outcome Yjs intends for a
+   * conflicting key. Written under `STRUCTURAL_ORIGIN`: untracked (no new undo
+   * step) yet published, so every peer converges on the repaired element.
+   */
+  private applyElementHistoryStep(step: () => unknown): boolean {
+    const dropped: Array<{
+      ymap: Y.Map<unknown>;
+      key: string;
+      value: unknown;
+    }> = [];
+    const collect = (
+      events: Y.YEvent<Y.AbstractType<unknown>>[],
+      transaction: Y.Transaction,
+    ) => {
+      if (transaction.origin !== this.undoManager) {
+        return;
+      }
+      for (const event of events) {
+        const ymap = event.target;
+        if (!(ymap instanceof Y.Map) || ymap.parent !== this.yElements) {
+          continue;
+        }
+        event.changes.keys.forEach((change, key) => {
+          if (
+            change.action === "delete" &&
+            change.oldValue !== undefined &&
+            !ymap.has(key) &&
+            ymap.get("isDeleted") !== true &&
+            isRequiredElementKey(ymap.get("type"), key)
+          ) {
+            dropped.push({ ymap, key, value: change.oldValue });
+          }
+        });
+      }
+    };
+    this.yElements.observeDeep(collect);
+    let applied: unknown;
+    try {
+      applied = step();
+    } finally {
+      this.yElements.unobserveDeep(collect);
+    }
+    if (dropped.length) {
+      const ids = new Set<string>();
+      for (const [id, ymap] of this.yElements.entries()) {
+        if (dropped.some((d) => d.ymap === ymap)) {
+          ids.add(id);
+        }
+      }
+      // STRUCTURAL_ORIGIN recomputes without bumping meta, so bump it here:
+      // the repaired element must read as a fresh change downstream.
+      this.bumpMetaVersionsFor(ids);
+      this.doc.transact(() => {
+        for (const { ymap, key, value } of dropped) {
+          if (!ymap.has(key)) {
+            ymap.set(key, JSON.parse(JSON.stringify(value)));
+          }
+        }
+      }, STRUCTURAL_ORIGIN);
+    }
+    return applied !== null;
   }
 
   /**
