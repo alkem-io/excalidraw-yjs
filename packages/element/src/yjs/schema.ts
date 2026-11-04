@@ -112,6 +112,38 @@ export const RECONCILE_META_KEYS: ReadonlySet<string> = new Set([
   "updated",
 ]);
 
+/**
+ * Properties every live element of a given type always carries. Their absence is
+ * never a legitimate state — the renderer reads them unguarded (`points.length`,
+ * `width`/`height` arithmetic), so an element missing one crashes every editor
+ * that materializes it.
+ *
+ * Consulted after an undo/redo: `Y.UndoManager` can delete a local write yet
+ * refuse to restore the value it replaced, when a peer's concurrent write to the
+ * same key sits between them (it treats that as a remote conflict). If the peer's
+ * write had itself lost the map-key conflict it is already a tombstone, and the
+ * key ends up with no value at all. Optional keys (`link`, `customData`, …) are
+ * excluded on purpose: an undo of a step that ADDED one legitimately removes it.
+ */
+const REQUIRED_BASE_KEYS: readonly string[] = [
+  "x",
+  "y",
+  "width",
+  "height",
+  "angle",
+];
+const REQUIRED_KEYS_BY_TYPE: Readonly<Record<string, readonly string[]>> = {
+  arrow: ["points"],
+  line: ["points"],
+  freedraw: ["points"],
+  text: ["text", "originalText", "fontSize", "fontFamily", "lineHeight"],
+};
+
+export const isRequiredElementKey = (type: unknown, key: string): boolean =>
+  REQUIRED_BASE_KEYS.includes(key) ||
+  (typeof type === "string" &&
+    (REQUIRED_KEYS_BY_TYPE[type]?.includes(key) ?? false));
+
 export type BoundElementType = BoundElement["type"];
 
 /** A plain element record as it travels through the schema (mutable copy). */
@@ -328,6 +360,26 @@ export const yMapToElement = (ymap: Y.Map<unknown>): ElementRecord => {
   // the documented element contract, not a renderer band-aid).
   if (!Array.isArray(element.groupIds)) {
     element.groupIds = [];
+  }
+  // Same contract for geometry: a doc can lose a required key (an undo racing a
+  // peer's concurrent edit — see `isRequiredElementKey`), and the renderer reads
+  // `points` / `width` / `height` unguarded. Default what is missing so a damaged
+  // doc still loads for everyone; the next edit writes the values back.
+  for (const key of ["x", "y", "width", "height", "angle"]) {
+    if (!Number.isFinite(element[key])) {
+      element[key] = 0;
+    }
+  }
+  if (
+    (element.type === "arrow" ||
+      element.type === "line" ||
+      element.type === "freedraw") &&
+    !Array.isArray(element.points)
+  ) {
+    element.points = [
+      [0, 0],
+      [element.width, element.height],
+    ];
   }
   return element;
 };
