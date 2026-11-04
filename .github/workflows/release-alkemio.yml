@@ -89,14 +89,15 @@ jobs:
           wait_for_registry() {
             name="$1"
             version="$2"
-            for attempt in $(seq 1 24); do
+            echo "Waiting for the package to appear on npm, this usually takes around 10 minutes."
+            for attempt in $(seq 1 45); do
               if npm view "${name}@${version}" version --json >/dev/null 2>&1; then
                 return 0
               fi
-              echo "Waiting for ${name}@${version} to become visible on npm (${attempt}/24)"
-              sleep 5
+              echo "Waiting for ${name}@${version} to become visible on npm (${attempt}/45)"
+              sleep 20
             done
-            echo "::error::${name}@${version} did not become visible on npm within 120 seconds"
+            echo "::error::${name}@${version} did not become visible on npm within 15 minutes. It's safe to re-run the action."
             return 1
           }
 
